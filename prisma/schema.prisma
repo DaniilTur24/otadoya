@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Для перехода на PostgreSQL: замени "sqlite" на "postgresql"
+  // и DATABASE_URL в .env на строку подключения PostgreSQL
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Pharmacy {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  revenueEntries   DailyRevenueEntry[]
+  uploadedFiles    UploadedFile[]
+  expenses         ExtractedExpenseEntry[]
+  monthlyOverrides MonthlyReportOverride[]
+
+  @@map("pharmacies")
+}
+
+model DailyRevenueEntry {
+  id                 Int      @id @default(autoincrement())
+  pharmacyId         Int      @map("pharmacy_id")
+  date               DateTime
+  // Decimal хранится как TEXT в SQLite для точности; в PostgreSQL — настоящий DECIMAL
+  cashRevenue        Decimal  @map("cash_revenue")
+  terminalRevenue    Decimal  @map("terminal_revenue")
+  additionalExpenses Decimal  @default(0) @map("additional_expenses")
+  expenseComment     String?  @map("expense_comment")
+  generalComment     String?  @map("general_comment")
+  employeeName       String   @map("employee_name")
+  // Статусы: pending | approved | rejected
+  status             String   @default("pending")
+  bookkeeperComment  String?  @map("bookkeeper_comment")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  pharmacy     Pharmacy           @relation(fields: [pharmacyId], references: [id])
+  expenseItems DailyExpenseItem[]
+
+  @@map("daily_revenue_entries")
+}
+
+// Детализация дополнительных расходов по каждой записи выручки
+model DailyExpenseItem {
+  id      Int      @id @default(autoincrement())
+  entryId Int      @map("entry_id")
+  amount  Decimal
+  comment String?
+
+  entry DailyRevenueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@map("daily_expense_items")
+}
+
+model UploadedFile {
+  id           Int      @id @default(autoincrement())
+  filename     String
+  originalName String   @map("original_name")
+  // Опционально: привязать файл к конкретной аптеке
+  pharmacyId   Int?     @map("pharmacy_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  pharmacy Pharmacy?               @relation(fields: [pharmacyId], references: [id])
+  expenses ExtractedExpenseEntry[]
+
+  @@map("uploaded_files")
+}
+
+model ExtractedExpenseEntry {
+  id              Int      @id @default(autoincrement())
+  fileId          Int      @map("file_id")
+  // Опционально: к какой аптеке относится расход
+  pharmacyId      Int?     @map("pharmacy_id")
+  operationDate   DateTime @map("operation_date")
+  amount          Decimal
+  counterparty    String?
+  description     String
+  // Категории: rent (аренда) | expense (расход)
+  category        String
+  // Статусы: pending | approved | rejected
+  status          String   @default("pending")
+  reviewerComment String?  @map("reviewer_comment")
+  // true — строка добавлена бухгалтером вручную (не автоматически)
+  isManual        Boolean  @default(false) @map("is_manual")
+  // Индекс строки в исходном Excel-файле (для отображения "уже добавлено")
+  rowIndex        Int?     @map("row_index")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  file     UploadedFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  pharmacy Pharmacy?    @relation(fields: [pharmacyId], references: [id])
+
+  @@map("extracted_expense_entries")
+}
+
+// Ручные правки ячеек отчёта «Закрытие месяца»
+model MonthlyReportOverride {
+  id         Int      @id @default(autoincrement())
+  year       Int
+  month      Int
+  pharmacyId Int      @map("pharmacy_id")
+  fieldKey   String   @map("field_key")
+  value      Decimal
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  // Одна запись на (год, месяц, аптека, поле)
+  @@unique([year, month, pharmacyId, fieldKey])
+  @@map("monthly_report_overrides")
+}
