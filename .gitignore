@@ -5,3 +5,5 @@ prisma/dev.db-journal
 uploads/
 .env
 .env.local
+*.xlsx
+*.xls
