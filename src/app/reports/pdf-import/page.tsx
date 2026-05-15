@@ -285,7 +285,7 @@ export default function PdfImportPage() {
               hint={(() => {
                 const n = parseFloat(editMarkup.replace(',', '.'));
                 if (isNaN(n)) return '→ Коэффициент в закрытии месяца';
-                return `→ Коэффициент: ${(1 + n / 100).toFixed(4)}`;
+                return `→ Коэффициент: ${(Math.round((1 + n / 100) * 100) / 100).toFixed(2)}`;
               })()}
             />
             <EditableNumber
