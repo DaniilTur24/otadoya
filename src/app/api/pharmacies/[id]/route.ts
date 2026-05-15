@@ -3,6 +3,15 @@ import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const pharmacy = await prisma.pharmacy.findUnique({ where: { id: Number(params.id) } });
+  if (!pharmacy) return NextResponse.json({ error: 'Не найдено' }, { status: 404 });
+  return NextResponse.json(pharmacy);
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
