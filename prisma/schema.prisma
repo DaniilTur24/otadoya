@@ -12,6 +12,10 @@ datasource db {
 model Pharmacy {
   id        Int      @id @default(autoincrement())
   name      String   @unique
+  keywords       String   @default("")
+  coefficient    Decimal  @default(0)
+  terminalRent   Decimal  @default(0)
+  procedureRent  Decimal  @default(0)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -30,6 +34,7 @@ model DailyRevenueEntry {
   // Decimal хранится как TEXT в SQLite для точности; в PostgreSQL — настоящий DECIMAL
   cashRevenue        Decimal  @map("cash_revenue")
   terminalRevenue    Decimal  @map("terminal_revenue")
+  bonusRevenue       Decimal  @default(0) @map("bonus_revenue")
   additionalExpenses Decimal  @default(0) @map("additional_expenses")
   expenseComment     String?  @map("expense_comment")
   generalComment     String?  @map("general_comment")

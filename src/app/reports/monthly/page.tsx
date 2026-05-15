@@ -9,7 +9,7 @@ type DataMap = Record<number, Record<string, number>>;
 type RowSource = 'db' | 'empty' | 'calc';
 interface ReportRow {
   key: string; label: string; source: RowSource;
-  bold?: boolean; section?: boolean; indent?: boolean;
+  bold?: boolean; section?: boolean; indent?: boolean; decimals?: number;
 }
 
 const EXPENSE_KEYS = [
@@ -17,18 +17,18 @@ const EXPENSE_KEYS = [
   'accountingServices','stationery','utilities','deferredTax','vat','security',
   'otherExpenses','householdExpenses','advertising','repairs','rentExpenses',
   'fixedAssets','standardKaspibot','daribar','communications','equipment',
-  'transport','cleaning','bankServices',
+  'transport','cleaning','bankServices','terminalRent','procedureRent',
 ];
 
 const ROWS: ReportRow[] = [
   { key: '_rev',              label: 'ВЫРУЧКА',                                          section: true, source: 'calc' },
   { key: 'retailRevenue',     label: 'ВЫРУЧКА розн в аптеке',                           source: 'db',    bold: true },
   { key: 'kaspiRevenue',      label: 'Выручка Каспи',                                   source: 'empty', indent: true },
-  { key: 'wholesaleRevenue',  label: 'ВЫРУЧКА опт',                                     source: 'empty', bold: true },
-  { key: 'coefficient',       label: 'коэффициент',                                     source: 'empty' },
+  { key: 'wholesaleRevenue',  label: 'ВЫРУЧКА опт',                                     source: 'calc',  bold: true },
+  { key: 'coefficient',       label: 'коэффициент',                                     source: 'db',    decimals: 2 },
   { key: 'avgDailyRevenue',   label: 'Среднедневная розн выручка',                      source: 'empty' },
-  { key: 'terminalRent',      label: 'Аренда терминал',                                 source: 'empty' },
-  { key: 'procedureRent',     label: 'Процедурная аренда',                              source: 'empty' },
+  { key: 'terminalRent',      label: 'Аренда терминал',                                 source: 'db' },
+  { key: 'procedureRent',     label: 'Процедурная аренда',                              source: 'db' },
   { key: 'legalEntityProfit', label: 'Прибыль по юрлицам',                             source: 'empty' },
   { key: '_stock',            label: 'ОСТАТКИ',                                         section: true, source: 'calc' },
   { key: 'stockRetail',       label: 'Остаток товара на конец месяца по розн ценам',    source: 'empty' },
@@ -72,21 +72,22 @@ const MONTH_NAMES = [
   'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь',
 ];
 
-function fmtN(n: number): string {
+function fmtN(n: number, decimals = 0): string {
   if (!n) return '';
-  return n.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
 // ─── Компонент редактируемой ячейки ────────────────────────────────────────
 
 function Cell({
   pharmacyId, fieldKey, systemValue, overrideValue,
-  onSave, onReset,
+  onSave, onReset, decimals = 0,
 }: {
   pharmacyId: number; fieldKey: string;
   systemValue: number; overrideValue: number | undefined;
   onSave: (pharmacyId: number, key: string, val: number) => Promise<void>;
   onReset: (pharmacyId: number, key: string) => Promise<void>;
+  decimals?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
@@ -142,7 +143,7 @@ function Cell({
         displayValue < 0 ? 'text-red-600 font-medium' : ''
       }`}
       onClick={startEdit}
-      title={isOverridden ? `Изменено вручную. Системное значение: ${fmtN(systemValue) || '0'}` : 'Нажмите для редактирования'}
+      title={isOverridden ? `Изменено вручную. Системное значение: ${fmtN(systemValue, decimals) || '0'}` : 'Нажмите для редактирования'}
     >
       <div className="flex items-center justify-end gap-1">
         {isOverridden && (
@@ -155,7 +156,7 @@ function Cell({
           </button>
         )}
         <span className={isOverridden ? 'text-amber-700 font-medium' : ''}>
-          {displayValue === 0 ? '—' : fmtN(displayValue)}
+          {displayValue === 0 ? '—' : fmtN(displayValue, decimals)}
         </span>
         {isOverridden && (
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Изменено вручную" />
@@ -202,7 +203,11 @@ export default function MonthlyReportPage() {
   function getCurrentValue(pharmacyId: number, key: string): number {
     const ov = getOverride(pharmacyId, key);
     if (ov !== undefined) return ov;
-    // Для вычисляемых полей пересчитываем из текущих значений
+    if (key === 'wholesaleRevenue') {
+      const coeff = getCurrentValue(pharmacyId, 'coefficient');
+      if (coeff > 0) return Math.round(getCurrentValue(pharmacyId, 'retailRevenue') / coeff);
+      return 0;
+    }
     if (key === 'totalExpenses') {
       return EXPENSE_KEYS.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0);
     }
@@ -367,7 +372,6 @@ export default function MonthlyReportPage() {
                       {/* Ячейки по аптекам */}
                       {pharmacies.map((p) => {
                         if (isCalc) {
-                          // Вычисляемые поля: показываем результат, но тоже редактируемые
                           const sysVal = getCurrentValue(p.id, row.key);
                           const ov = getOverride(p.id, row.key);
                           return (
@@ -379,6 +383,7 @@ export default function MonthlyReportPage() {
                               overrideValue={ov}
                               onSave={handleSave}
                               onReset={handleReset}
+                              decimals={row.decimals}
                             />
                           );
                         }
@@ -391,6 +396,7 @@ export default function MonthlyReportPage() {
                             overrideValue={getOverride(p.id, row.key)}
                             onSave={handleSave}
                             onReset={handleReset}
+                            decimals={row.decimals}
                           />
                         );
                       })}
@@ -402,7 +408,7 @@ export default function MonthlyReportPage() {
                         row.key === 'retailRevenue' || row.key === 'netIncome' ? 'text-blue-700' :
                         row.key === 'totalExpenses' ? 'text-red-700' : 'text-gray-800'
                       }`}>
-                        {total === 0 ? '—' : fmtN(total)}
+                        {total === 0 ? '—' : fmtN(total, row.decimals)}
                       </td>
                     </tr>
                   );

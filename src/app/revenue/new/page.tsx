@@ -34,6 +34,7 @@ export default function NewRevenuePage() {
     date: today,
     cashRevenue: '',
     terminalRevenue: '',
+    bonusRevenue: '',
     generalComment: '',
     employeeName: '',
   });
@@ -74,7 +75,8 @@ export default function NewRevenuePage() {
   );
 
   const totalRevenue =
-    (parseFloat(form.cashRevenue) || 0) + (parseFloat(form.terminalRevenue) || 0);
+    (parseFloat(form.cashRevenue) || 0) +
+    (parseFloat(form.terminalRevenue) || 0);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,6 +104,7 @@ export default function NewRevenuePage() {
         date: today,
         cashRevenue: '',
         terminalRevenue: '',
+        bonusRevenue: '',
         generalComment: '',
         employeeName: form.employeeName,
       });
@@ -205,6 +208,24 @@ export default function NewRevenuePage() {
               step="0.01"
               placeholder="0.00"
               className="input"
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="label">
+              Бонусы фарм и зав
+              <span className="ml-1 text-gray-400 font-normal">
+                — учитываются отдельно в закрытии месяца
+              </span>
+            </label>
+            <input
+              type="number"
+              name="bonusRevenue"
+              value={form.bonusRevenue}
+              onChange={handleChange}
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              className="input max-w-xs"
             />
           </div>
         </div>

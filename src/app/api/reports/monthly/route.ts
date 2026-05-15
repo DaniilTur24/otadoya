@@ -29,8 +29,8 @@ export async function GET(request: NextRequest) {
 
   for (const p of pharmacies) {
     systemData[p.id] = {
-      retailRevenue: 0, kaspiRevenue: 0, wholesaleRevenue: 0, coefficient: 0,
-      avgDailyRevenue: 0, terminalRent: 0, procedureRent: 0, legalEntityProfit: 0,
+      retailRevenue: 0, kaspiRevenue: 0, wholesaleRevenue: 0, coefficient: Number(p.coefficient ?? 0),
+      avgDailyRevenue: 0, terminalRent: Number(p.terminalRent ?? 0), procedureRent: Number(p.procedureRent ?? 0), legalEntityProfit: 0,
       stockRetail: 0, stockWholesale: 0, consignment: 0, consignmentOverdue: 0,
       goodsExpenses: 0, pharmaBonus: 0, pharmaSalary: 0, officeSalary: 0,
       association: 0, charity: 0, accountingServices: 0, stationery: 0,
@@ -44,8 +44,17 @@ export async function GET(request: NextRequest) {
 
   for (const e of revenueEntries) {
     if (!systemData[e.pharmacyId]) continue;
-    systemData[e.pharmacyId].retailRevenue  += Number(e.cashRevenue) + Number(e.terminalRevenue);
-    systemData[e.pharmacyId].otherExpenses  += Number(e.additionalExpenses);
+    systemData[e.pharmacyId].retailRevenue += Number(e.cashRevenue) + Number(e.terminalRevenue);
+    systemData[e.pharmacyId].pharmaBonus   += Number((e as unknown as Record<string, unknown>).bonusRevenue ?? 0);
+    systemData[e.pharmacyId].otherExpenses += Number(e.additionalExpenses);
+  }
+
+  // Считаем оптовую выручку: розничная / коэффициент
+  for (const p of pharmacies) {
+    const d = systemData[p.id];
+    if (d.coefficient > 0) {
+      d.wholesaleRevenue = Math.round(d.retailRevenue / d.coefficient);
+    }
   }
 
   for (const e of expenseEntries) {
@@ -60,7 +69,7 @@ export async function GET(request: NextRequest) {
     'accountingServices','stationery','utilities','deferredTax','vat','security',
     'otherExpenses','householdExpenses','advertising','repairs','rentExpenses',
     'fixedAssets','standardKaspibot','daribar','communications','equipment',
-    'transport','cleaning','bankServices',
+    'transport','cleaning','bankServices','terminalRent','procedureRent',
   ];
 
   for (const p of pharmacies) {

@@ -200,6 +200,12 @@ export function parseExcelFile(buffer: Buffer): ParsedExpense[] {
     const category = detectCategory(description);
     if (!category) continue;
 
+    // Если есть колонки дебет и кредит — берём только строки с суммой в дебете.
+    // Дебет = исходящий платёж (расход), кредит = входящий/возврат — не расход.
+    const rowDebit = debitCol !== -1 ? row[debitCol] : undefined;
+    const rowCredit = creditCol !== -1 ? row[creditCol] : undefined;
+    if (debitCol !== -1 && creditCol !== -1 && !rowDebit && rowCredit) continue;
+
     const operationDate = dateCol !== -1 ? (parseDate(row[dateCol]) ?? new Date()) : new Date();
 
     let rawAmount: unknown = undefined;

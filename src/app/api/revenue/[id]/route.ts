@@ -7,6 +7,7 @@ function serialize(entry: Record<string, unknown>) {
     ...entry,
     cashRevenue: Number(entry.cashRevenue),
     terminalRevenue: Number(entry.terminalRevenue),
+    bonusRevenue: Number(entry.bonusRevenue ?? 0),
     additionalExpenses: Number(entry.additionalExpenses),
     totalRevenue: Number(entry.cashRevenue) + Number(entry.terminalRevenue),
     expenseItems: items.map((i) => ({ ...i, amount: Number(i.amount) })),
@@ -39,7 +40,7 @@ export async function PUT(
 ) {
   const body = await request.json();
   const {
-    pharmacyId, date, cashRevenue, terminalRevenue,
+    pharmacyId, date, cashRevenue, terminalRevenue, bonusRevenue,
     expenseItems, generalComment, employeeName,
     bookkeeperComment, status,
   } = body;
@@ -50,6 +51,7 @@ export async function PUT(
   if (date) data.date = new Date(date);
   if (cashRevenue != null) data.cashRevenue = String(cashRevenue);
   if (terminalRevenue != null) data.terminalRevenue = String(terminalRevenue);
+  if (bonusRevenue != null) data.bonusRevenue = String(bonusRevenue);
   if (generalComment !== undefined) data.generalComment = generalComment || null;
   if (employeeName) data.employeeName = employeeName.trim();
   if (bookkeeperComment !== undefined) data.bookkeeperComment = bookkeeperComment || null;

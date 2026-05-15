@@ -7,6 +7,7 @@ function serializeEntry(entry: Record<string, unknown>) {
     ...entry,
     cashRevenue: Number(entry.cashRevenue),
     terminalRevenue: Number(entry.terminalRevenue),
+    bonusRevenue: Number(entry.bonusRevenue ?? 0),
     additionalExpenses: Number(entry.additionalExpenses),
     totalRevenue: Number(entry.cashRevenue) + Number(entry.terminalRevenue),
     expenseItems: items.map((i) => ({
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
     date,
     cashRevenue,
     terminalRevenue,
+    bonusRevenue,
     expenseItems,   // [{ amount, comment }]
     generalComment,
     employeeName,
@@ -82,6 +84,7 @@ export async function POST(request: Request) {
         date: new Date(date),
         cashRevenue: String(cashRevenue || 0),
         terminalRevenue: String(terminalRevenue || 0),
+        bonusRevenue: String(bonusRevenue || 0),
         additionalExpenses: totalExpenses,
         expenseComment,
         generalComment: generalComment || null,

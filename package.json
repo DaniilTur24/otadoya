@@ -3,14 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "rm -rf .next",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "clean": "rm -rf .next"
+    "clean": "if exist .next rmdir /s /q .next"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
