@@ -1,6 +1,7 @@
 // Парсер ежемесячного PDF-отчёта аптеки
+// pdf-parse v1.x — CommonJS, экспортирует функцию напрямую
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse');
+const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
 
 export interface PdfReportResult {
   markupPercent:  number | null;  // Наценка от выручки (%)
