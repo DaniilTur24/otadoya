@@ -23,6 +23,7 @@ model Pharmacy {
   uploadedFiles    UploadedFile[]
   expenses         ExtractedExpenseEntry[]
   monthlyOverrides MonthlyReportOverride[]
+  pdfReports       PharmacyPdfReport[]
 
   @@map("pharmacies")
 }
@@ -121,4 +122,29 @@ model MonthlyReportOverride {
   // Одна запись на (год, месяц, аптека, поле)
   @@unique([year, month, pharmacyId, fieldKey])
   @@map("monthly_report_overrides")
+}
+
+// Данные из ежемесячного PDF-отчёта по аптеке
+model PharmacyPdfReport {
+  id             Int      @id @default(autoincrement())
+  pharmacyId     Int      @map("pharmacy_id")
+  year           Int
+  month          Int
+  // Наценка от выручки → Коэффициент в закрытии месяца
+  markupPercent  Decimal? @map("markup_percent")
+  // Остаток товара на конец месяца
+  stockRetail    Decimal? @map("stock_retail")
+  stockWholesale Decimal? @map("stock_wholesale")
+  // pending = ожидает подтверждения, confirmed = подтверждено
+  status         String   @default("pending")
+  sourceFile     String?  @map("source_file")
+  // Была ли система уверена в извлечении значений
+  confident      Boolean  @default(true) @map("confident")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@unique([pharmacyId, year, month])
+  @@map("pharmacy_pdf_reports")
 }

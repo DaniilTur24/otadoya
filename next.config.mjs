@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['xlsx'],
+    serverComponentsExternalPackages: ['xlsx', 'pdf-parse'],
   },
   webpack: (config, { dev }) => {
     if (dev) {

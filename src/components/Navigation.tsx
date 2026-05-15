@@ -10,6 +10,7 @@ const links = [
   { href: '/files', label: 'Файлы / Расходы' },
   { href: '/reports', label: 'Отчёты' },
   { href: '/reports/monthly', label: 'Закрытие месяца' },
+  { href: '/reports/pdf-import', label: 'Импорт PDF' },
   { href: '/settings', label: 'Настройки' },
 ];
 

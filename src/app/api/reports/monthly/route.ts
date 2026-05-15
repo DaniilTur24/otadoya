@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const dateFrom = new Date(year, month - 1, 1);
   const dateTo   = new Date(year, month, 0, 23, 59, 59, 999);
 
-  const [pharmacies, revenueEntries, expenseEntries, overrides] = await Promise.all([
+  const [pharmacies, revenueEntries, expenseEntries, overrides, pdfReports] = await Promise.all([
     prisma.pharmacy.findMany({ orderBy: { name: 'asc' } }),
     prisma.dailyRevenueEntry.findMany({
       where: { status: 'approved', date: { gte: dateFrom, lte: dateTo } },
@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
       where: { status: 'approved', operationDate: { gte: dateFrom, lte: dateTo } },
     }),
     prisma.monthlyReportOverride.findMany({ where: { year, month } }),
+    prisma.pharmacyPdfReport.findMany({ where: { year, month, status: 'confirmed' } }),
   ]);
 
   // Системные значения по аптекам
@@ -61,6 +62,15 @@ export async function GET(request: NextRequest) {
     if (!e.pharmacyId || !systemData[e.pharmacyId]) continue;
     if (e.category === 'rent')    systemData[e.pharmacyId].rentExpenses  += Number(e.amount);
     if (e.category === 'expense') systemData[e.pharmacyId].bankServices  += Number(e.amount);
+  }
+
+  // Подставляем данные из PDF-отчётов (подтверждённых)
+  for (const r of pdfReports) {
+    if (!systemData[r.pharmacyId]) continue;
+    const d = systemData[r.pharmacyId];
+    if (r.stockRetail    != null) d.stockRetail    = Number(r.stockRetail);
+    if (r.stockWholesale != null) d.stockWholesale = Number(r.stockWholesale);
+    if (r.markupPercent  != null) d.coefficient    = Number(r.markupPercent);
   }
 
   // Считаем итоги из системных данных
