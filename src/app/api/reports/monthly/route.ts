@@ -70,7 +70,8 @@ export async function GET(request: NextRequest) {
     const d = systemData[r.pharmacyId];
     if (r.stockRetail    != null) d.stockRetail    = Number(r.stockRetail);
     if (r.stockWholesale != null) d.stockWholesale = Number(r.stockWholesale);
-    if (r.markupPercent  != null) d.coefficient    = Number(r.markupPercent);
+    // Наценка от выручки 34,18% → коэффициент 1.3418 (= 1 + markup/100)
+    if (r.markupPercent  != null) d.coefficient    = 1 + Number(r.markupPercent) / 100;
   }
 
   // Считаем итоги из системных данных

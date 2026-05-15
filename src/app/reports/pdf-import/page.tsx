@@ -282,7 +282,11 @@ export default function PdfImportPage() {
               label="Наценка от выручки (%)"
               value={editMarkup}
               onChange={setEditMarkup}
-              hint="→ Коэффициент в закрытии месяца"
+              hint={(() => {
+                const n = parseFloat(editMarkup.replace(',', '.'));
+                if (isNaN(n)) return '→ Коэффициент в закрытии месяца';
+                return `→ Коэффициент: ${(1 + n / 100).toFixed(4)}`;
+              })()}
             />
             <EditableNumber
               label="Остаток по розн ценам"
