@@ -4,22 +4,23 @@ const prisma = new PrismaClient();
 
 async function main() {
   const pharmacies = [
-    'Аптека №1 — Центральная',
-    'Аптека №2 — Северная',
-    'Аптека №3 — Западная',
-    'Аптека №4 — Восточная',
-    'Аптека №5 — Южная',
+    '70я',
+    'Алатау',
+    'Байтерек',
+    'Думан',
+    'Есик',
+    'Ирень',
   ];
 
   for (const name of pharmacies) {
     await prisma.pharmacy.upsert({
       where: { name },
-      update: {},
-      create: { name },
+      update: { isActive: true },
+      create: { name, isActive: true },
     });
   }
 
-  console.log('✓ Seed завершён: добавлено 5 аптек');
+  console.log('✓ Seed завершён: добавлены аптеки');
 }
 
 main()

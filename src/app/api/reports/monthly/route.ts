@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { MONTHLY_EXPENSE_KEYS } from '@/lib/monthly-report-fields';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
   const dateFrom = new Date(year, month - 1, 1);
   const dateTo   = new Date(year, month, 0, 23, 59, 59, 999);
 
-  const [pharmacies, revenueEntries, expenseEntries, overrides, pdfReports] = await Promise.all([
+  const [pharmacies, revenueEntries, expenseEntries, importedValues, overrides, pdfReports] = await Promise.all([
     prisma.pharmacy.findMany({ orderBy: { name: 'asc' } }),
     prisma.dailyRevenueEntry.findMany({
       where: { status: 'approved', date: { gte: dateFrom, lte: dateTo } },
@@ -19,6 +20,16 @@ export async function GET(request: NextRequest) {
     }),
     prisma.extractedExpenseEntry.findMany({
       where: { status: 'approved', operationDate: { gte: dateFrom, lte: dateTo } },
+    }),
+    prisma.importedReportValue.findMany({
+      where: {
+        status: 'approved',
+        upload: {
+          fileType: 'bank_transactions_excel',
+          year,
+          month,
+        },
+      },
     }),
     prisma.monthlyReportOverride.findMany({ where: { year, month } }),
     prisma.pharmacyPdfReport.findMany({ where: { year, month, status: 'confirmed' } }),
@@ -64,6 +75,16 @@ export async function GET(request: NextRequest) {
     if (e.category === 'expense') systemData[e.pharmacyId].bankServices  += Number(e.amount);
   }
 
+  const totalOnlyData: Record<string, number> = {};
+  for (const value of importedValues) {
+    const amount = Number(value.amount);
+    if (value.pharmacyId && systemData[value.pharmacyId] && value.fieldKey in systemData[value.pharmacyId]) {
+      systemData[value.pharmacyId][value.fieldKey] += amount;
+    } else if (!value.pharmacyId) {
+      totalOnlyData[value.fieldKey] = (totalOnlyData[value.fieldKey] ?? 0) + amount;
+    }
+  }
+
   // Подставляем данные из PDF-отчётов (подтверждённых)
   for (const r of pdfReports) {
     if (!systemData[r.pharmacyId]) continue;
@@ -74,18 +95,9 @@ export async function GET(request: NextRequest) {
     if (r.markupPercent  != null) d.coefficient    = Math.round((1 + Number(r.markupPercent) / 100) * 100) / 100;
   }
 
-  // Считаем итоги из системных данных
-  const EXPENSE_KEYS = [
-    'goodsExpenses','pharmaBonus','pharmaSalary','officeSalary','association','charity',
-    'accountingServices','stationery','utilities','deferredTax','vat','security',
-    'otherExpenses','householdExpenses','advertising','repairs','rentExpenses',
-    'fixedAssets','standardKaspibot','daribar','communications','equipment',
-    'transport','cleaning','bankServices','terminalRent','procedureRent',
-  ];
-
   for (const p of pharmacies) {
     const d = systemData[p.id];
-    d.totalExpenses = EXPENSE_KEYS.reduce((s, k) => s + d[k], 0);
+    d.totalExpenses = MONTHLY_EXPENSE_KEYS.reduce((s, k) => s + d[k], 0);
     d.netIncome     = d.retailRevenue - d.totalExpenses;
   }
 
@@ -95,7 +107,7 @@ export async function GET(request: NextRequest) {
     overrideMap[`${o.pharmacyId}:${o.fieldKey}`] = Number(o.value);
   }
 
-  return NextResponse.json({ pharmacies, systemData, overrideMap });
+  return NextResponse.json({ pharmacies, systemData, overrideMap, totalOnlyData });
 }
 
 // PUT — сохранить или удалить override для одной ячейки

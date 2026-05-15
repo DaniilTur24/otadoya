@@ -6,6 +6,7 @@ import Link from 'next/link';
 interface Pharmacy {
   id: number;
   name: string;
+  isActive: boolean;
   keywords: string;
   coefficient: number;
   terminalRent: number;
@@ -46,11 +47,25 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Настройки — Аптеки</h1>
+    <div>
+      <h1 className="text-xl font-bold text-gray-900 mb-1">Настройки</h1>
       <p className="text-sm text-gray-500 mb-6">
-        Нажмите на аптеку чтобы изменить её параметры.
+        Управление аптеками, алиасами и правилами импорта банковских транзакций.
       </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+        <Link href="/settings/pharmacy-aliases" className="card p-4 hover:bg-gray-50">
+          <div className="font-semibold text-gray-900">Алиасы аптек</div>
+          <div className="text-xs text-gray-500 mt-1">ИП, контрагенты, ИИН/БИН и ключевые слова.</div>
+        </Link>
+        <Link href="/settings/transaction-rules" className="card p-4 hover:bg-gray-50">
+          <div className="font-semibold text-gray-900">Правила транзакций</div>
+          <div className="text-xs text-gray-500 mt-1">Классификация и распределение строк банка.</div>
+        </Link>
+      </div>
+
+      <div className="max-w-2xl">
+      <h2 className="font-semibold text-gray-800 mb-3">Аптеки</h2>
 
       {loading ? (
         <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
@@ -62,6 +77,9 @@ export default function SettingsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-gray-900">{p.name}</div>
                   <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap gap-3">
+                    <span className={p.isActive ? 'text-green-600' : 'text-gray-400'}>
+                      {p.isActive ? 'Активна' : 'Неактивна'}
+                    </span>
                     {p.keywords && (
                       <span>Ключевые слова: <span className="text-gray-600">{p.keywords}</span></span>
                     )}
@@ -117,6 +135,7 @@ export default function SettingsPage() {
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }

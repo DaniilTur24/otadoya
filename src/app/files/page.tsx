@@ -1,23 +1,38 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
-interface Pharmacy {
-  id: number;
-  name: string;
-}
-
-interface UploadedFile {
+interface BankImport {
   id: number;
   originalName: string;
-  pharmacy: Pharmacy | null;
-  createdAt: string;
-  _count: { expenses: number };
+  month: number | null;
+  year: number | null;
+  uploadedAt: string;
+  _count: {
+    importedTransactions: number;
+    importedReportValues: number;
+  };
 }
 
-function fmtDate(s: string) {
-  return new Date(s).toLocaleString('ru-RU', {
+const MONTHS = [
+  'Январь',
+  'Февраль',
+  'Март',
+  'Апрель',
+  'Май',
+  'Июнь',
+  'Июль',
+  'Август',
+  'Сентябрь',
+  'Октябрь',
+  'Ноябрь',
+  'Декабрь',
+];
+
+function fmtDate(value: string) {
+  return new Date(value).toLocaleString('ru-RU', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -27,188 +42,176 @@ function fmtDate(s: string) {
 }
 
 export default function FilesPage() {
-  const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
-  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const router = useRouter();
+  const now = new Date();
+  const [imports, setImports] = useState<BankImport[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedPharmacy, setSelectedPharmacy] = useState('');
-  const [uploadResult, setUploadResult] = useState<{
-    count: number;
-    error: string | null;
-  } | null>(null);
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
-  const loadFiles = useCallback(async () => {
+  const loadImports = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/files');
-    const data = await res.json();
-    setFiles(data);
+    const res = await fetch('/api/bank-imports');
+    setImports(await res.json());
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    fetch('/api/pharmacies')
-      .then((r) => r.json())
-      .then(setPharmacies);
-    loadFiles();
-  }, [loadFiles]);
+    loadImports();
+  }, [loadImports]);
 
-  async function deleteFile(id: number, name: string) {
-    if (!confirm(`Удалить файл «${name}» и все найденные в нём расходы?`)) return;
-    await fetch(`/api/files/${id}`, { method: 'DELETE' });
-    loadFiles();
-  }
-
-  async function handleUpload(e: React.FormEvent) {
+  async function upload(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedFile) return;
 
     setUploading(true);
-    setUploadResult(null);
+    setMessage('');
+    setError('');
 
     const formData = new FormData();
     formData.append('file', selectedFile);
-    if (selectedPharmacy) formData.append('pharmacyId', selectedPharmacy);
+    formData.append('month', String(month));
+    formData.append('year', String(year));
 
-    const res = await fetch('/api/files', {
+    const res = await fetch('/api/bank-imports', {
       method: 'POST',
       body: formData,
     });
-
     const data = await res.json();
+
     if (res.ok) {
-      setUploadResult({ count: data.extractedCount, error: data.parseError });
+      setMessage(
+        `Импортировано строк: ${data.importedCount}. На проверку: ${data.needsReviewCount}. Игнорировано: ${data.ignoredCount}.`
+      );
       setSelectedFile(null);
-      // сбрасываем input
-      const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-      loadFiles();
+      const input = document.getElementById('bankFileInput') as HTMLInputElement | null;
+      if (input) input.value = '';
+      await loadImports();
+      router.push(`/files/${data.id}`);
     } else {
-      setUploadResult({ count: 0, error: data.error });
+      setError(data.error || 'Не удалось импортировать файл');
     }
+
     setUploading(false);
+  }
+
+  async function remove(id: number, name: string) {
+    if (!confirm(`Удалить импорт «${name}» и все связанные транзакции?`)) return;
+    await fetch(`/api/bank-imports/${id}`, { method: 'DELETE' });
+    loadImports();
   }
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Загрузка файлов с расходами</h1>
-      <p className="text-gray-500 text-sm mb-6">
-        Загрузите Excel-выгрузку из банка. Система автоматически найдёт строки с расходами и арендой.
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <h1 className="text-xl font-bold text-gray-900">Загрузка банковской выписки</h1>
+        <Link href="/reports/monthly" className="btn-secondary text-xs">
+          Закрытие месяца
+        </Link>
+      </div>
+      <p className="text-sm text-gray-500 mb-6">
+        Загрузите Excel со списком банковских транзакций. Система применит правила, алиасы аптек и отправит строки на проверку.
       </p>
 
-      {/* Форма загрузки */}
       <div className="card p-5 mb-6">
-        <h2 className="font-semibold text-gray-800 mb-3">Загрузить новый файл</h2>
-        <form onSubmit={handleUpload} className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <h2 className="font-semibold text-gray-800 mb-4">Новый импорт</h2>
+        <form onSubmit={upload} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_140px] gap-3">
             <div>
               <label className="label">Excel-файл *</label>
               <input
-                id="fileInput"
+                id="bankFileInput"
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 required
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                 className="input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
               />
             </div>
             <div>
-              <label className="label">Привязать к аптеке</label>
-              <select
-                value={selectedPharmacy}
-                onChange={(e) => setSelectedPharmacy(e.target.value)}
-                className="input"
-              >
-                <option value="">— не привязывать —</option>
-                {pharmacies.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
+              <label className="label">Месяц *</label>
+              <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+                {MONTHS.map((name, index) => (
+                  <option key={name} value={index + 1}>
+                    {name}
                   </option>
                 ))}
               </select>
             </div>
+            <div>
+              <label className="label">Год *</label>
+              <input
+                type="number"
+                min="2000"
+                max="2100"
+                className="input"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              />
+            </div>
           </div>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800">
-            Система ищет строки, где в описании операции встречаются слова:{' '}
-            <strong>расход, расходы, аренда, аренду, арендная плата</strong> (без учёта регистра).
+          <div className="bg-sky-50 border border-sky-200 rounded-md p-3 text-xs text-sky-800">
+            После подтверждения строки попадут в существующее закрытие месяца, например в «Расходы по арендной плате» или «Расходы на хознужды».
           </div>
 
-          <button type="submit" className="btn-primary" disabled={uploading || !selectedFile}>
-            {uploading ? 'Загрузка и парсинг...' : 'Загрузить и обработать'}
+          <button className="btn-primary" disabled={uploading || !selectedFile}>
+            {uploading ? 'Импорт...' : 'Загрузить и разобрать'}
           </button>
         </form>
 
-        {uploadResult && (
-          <div
-            className={`mt-3 p-3 rounded-md text-sm ${
-              uploadResult.error
-                ? 'bg-red-50 text-red-800 border border-red-200'
-                : 'bg-green-50 text-green-800 border border-green-200'
-            }`}
-          >
-            {uploadResult.error ? (
-              <>Ошибка обработки файла: {uploadResult.error}</>
-            ) : (
-              <>
-                Файл загружен. Найдено строк с расходами/арендой:{' '}
-                <strong>{uploadResult.count}</strong>. Просмотрите и подтвердите их ниже.
-              </>
-            )}
-          </div>
-        )}
+        {message && <div className="mt-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3">{message}</div>}
+        {error && <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">{error}</div>}
       </div>
 
-      {/* Список загруженных файлов */}
-      <h2 className="font-semibold text-gray-800 mb-3">Загруженные файлы</h2>
+      <h2 className="font-semibold text-gray-800 mb-3">Загруженные банковские выписки</h2>
       {loading ? (
-        <div className="text-gray-400 text-sm py-4 text-center">Загрузка...</div>
-      ) : files.length === 0 ? (
-        <div className="card p-8 text-center text-gray-400 text-sm">
-          Файлов ещё нет
-        </div>
+        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+      ) : imports.length === 0 ? (
+        <div className="card p-8 text-sm text-gray-400 text-center">Импортов пока нет</div>
       ) : (
         <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="th">Файл</th>
-                <th className="th">Аптека</th>
-                <th className="th">Загружен</th>
-                <th className="th text-center">Найдено строк</th>
-                <th className="th">Действие</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {files.map((file) => (
-                <tr key={file.id} className="hover:bg-gray-50">
-                  <td className="td font-medium">{file.originalName}</td>
-                  <td className="td text-gray-500">
-                    {file.pharmacy?.name ?? <span className="italic text-gray-300">не привязан</span>}
-                  </td>
-                  <td className="td text-gray-500">{fmtDate(file.createdAt)}</td>
-                  <td className="td text-center">
-                    <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full font-medium">
-                      {file._count.expenses}
-                    </span>
-                  </td>
-                  <td className="td">
-                    <div className="flex gap-1">
-                      <Link href={`/files/${file.id}`} className="btn-secondary text-xs">
-                        Просмотреть →
-                      </Link>
-                      <button
-                        className="btn-danger text-xs"
-                        onClick={() => deleteFile(file.id, file.originalName)}
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="th">Файл</th>
+                  <th className="th">Период</th>
+                  <th className="th">Загружен</th>
+                  <th className="th text-center">Транзакции</th>
+                  <th className="th text-center">Значения</th>
+                  <th className="th">Действия</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {imports.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="td font-medium">{item.originalName}</td>
+                    <td className="td text-gray-500">
+                      {item.month ? MONTHS[item.month - 1] : '—'} {item.year ?? ''}
+                    </td>
+                    <td className="td text-gray-500">{fmtDate(item.uploadedAt)}</td>
+                    <td className="td text-center">{item._count.importedTransactions}</td>
+                    <td className="td text-center">{item._count.importedReportValues}</td>
+                    <td className="td">
+                      <div className="flex gap-2">
+                        <Link href={`/files/${item.id}`} className="btn-secondary text-xs">
+                          Проверить
+                        </Link>
+                        <button className="btn-danger text-xs" onClick={() => remove(item.id, item.originalName)}>
+                          Удалить
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

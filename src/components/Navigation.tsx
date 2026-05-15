@@ -7,7 +7,7 @@ const links = [
   { href: '/', label: 'Главная' },
   { href: '/revenue/new', label: '+ Добавить выручку' },
   { href: '/revenue', label: 'Записи выручки' },
-  { href: '/files', label: 'Файлы / Расходы' },
+  { href: '/files', label: 'Банк / Импорт' },
   { href: '/reports', label: 'Отчёты' },
   { href: '/reports/monthly', label: 'Закрытие месяца' },
   { href: '/reports/pdf-import', label: 'Импорт PDF' },
@@ -20,7 +20,7 @@ export function Navigation() {
   return (
     <nav className="bg-white border-b border-gray-200 shadow-sm">
       <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center h-14 gap-1">
+        <div className="flex items-center min-h-14 py-2 gap-1 flex-wrap">
           <span className="font-bold text-blue-700 mr-4 text-sm shrink-0">
             Аптека Учёт
           </span>

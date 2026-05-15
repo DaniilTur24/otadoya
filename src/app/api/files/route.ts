@@ -9,6 +9,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const files = await prisma.uploadedFile.findMany({
+    where: {
+      fileType: { not: 'bank_transactions_excel' },
+    },
     include: {
       pharmacy: true,
       _count: { select: { expenses: true } },

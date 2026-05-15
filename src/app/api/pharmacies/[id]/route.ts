@@ -17,12 +17,13 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   const id = Number(params.id);
-  const { name, keywords, coefficient, terminalRent, procedureRent } = await request.json();
+  const { name, isActive, keywords, coefficient, terminalRent, procedureRent } = await request.json();
 
   const pharmacy = await prisma.pharmacy.update({
     where: { id },
     data: {
       ...(name?.trim() ? { name: name.trim() } : {}),
+      isActive:     isActive     !== undefined ? Boolean(isActive) : undefined,
       keywords:      typeof keywords === 'string' ? keywords.trim() : undefined,
       coefficient:   coefficient   != null ? String(coefficient)   : undefined,
       terminalRent:  terminalRent  != null ? String(terminalRent)  : undefined,

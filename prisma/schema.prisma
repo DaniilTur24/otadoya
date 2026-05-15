@@ -10,22 +10,42 @@ datasource db {
 }
 
 model Pharmacy {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  keywords       String   @default("")
-  coefficient    Decimal  @default(0)
-  terminalRent   Decimal  @default(0)
-  procedureRent  Decimal  @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  isActive      Boolean  @default(true) @map("is_active")
+  keywords      String   @default("")
+  coefficient   Decimal  @default(0)
+  terminalRent  Decimal  @default(0)
+  procedureRent Decimal  @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  revenueEntries   DailyRevenueEntry[]
-  uploadedFiles    UploadedFile[]
-  expenses         ExtractedExpenseEntry[]
-  monthlyOverrides MonthlyReportOverride[]
-  pdfReports       PharmacyPdfReport[]
+  revenueEntries       DailyRevenueEntry[]
+  uploadedFiles        UploadedFile[]
+  expenses             ExtractedExpenseEntry[]
+  monthlyOverrides     MonthlyReportOverride[]
+  pdfReports           PharmacyPdfReport[]
+  aliases              PharmacyAlias[]
+  transactionRules     TransactionImportRule[]
+  importedTransactions ImportedTransaction[]
+  importedReportValues ImportedReportValue[]
 
   @@map("pharmacies")
+}
+
+model PharmacyAlias {
+  id         Int      @id @default(autoincrement())
+  pharmacyId Int      @map("pharmacy_id")
+  alias      String
+  aliasType  String   @default("keyword") @map("alias_type")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@index([pharmacyId])
+  @@map("pharmacy_aliases")
 }
 
 model DailyRevenueEntry {
@@ -54,8 +74,8 @@ model DailyRevenueEntry {
 
 // Детализация дополнительных расходов по каждой записи выручки
 model DailyExpenseItem {
-  id      Int      @id @default(autoincrement())
-  entryId Int      @map("entry_id")
+  id      Int     @id @default(autoincrement())
+  entryId Int     @map("entry_id")
   amount  Decimal
   comment String?
 
@@ -68,13 +88,19 @@ model UploadedFile {
   id           Int      @id @default(autoincrement())
   filename     String
   originalName String   @map("original_name")
+  fileType     String   @default("other") @map("file_type")
+  month        Int?
+  year         Int?
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
   // Опционально: привязать файл к конкретной аптеке
   pharmacyId   Int?     @map("pharmacy_id")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  pharmacy Pharmacy?               @relation(fields: [pharmacyId], references: [id])
-  expenses ExtractedExpenseEntry[]
+  pharmacy             Pharmacy?               @relation(fields: [pharmacyId], references: [id])
+  expenses             ExtractedExpenseEntry[]
+  importedTransactions ImportedTransaction[]
+  importedReportValues ImportedReportValue[]
 
   @@map("uploaded_files")
 }
@@ -100,9 +126,9 @@ model ExtractedExpenseEntry {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  file     UploadedFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  file UploadedFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
-  pharmacy Pharmacy?    @relation(fields: [pharmacyId], references: [id])
+  pharmacy Pharmacy? @relation(fields: [pharmacyId], references: [id])
 
   @@map("extracted_expense_entries")
 }
@@ -147,4 +173,77 @@ model PharmacyPdfReport {
 
   @@unique([pharmacyId, year, month])
   @@map("pharmacy_pdf_reports")
+}
+
+model TransactionImportRule {
+  id               Int      @id @default(autoincrement())
+  name             String
+  sourceField      String   @map("source_field")
+  pattern          String
+  matchType        String   @default("contains") @map("match_type")
+  targetFieldKey   String?  @map("target_field_key")
+  distributionType String   @map("distribution_type")
+  pharmacyId       Int?     @map("pharmacy_id")
+  priority         Int      @default(0)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  pharmacy             Pharmacy?             @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
+  importedTransactions ImportedTransaction[]
+
+  @@index([isActive, priority])
+  @@map("transaction_import_rules")
+}
+
+model ImportedTransaction {
+  id                 Int       @id @default(autoincrement())
+  uploadId           Int       @map("upload_id")
+  transactionDate    DateTime? @map("transaction_date")
+  amount             Decimal
+  counterparty       String?
+  binIin             String?   @map("bin_iin")
+  paymentPurpose     String?   @map("payment_purpose")
+  rawRowJson         String    @map("raw_row_json")
+  searchableText     String    @map("searchable_text")
+  matchedRuleId      Int?      @map("matched_rule_id")
+  detectedPharmacyId Int?      @map("detected_pharmacy_id")
+  targetFieldKey     String?   @map("target_field_key")
+  distributionType   String?   @map("distribution_type")
+  status             String    @default("pending")
+  accountantComment  String?   @map("accountant_comment")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  upload           UploadedFile           @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  matchedRule      TransactionImportRule? @relation(fields: [matchedRuleId], references: [id], onDelete: SetNull)
+  detectedPharmacy Pharmacy?              @relation(fields: [detectedPharmacyId], references: [id], onDelete: SetNull)
+  reportValues     ImportedReportValue[]
+
+  @@index([uploadId])
+  @@index([status])
+  @@map("imported_transactions")
+}
+
+model ImportedReportValue {
+  id                    Int      @id @default(autoincrement())
+  importedTransactionId Int      @map("imported_transaction_id")
+  uploadId              Int      @map("upload_id")
+  pharmacyId            Int?     @map("pharmacy_id")
+  fieldKey              String   @map("field_key")
+  amount                Decimal
+  status                String   @default("pending")
+  distributionType      String   @map("distribution_type")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  importedTransaction ImportedTransaction @relation(fields: [importedTransactionId], references: [id], onDelete: Cascade)
+  upload              UploadedFile        @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  pharmacy            Pharmacy?           @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
+
+  @@index([uploadId])
+  @@index([pharmacyId])
+  @@index([fieldKey])
+  @@index([status])
+  @@map("imported_report_values")
 }

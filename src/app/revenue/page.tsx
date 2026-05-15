@@ -12,6 +12,7 @@ interface RevenueEntry {
   pharmacy: Pharmacy;
   cashRevenue: number;
   terminalRevenue: number;
+  bonusRevenue: number;
   totalRevenue: number;
   additionalExpenses: number;
   expenseItems: ExpenseItem[];
@@ -28,6 +29,7 @@ interface EditState {
   date: string;
   cashRevenue: string;
   terminalRevenue: string;
+  bonusRevenue: string;
   generalComment: string;
   employeeName: string;
   expenseItems: EditExpenseItem[];
@@ -88,6 +90,7 @@ export default function RevenueListPage() {
       date: entry.date.split('T')[0],
       cashRevenue: String(entry.cashRevenue),
       terminalRevenue: String(entry.terminalRevenue),
+      bonusRevenue: String(entry.bonusRevenue ?? 0),
       generalComment: entry.generalComment ?? '',
       employeeName: entry.employeeName,
       expenseItems: entry.expenseItems.length > 0
@@ -147,6 +150,7 @@ export default function RevenueListPage() {
         date: editState.date,
         cashRevenue: editState.cashRevenue || '0',
         terminalRevenue: editState.terminalRevenue || '0',
+        bonusRevenue: editState.bonusRevenue || '0',
         generalComment: editState.generalComment || null,
         employeeName: editState.employeeName,
         expenseItems: editState.expenseItems
@@ -262,6 +266,12 @@ export default function RevenueListPage() {
                 value={editState.terminalRevenue}
                 onChange={(e) => updateField('terminalRevenue', e.target.value)} />
             </div>
+            <div className="col-span-2">
+              <label className="label">Бонусы фарм и зав</label>
+              <input type="number" min="0" step="0.01" className="input max-w-xs"
+                value={editState.bonusRevenue}
+                onChange={(e) => updateField('bonusRevenue', e.target.value)} />
+            </div>
           </div>
 
           {/* Строки расходов */}
@@ -334,6 +344,7 @@ export default function RevenueListPage() {
                   <th className="th">Аптека</th>
                   <th className="th text-right">Наличные</th>
                   <th className="th text-right">Терминал</th>
+                  <th className="th text-right">Бонусы</th>
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
@@ -351,6 +362,9 @@ export default function RevenueListPage() {
                       <td className="td font-medium">{entry.pharmacy.name}</td>
                       <td className="td text-right">{fmt(entry.cashRevenue)}</td>
                       <td className="td text-right">{fmt(entry.terminalRevenue)}</td>
+                      <td className="td text-right text-violet-700">
+                        {entry.bonusRevenue > 0 ? fmt(entry.bonusRevenue) : '—'}
+                      </td>
                       <td className="td text-right font-semibold text-blue-700">
                         {fmt(entry.totalRevenue)}
                       </td>
@@ -383,7 +397,7 @@ export default function RevenueListPage() {
                     {/* Строки расходов под записью */}
                     {entry.expenseItems.length > 0 && (
                       <tr key={`${entry.id}-exp`} className="bg-orange-50">
-                        <td colSpan={8} className="px-4 py-1.5">
+                        <td colSpan={9} className="px-4 py-1.5">
                           <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                             <span className="text-xs font-medium text-orange-700 shrink-0">
                               Расходы:
@@ -404,7 +418,7 @@ export default function RevenueListPage() {
                     {/* Общий комментарий */}
                     {entry.generalComment && (
                       <tr key={`${entry.id}-note`} className="bg-gray-50">
-                        <td colSpan={8} className="px-4 py-1 text-xs text-gray-400">
+                        <td colSpan={9} className="px-4 py-1 text-xs text-gray-400">
                           {entry.generalComment}
                         </td>
                       </tr>
@@ -422,6 +436,12 @@ export default function RevenueListPage() {
               Выручка:{' '}
               <strong className="text-blue-700">
                 {fmt(entries.reduce((s, e) => s + e.totalRevenue, 0))}
+              </strong>
+            </span>
+            <span>
+              Бонусы:{' '}
+              <strong className="text-violet-700">
+                {fmt(entries.reduce((s, e) => s + e.bonusRevenue, 0))}
               </strong>
             </span>
             <span>

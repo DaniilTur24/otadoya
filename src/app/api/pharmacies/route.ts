@@ -9,10 +9,12 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { name } = await request.json();
+  const { name, isActive } = await request.json();
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Название обязательно' }, { status: 400 });
   }
-  const pharmacy = await prisma.pharmacy.create({ data: { name: name.trim() } });
+  const pharmacy = await prisma.pharmacy.create({
+    data: { name: name.trim(), isActive: isActive ?? true },
+  });
   return NextResponse.json(pharmacy, { status: 201 });
 }

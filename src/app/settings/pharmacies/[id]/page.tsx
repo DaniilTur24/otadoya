@@ -7,6 +7,7 @@ import Link from 'next/link';
 interface Pharmacy {
   id: number;
   name: string;
+  isActive: boolean;
   keywords: string;
   coefficient: number;
   terminalRent: number;
@@ -26,6 +27,7 @@ export default function PharmacyEditPage() {
 
   const [form, setForm] = useState({
     name: '',
+    isActive: true,
     keywords: '',
     coefficient: '',
     terminalRent: '',
@@ -42,6 +44,7 @@ export default function PharmacyEditPage() {
         setOriginal(p);
         setForm({
           name:          p.name,
+          isActive:      p.isActive ?? true,
           keywords:      p.keywords ?? '',
           coefficient:   p.coefficient   ? String(p.coefficient)   : '',
           terminalRent:  p.terminalRent  ? String(p.terminalRent)  : '',
@@ -53,7 +56,7 @@ export default function PharmacyEditPage() {
       });
   }, [id]);
 
-  function set(field: string, value: string) {
+  function set(field: string, value: string | boolean) {
     setForm((f) => ({ ...f, [field]: value }));
     setSaved(false);
   }
@@ -69,6 +72,7 @@ export default function PharmacyEditPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name:          form.name.trim(),
+        isActive:      form.isActive,
         keywords:      form.keywords.trim(),
         coefficient:   form.coefficient   ? parseFloat(form.coefficient)   : 0,
         terminalRent:  terminalOn  && form.terminalRent  ? parseFloat(form.terminalRent)  : 0,
@@ -129,10 +133,20 @@ export default function PharmacyEditPage() {
           />
         </div>
 
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-blue-600"
+            checked={form.isActive}
+            onChange={(e) => set('isActive', e.target.checked)}
+          />
+          Активна
+        </label>
+
         {/* Ключевые слова */}
         <div>
           <label className="label">
-            Ключевые слова для авто-привязки аренды
+            Старые ключевые слова для авто-привязки
             <span className="ml-1 text-gray-400 font-normal text-xs">(через запятую)</span>
           </label>
           <input
@@ -143,7 +157,7 @@ export default function PharmacyEditPage() {
             onChange={(e) => set('keywords', e.target.value)}
           />
           <p className="text-xs text-gray-400 mt-1">
-            Если в описании банковской операции встретится одно из этих слов — расход автоматически привяжется к этой аптеке.
+            Для нового банковского импорта используйте страницу «Алиасы аптек».
           </p>
         </div>
 

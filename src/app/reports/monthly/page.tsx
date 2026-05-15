@@ -2,70 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { MONTHLY_EXPENSE_KEYS, MONTHLY_REPORT_ROWS } from '@/lib/monthly-report-fields';
 
 interface Pharmacy { id: number; name: string }
 type DataMap = Record<number, Record<string, number>>;
-
-type RowSource = 'db' | 'empty' | 'calc';
-interface ReportRow {
-  key: string; label: string; source: RowSource;
-  bold?: boolean; section?: boolean; indent?: boolean; decimals?: number;
-}
-
-const EXPENSE_KEYS = [
-  'goodsExpenses','pharmaBonus','pharmaSalary','officeSalary','association','charity',
-  'accountingServices','stationery','utilities','deferredTax','vat','security',
-  'otherExpenses','householdExpenses','advertising','repairs','rentExpenses',
-  'fixedAssets','standardKaspibot','daribar','communications','equipment',
-  'transport','cleaning','bankServices','terminalRent','procedureRent',
-];
-
-const ROWS: ReportRow[] = [
-  { key: '_rev',              label: 'ВЫРУЧКА',                                          section: true, source: 'calc' },
-  { key: 'retailRevenue',     label: 'ВЫРУЧКА розн в аптеке',                           source: 'db',    bold: true },
-  { key: 'kaspiRevenue',      label: 'Выручка Каспи',                                   source: 'empty', indent: true },
-  { key: 'wholesaleRevenue',  label: 'ВЫРУЧКА опт',                                     source: 'calc',  bold: true },
-  { key: 'coefficient',       label: 'коэффициент',                                     source: 'db',    decimals: 2 },
-  { key: 'avgDailyRevenue',   label: 'Среднедневная розн выручка',                      source: 'empty' },
-  { key: 'terminalRent',      label: 'Аренда терминал',                                 source: 'db' },
-  { key: 'procedureRent',     label: 'Процедурная аренда',                              source: 'db' },
-  { key: 'legalEntityProfit', label: 'Прибыль по юрлицам',                             source: 'empty' },
-  { key: '_stock',            label: 'ОСТАТКИ',                                         section: true, source: 'calc' },
-  { key: 'stockRetail',       label: 'Остаток товара на конец месяца по розн ценам',    source: 'empty' },
-  { key: 'stockWholesale',    label: 'Остаток товара на конец месяца по оптовым ценам', source: 'empty' },
-  { key: 'consignment',       label: 'Консигнация',                                     source: 'empty' },
-  { key: 'consignmentOverdue',label: 'из них просрочка',                                source: 'empty', indent: true },
-  { key: '_exp',              label: 'РАСХОДЫ',                                         section: true, source: 'calc' },
-  { key: 'goodsExpenses',     label: 'Расходы на товар',                                source: 'empty' },
-  { key: 'pharmaBonus',       label: 'Бонусы фарм и зав',                              source: 'empty' },
-  { key: 'pharmaSalary',      label: 'Оклады фарм и зав',                              source: 'empty' },
-  { key: 'officeSalary',      label: 'Зарплата офиса',                                  source: 'empty' },
-  { key: 'association',       label: 'Ассоциация',                                      source: 'empty' },
-  { key: 'charity',           label: 'Благотворительность',                             source: 'empty' },
-  { key: 'accountingServices',label: 'Бух.услуги',                                      source: 'empty' },
-  { key: 'stationery',        label: 'Канцелярские и офисные принадлежности',           source: 'empty' },
-  { key: 'utilities',         label: 'Коммунальные расходы',                            source: 'empty' },
-  { key: 'deferredTax',       label: 'Налоги отложенные',                               source: 'empty' },
-  { key: 'vat',               label: 'НДС 5% с наценкой 20%',                          source: 'empty' },
-  { key: 'security',          label: 'Охрана',                                          source: 'empty' },
-  { key: 'otherExpenses',     label: 'Прочие расходы',                                  source: 'db' },
-  { key: 'householdExpenses', label: 'Расходы на хознужды',                             source: 'empty' },
-  { key: 'advertising',       label: 'Расходы на рекламу',                              source: 'empty' },
-  { key: 'repairs',           label: 'Расходы на ремонт',                               source: 'empty' },
-  { key: 'rentExpenses',      label: 'Расходы по арендной плате',                       source: 'db' },
-  { key: 'fixedAssets',       label: 'Расходы по обслуг.ФА',                           source: 'empty' },
-  { key: 'standardKaspibot',  label: 'Стандарт Ни Каспибот',                           source: 'empty' },
-  { key: 'daribar',           label: 'Расходы Дарибар',                                 source: 'empty' },
-  { key: 'communications',    label: 'Расходы по связи, интернет, ОФД, Webkassa',      source: 'empty' },
-  { key: 'equipment',         label: 'Техника, мебель',                                 source: 'empty' },
-  { key: 'transport',         label: 'Транспортные услуги на тер.РК',                  source: 'empty' },
-  { key: 'cleaning',          label: 'Уборка территории',                               source: 'empty' },
-  { key: 'bankServices',      label: 'Услуги банка без НДС',                            source: 'db' },
-  { key: 'totalExpenses',     label: 'ИТОГО РАСХОДЫ',                                  source: 'calc', bold: true },
-  { key: 'netIncome',         label: 'Чистый доход',                                    source: 'calc', bold: true },
-  { key: 'divideBy2',         label: 'Разделить на 2',                                  source: 'empty' },
-  { key: 'directorShare',     label: 'руководителя',                                    source: 'empty' },
-];
 
 const MONTH_NAMES = [
   'Январь','Февраль','Март','Апрель','Май','Июнь',
@@ -174,6 +114,7 @@ export default function MonthlyReportPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [systemData, setSystemData] = useState<DataMap>({});
+  const [totalOnlyData, setTotalOnlyData] = useState<Record<string, number>>({});
   // overrideMap: "pharmacyId:fieldKey" → number
   const [overrideMap, setOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
@@ -185,6 +126,7 @@ export default function MonthlyReportPage() {
     const json = await res.json();
     setPharmacies(json.pharmacies ?? []);
     setSystemData(json.systemData ?? {});
+    setTotalOnlyData(json.totalOnlyData ?? {});
     setOverrideMap(json.overrideMap ?? {});
     setLoading(false);
   }, [year, month]);
@@ -209,7 +151,7 @@ export default function MonthlyReportPage() {
       return 0;
     }
     if (key === 'totalExpenses') {
-      return EXPENSE_KEYS.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0);
+      return MONTHLY_EXPENSE_KEYS.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0);
     }
     if (key === 'netIncome') {
       return getCurrentValue(pharmacyId, 'retailRevenue') - getCurrentValue(pharmacyId, 'totalExpenses');
@@ -219,7 +161,11 @@ export default function MonthlyReportPage() {
 
   function rowTotal(key: string): number {
     if (key.startsWith('_')) return 0;
-    return pharmacies.reduce((s, p) => s + getCurrentValue(p.id, key), 0);
+    const pharmacyTotal = pharmacies.reduce((s, p) => s + getCurrentValue(p.id, key), 0);
+    const totalOnlyExpenses = MONTHLY_EXPENSE_KEYS.reduce((s, expenseKey) => s + (totalOnlyData[expenseKey] ?? 0), 0);
+    if (key === 'totalExpenses') return pharmacyTotal + totalOnlyExpenses;
+    if (key === 'netIncome') return pharmacyTotal - totalOnlyExpenses;
+    return pharmacyTotal + (totalOnlyData[key] ?? 0);
   }
 
   async function handleSave(pharmacyId: number, key: string, value: number) {
@@ -337,7 +283,7 @@ export default function MonthlyReportPage() {
                 </tr>
               </thead>
               <tbody>
-                {ROWS.map((row) => {
+                {MONTHLY_REPORT_ROWS.map((row) => {
                   if (row.section) {
                     return (
                       <tr key={row.key} className="bg-gray-100">
