@@ -69,5 +69,6 @@ export async function POST(request: NextRequest) {
     month:         Number(month),
     fileName:      file.name,
     ...parsed,
+    // retailMethod показывает какой из 4 методов сработал — для отладки
   });
 }
