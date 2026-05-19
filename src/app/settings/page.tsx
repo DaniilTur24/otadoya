@@ -54,6 +54,10 @@ export default function SettingsPage() {
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+        <Link href="/employees" className="card p-4 hover:bg-gray-50">
+          <div className="font-semibold text-gray-900">Сотрудники</div>
+          <div className="text-xs text-gray-500 mt-1">Оклады, смены, расчёт зарплаты за месяц.</div>
+        </Link>
         <Link href="/settings/pharmacy-aliases" className="card p-4 hover:bg-gray-50">
           <div className="font-semibold text-gray-900">Алиасы аптек</div>
           <div className="text-xs text-gray-500 mt-1">ИП, контрагенты, ИИН/БИН и ключевые слова.</div>

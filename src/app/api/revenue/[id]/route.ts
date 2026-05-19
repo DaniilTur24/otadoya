@@ -40,8 +40,8 @@ export async function PUT(
 ) {
   const body = await request.json();
   const {
-    pharmacyId, date, cashRevenue, terminalRevenue, bonusRevenue,
-    expenseItems, generalComment, employeeName,
+    pharmacyId, date, cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue,
+    expenseItems, generalComment, employeeName, employeeId, shiftType,
     bookkeeperComment, status,
   } = body;
 
@@ -51,9 +51,12 @@ export async function PUT(
   if (date) data.date = new Date(date);
   if (cashRevenue != null) data.cashRevenue = String(cashRevenue);
   if (terminalRevenue != null) data.terminalRevenue = String(terminalRevenue);
+  if (kaspiRevenue != null) data.kaspiRevenue = String(kaspiRevenue);
   if (bonusRevenue != null) data.bonusRevenue = String(bonusRevenue);
   if (generalComment !== undefined) data.generalComment = generalComment || null;
   if (employeeName) data.employeeName = employeeName.trim();
+  if (employeeId !== undefined) data.employeeId = employeeId ? Number(employeeId) : null;
+  if (shiftType !== undefined) data.shiftType = shiftType || null;
   if (bookkeeperComment !== undefined) data.bookkeeperComment = bookkeeperComment || null;
   if (status) data.status = status;
 
@@ -81,9 +84,10 @@ export async function PUT(
 
       if (filled.length > 0) {
         await tx.dailyExpenseItem.createMany({
-          data: filled.map((i: { amount: string; comment?: string }) => ({
+          data: filled.map((i: { amount: string; category?: string; comment?: string }) => ({
             entryId: Number(params.id),
             amount: i.amount,
+            category: i.category || null,
             comment: i.comment || null,
           })),
         });

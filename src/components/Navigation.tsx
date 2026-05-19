@@ -7,6 +7,7 @@ const links = [
   { href: '/', label: 'Главная' },
   { href: '/revenue/new', label: '+ Добавить выручку' },
   { href: '/revenue', label: 'Записи выручки' },
+  { href: '/employees', label: 'Сотрудники' },
   { href: '/files', label: 'Банк / Импорт' },
   { href: '/reports', label: 'Отчёты' },
   { href: '/reports/monthly', label: 'Закрытие месяца' },

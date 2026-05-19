@@ -2,9 +2,22 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
+import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
+
+const EXPENSE_CATEGORY_OPTIONS = MONTHLY_REPORT_ROWS.filter(
+  (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
+).map((row) => ({ key: row.key, label: row.label }));
 
 interface Pharmacy { id: number; name: string }
-interface ExpenseItem { id: number; amount: number; comment: string | null }
+interface Employee { id: number; name: string }
+
+interface ExpenseItem {
+  id: number;
+  amount: number;
+  category: string | null;
+  comment: string | null;
+}
 
 interface RevenueEntry {
   id: number;
@@ -12,31 +25,34 @@ interface RevenueEntry {
   pharmacy: Pharmacy;
   cashRevenue: number;
   terminalRevenue: number;
-  bonusRevenue: number;
+  kaspiRevenue: number;
   totalRevenue: number;
   additionalExpenses: number;
   expenseItems: ExpenseItem[];
-  expenseComment: string | null;
   generalComment: string | null;
+  employeeId: number | null;
   employeeName: string;
+  shiftType: string | null;
   status: string;
 }
 
-interface EditExpenseItem { id: number; amount: string; comment: string }
+interface EditExpenseItem { id: number; amount: string; category: string; comment: string }
 
 interface EditState {
   pharmacyId: string;
   date: string;
   cashRevenue: string;
   terminalRevenue: string;
-  bonusRevenue: string;
+  kaspiRevenue: string;
   generalComment: string;
+  employeeId: string;
   employeeName: string;
+  shiftType: string;
   expenseItems: EditExpenseItem[];
 }
 
 let nextItemId = 1;
-function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', comment: '' }; }
+function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', category: '', comment: '' }; }
 
 function fmt(n: number) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -45,24 +61,40 @@ function fmtDate(s: string) {
   return new Date(s).toLocaleDateString('ru-RU');
 }
 
+function pharmaBonusSum(items: ExpenseItem[]) {
+  return items.filter((i) => i.category === 'pharmaBonus').reduce((s, i) => s + i.amount, 0);
+}
+// Статьи с rowType 'income' — доходные, прибавляются к выручке
+function incomeItemsSum(items: ExpenseItem[]) {
+  return items
+    .filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) === 'income')
+    .reduce((s, i) => s + i.amount, 0);
+}
+// Остальные статьи (expense / neutral) — расходы
+function expenseItemsSum(items: ExpenseItem[]) {
+  return items
+    .filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) !== 'income')
+    .reduce((s, i) => s + i.amount, 0);
+}
+
 export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
-  // Фильтры
   const [filterPharmacy, setFilterPharmacy] = useState('');
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
 
-  // Редактирование
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
+    fetch('/api/employees?isActive=true').then((r) => r.json()).then(setEmployees);
   }, []);
 
   const load = useCallback(async () => {
@@ -71,11 +103,8 @@ export default function RevenueListPage() {
     if (filterPharmacy) p.set('pharmacyId', filterPharmacy);
     const res = await fetch(`/api/revenue?${p}`);
     let data: RevenueEntry[] = await res.json();
-
-    // Фильтрация по дате на клиенте (проще, чем доп. API-параметры)
     if (filterFrom) data = data.filter((e) => e.date >= filterFrom);
     if (filterTo)   data = data.filter((e) => e.date <= filterTo + 'T23:59:59');
-
     setEntries(data);
     setLoading(false);
   }, [filterPharmacy, filterFrom, filterTo]);
@@ -90,43 +119,45 @@ export default function RevenueListPage() {
       date: entry.date.split('T')[0],
       cashRevenue: String(entry.cashRevenue),
       terminalRevenue: String(entry.terminalRevenue),
-      bonusRevenue: String(entry.bonusRevenue ?? 0),
+      kaspiRevenue: String(entry.kaspiRevenue ?? 0),
       generalComment: entry.generalComment ?? '',
+      employeeId: entry.employeeId ? String(entry.employeeId) : '',
       employeeName: entry.employeeName,
+      shiftType: entry.shiftType ?? '',
       expenseItems: entry.expenseItems.length > 0
         ? entry.expenseItems.map((i) => ({
             id: nextItemId++,
             amount: String(i.amount),
+            category: i.category ?? '',
             comment: i.comment ?? '',
           }))
         : [],
     });
   }
 
-  function cancelEdit() {
-    setEditingId(null);
-    setEditState(null);
-    setSaveError('');
-  }
+  function cancelEdit() { setEditingId(null); setEditState(null); setSaveError(''); }
 
   function updateField(field: keyof Omit<EditState, 'expenseItems'>, value: string) {
-    setEditState((s) => s ? { ...s, [field]: value } : s);
+    setEditState((s) => {
+      if (!s) return s;
+      const updated = { ...s, [field]: value };
+      if (field === 'employeeId') {
+        const emp = employees.find((e) => e.id === Number(value));
+        updated.employeeName = emp ? emp.name : s.employeeName;
+      }
+      return updated;
+    });
   }
 
   function addExpenseItem() {
     setEditState((s) => s ? { ...s, expenseItems: [...s.expenseItems, newItem()] } : s);
   }
-
   function removeExpenseItem(id: number) {
     setEditState((s) => s ? { ...s, expenseItems: s.expenseItems.filter((i) => i.id !== id) } : s);
   }
-
-  function updateExpenseItem(id: number, field: 'amount' | 'comment', value: string) {
+  function updateExpenseItem(id: number, field: 'amount' | 'category' | 'comment', value: string) {
     setEditState((s) =>
-      s ? {
-        ...s,
-        expenseItems: s.expenseItems.map((i) => i.id === id ? { ...i, [field]: value } : i),
-      } : s
+      s ? { ...s, expenseItems: s.expenseItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
     );
   }
 
@@ -142,6 +173,21 @@ export default function RevenueListPage() {
     setSaving(true);
     setSaveError('');
 
+    const validItems = editState.expenseItems.filter((i) => parseFloat(i.amount) > 0);
+    const missingCategory = validItems.find((i) => !i.category);
+    if (missingCategory) {
+      setSaveError('Выберите категорию расхода для каждой строки');
+      setSaving(false);
+      return;
+    }
+
+    const employeeName = editState.employeeName.trim();
+    if (!employeeName) {
+      setSaveError('Выберите сотрудника из списка');
+      setSaving(false);
+      return;
+    }
+
     const res = await fetch(`/api/revenue/${editingId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -150,29 +196,34 @@ export default function RevenueListPage() {
         date: editState.date,
         cashRevenue: editState.cashRevenue || '0',
         terminalRevenue: editState.terminalRevenue || '0',
-        bonusRevenue: editState.bonusRevenue || '0',
+        kaspiRevenue: editState.kaspiRevenue || '0',
         generalComment: editState.generalComment || null,
-        employeeName: editState.employeeName,
-        expenseItems: editState.expenseItems
-          .filter((i) => parseFloat(i.amount) > 0)
-          .map((i) => ({ amount: i.amount, comment: i.comment || null })),
+        employeeId: editState.employeeId ? Number(editState.employeeId) : null,
+        employeeName,
+        shiftType: editState.shiftType || null,
+        expenseItems: validItems.map((i) => ({
+          amount: i.amount,
+          category: i.category || null,
+          comment: i.comment || null,
+        })),
       }),
     });
 
-    if (res.ok) {
-      setEditingId(null);
-      setEditState(null);
-      load();
-    } else {
-      const d = await res.json();
-      setSaveError(d.error || 'Ошибка сохранения');
-    }
+    if (res.ok) { cancelEdit(); load(); }
+    else { const d = await res.json(); setSaveError(d.error || 'Ошибка сохранения'); }
     setSaving(false);
   }
 
   const totalExpenses = editState
     ? editState.expenseItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
     : 0;
+
+  const totalRevenue =
+    editState
+      ? (parseFloat(editState.cashRevenue) || 0) +
+        (parseFloat(editState.terminalRevenue) || 0) +
+        (parseFloat(editState.kaspiRevenue) || 0)
+      : 0;
 
   return (
     <div>
@@ -231,8 +282,9 @@ export default function RevenueListPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-            <div className="col-span-2">
+          {/* Аптека и дата */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+            <div className="col-span-2 sm:col-span-1">
               <label className="label">Аптека</label>
               <select className="input" value={editState.pharmacyId}
                 onChange={(e) => updateField('pharmacyId', e.target.value)}>
@@ -246,65 +298,133 @@ export default function RevenueListPage() {
               <input type="date" className="input" value={editState.date}
                 onChange={(e) => updateField('date', e.target.value)} />
             </div>
+          </div>
+
+          {/* Сотрудник и смена */}
+          <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className="label">Сотрудник</label>
-              <input type="text" className="input" value={editState.employeeName}
-                onChange={(e) => updateField('employeeName', e.target.value)} />
+              {employees.length > 0 ? (
+                <>
+                  <select className="input" value={editState.employeeId}
+                    onChange={(e) => updateField('employeeId', e.target.value)} required>
+                    <option value="">— выберите из списка —</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>{emp.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Нет нужного?{' '}
+                    <a href="/employees" target="_blank" className="text-blue-500 hover:underline">
+                      Добавить сотрудника
+                    </a>
+                  </p>
+                </>
+              ) : (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Список пуст.{' '}
+                  <a href="/employees" target="_blank" className="font-medium underline">
+                    Добавить сотрудников
+                  </a>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="label">Тип смены</label>
+              <select className="input" value={editState.shiftType}
+                onChange={(e) => updateField('shiftType', e.target.value)}>
+                <option value="">— не указан —</option>
+                {SHIFT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              {!editState.shiftType && (
+                <p className="mt-1 text-xs text-amber-600">Без типа смены зарплата не рассчитается</p>
+              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          {/* Выручка */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
             <div>
-              <label className="label">Выручка наличными</label>
+              <label className="label">Наличные</label>
               <input type="number" min="0" step="0.01" className="input"
                 value={editState.cashRevenue}
                 onChange={(e) => updateField('cashRevenue', e.target.value)} />
             </div>
             <div>
-              <label className="label">Выручка по терминалу</label>
+              <label className="label">Терминал</label>
               <input type="number" min="0" step="0.01" className="input"
                 value={editState.terminalRevenue}
                 onChange={(e) => updateField('terminalRevenue', e.target.value)} />
             </div>
-            <div className="col-span-2">
-              <label className="label">Бонусы фарм и зав</label>
-              <input type="number" min="0" step="0.01" className="input max-w-xs"
-                value={editState.bonusRevenue}
-                onChange={(e) => updateField('bonusRevenue', e.target.value)} />
+            <div>
+              <label className="label">
+                Каспи
+                <span className="ml-1 text-gray-400 font-normal text-xs">— входит в общую</span>
+              </label>
+              <input type="number" min="0" step="0.01" className="input"
+                value={editState.kaspiRevenue}
+                onChange={(e) => updateField('kaspiRevenue', e.target.value)} />
             </div>
           </div>
 
-          {/* Строки расходов */}
+          {totalRevenue > 0 && (
+            <div className="bg-blue-50 rounded-md px-4 py-2 text-sm text-blue-800 mb-4">
+              Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
+            </div>
+          )}
+
+          {/* Дополнительные статьи */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Дополнительные расходы</label>
+              <label className="label mb-0">Дополнительные статьи</label>
               <button type="button" onClick={addExpenseItem}
                 className="text-sm text-blue-600 hover:text-blue-800 font-medium">
-                + Добавить расход
+                + Добавить строку
               </button>
             </div>
             {editState.expenseItems.length === 0 ? (
-              <p className="text-sm text-gray-400 italic">Нет расходов</p>
+              <p className="text-sm text-gray-400 italic">Нет записей</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
+                <div className="grid gap-2 text-xs text-gray-400 font-medium px-5"
+                  style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
+                  <span></span><span>Сумма</span><span>Статья *</span><span>Примечание</span><span></span>
+                </div>
                 {editState.expenseItems.map((item, idx) => (
-                  <div key={item.id} className="flex gap-2 items-center">
-                    <span className="text-xs text-gray-400 w-4 shrink-0">{idx + 1}.</span>
-                    <input type="number" min="0" step="0.01" placeholder="Сумма"
-                      className="input w-32 shrink-0" value={item.amount}
-                      onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)} />
-                    <input type="text" placeholder="Комментарий"
-                      className="input flex-1" value={item.comment}
-                      onChange={(e) => updateExpenseItem(item.id, 'comment', e.target.value)} />
-                    <button type="button" onClick={() => removeExpenseItem(item.id)}
-                      className="text-gray-300 hover:text-red-500 text-xl leading-none transition-colors">
-                      ×
-                    </button>
+                  <div key={item.id}>
+                    <div className="grid gap-2 items-start"
+                      style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
+                      <span className="text-xs text-gray-400 mt-2.5 text-right pr-1">{idx + 1}.</span>
+                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                        className="input" value={item.amount}
+                        onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)} />
+                      <select className="input" value={item.category} required
+                        onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}>
+                        <option value="">— статья —</option>
+                        {EXPENSE_CATEGORY_OPTIONS.map((opt) => (
+                          <option key={opt.key} value={opt.key}>{opt.label}</option>
+                        ))}
+                      </select>
+                      <input type="text" placeholder="необязательно"
+                        className="input" value={item.comment}
+                        onChange={(e) => updateExpenseItem(item.id, 'comment', e.target.value)} />
+                      <button type="button" onClick={() => removeExpenseItem(item.id)}
+                        className="mt-2 text-gray-300 hover:text-red-500 transition-colors text-lg leading-none">
+                        ×
+                      </button>
+                    </div>
+                    {item.category === 'pharmaBonus' && (
+                      <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mt-1 ml-5">
+                        Эта сумма пойдёт в расходы и будет учтена в зарплате сотрудника за месяц.
+                      </p>
+                    )}
                   </div>
                 ))}
                 {editState.expenseItems.length > 1 && (
-                  <p className="text-sm text-gray-600 pl-6">
-                    Итого расходов: <strong>{totalExpenses.toLocaleString('ru-RU')}</strong>
+                  <p className="text-sm text-gray-600 pl-5 pt-1">
+                    Итого: <strong>{totalExpenses.toLocaleString('ru-RU')}</strong>
                   </p>
                 )}
               </div>
@@ -352,105 +472,150 @@ export default function RevenueListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {entries.map((entry) => (
-                  <>
-                    <tr
-                      key={entry.id}
-                      className={`${editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                    >
-                      <td className="td">{fmtDate(entry.date)}</td>
-                      <td className="td font-medium">{entry.pharmacy.name}</td>
-                      <td className="td text-right">{fmt(entry.cashRevenue)}</td>
-                      <td className="td text-right">{fmt(entry.terminalRevenue)}</td>
-                      <td className="td text-right text-violet-700">
-                        {entry.bonusRevenue > 0 ? fmt(entry.bonusRevenue) : '—'}
-                      </td>
-                      <td className="td text-right font-semibold text-blue-700">
-                        {fmt(entry.totalRevenue)}
-                      </td>
-                      <td className="td text-right text-red-600">
-                        {entry.additionalExpenses > 0 ? fmt(entry.additionalExpenses) : '—'}
-                      </td>
-                      <td className="td text-gray-500">{entry.employeeName}</td>
-                      <td className="td">
-                        {editingId === entry.id ? (
-                          <span className="text-xs text-blue-600 font-medium">Редактируется</span>
-                        ) : (
-                          <div className="flex gap-1">
-                            <button
-                              className="btn-secondary text-xs"
-                              onClick={() => startEdit(entry)}
-                            >
-                              Изменить
-                            </button>
-                            <button
-                              className="btn-danger text-xs"
-                              onClick={() => deleteEntry(entry.id)}
-                            >
-                              Удалить
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-
-                    {/* Строки расходов под записью */}
-                    {entry.expenseItems.length > 0 && (
-                      <tr key={`${entry.id}-exp`} className="bg-orange-50">
-                        <td colSpan={9} className="px-4 py-1.5">
-                          <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                            <span className="text-xs font-medium text-orange-700 shrink-0">
-                              Расходы:
+                {entries.map((entry) => {
+                  const bonuses  = pharmaBonusSum(entry.expenseItems);
+                  const incomes  = incomeItemsSum(entry.expenseItems);
+                  const expenses = expenseItemsSum(entry.expenseItems);
+                  const bonusItems   = entry.expenseItems.filter((i) => i.category === 'pharmaBonus');
+                  const incomeItems  = entry.expenseItems.filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) === 'income');
+                  const expenseItems = entry.expenseItems.filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) !== 'income');
+                  return (
+                    <>
+                      <tr key={entry.id}
+                        className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                        <td className="td">{fmtDate(entry.date)}</td>
+                        <td className="td font-medium">{entry.pharmacy.name}</td>
+                        <td className="td text-right">{fmt(entry.cashRevenue)}</td>
+                        <td className="td text-right">{fmt(entry.terminalRevenue)}</td>
+                        <td className="td text-right text-violet-700">
+                          {bonuses > 0 ? fmt(bonuses) : '—'}
+                        </td>
+                        <td className="td text-right font-semibold text-blue-700">
+                          {fmt(entry.totalRevenue)}
+                        </td>
+                        <td className="td text-right text-red-600">
+                          {expenses > 0 ? fmt(expenses) : '—'}
+                        </td>
+                        <td className="td text-gray-500">
+                          <div>{entry.employeeName}</div>
+                          {entry.shiftType && (
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              entry.shiftType === 'full_day'
+                                ? 'bg-purple-50 text-purple-700'
+                                : 'bg-blue-50 text-blue-700'
+                            }`}>
+                              {SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType}
                             </span>
-                            {entry.expenseItems.map((item) => (
-                              <span key={item.id} className="text-xs text-orange-800">
-                                <strong>{fmt(item.amount)}</strong>
-                                {item.comment && (
-                                  <span className="text-orange-600"> — {item.comment}</span>
-                                )}
-                              </span>
-                            ))}
-                          </div>
+                          )}
+                        </td>
+                        <td className="td">
+                          {editingId === entry.id ? (
+                            <span className="text-xs text-blue-600 font-medium">Редактируется</span>
+                          ) : (
+                            <div className="flex gap-1">
+                              <button className="btn-secondary text-xs" onClick={() => startEdit(entry)}>
+                                Изменить
+                              </button>
+                              <button className="btn-danger text-xs" onClick={() => deleteEntry(entry.id)}>
+                                Удалить
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
-                    )}
 
-                    {/* Общий комментарий */}
-                    {entry.generalComment && (
-                      <tr key={`${entry.id}-note`} className="bg-gray-50">
-                        <td colSpan={9} className="px-4 py-1 text-xs text-gray-400">
-                          {entry.generalComment}
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))}
+                      {/* Доходные статьи под записью */}
+                      {incomeItems.length > 0 && (
+                        <tr key={`${entry.id}-inc`} className="bg-green-50">
+                          <td colSpan={9} className="px-4 py-1.5">
+                            <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                              <span className="text-xs font-medium text-green-700 shrink-0">Доходы:</span>
+                              {incomeItems.map((item) => (
+                                <span key={item.id} className="text-xs text-green-800">
+                                  <strong>{fmt(item.amount)}</strong>
+                                  {item.comment && <span className="text-green-600"> — {item.comment}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+
+                      {/* Бонусы под записью */}
+                      {bonusItems.length > 0 && (
+                        <tr key={`${entry.id}-bonus`} className="bg-violet-50">
+                          <td colSpan={9} className="px-4 py-1.5">
+                            <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                              <span className="text-xs font-medium text-violet-700 shrink-0">Бонусы:</span>
+                              {bonusItems.map((item) => (
+                                <span key={item.id} className="text-xs text-violet-800">
+                                  <strong>{fmt(item.amount)}</strong>
+                                  {item.comment && <span className="text-violet-600"> — {item.comment}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+
+                      {/* Расходы под записью */}
+                      {expenseItems.length > 0 && (
+                        <tr key={`${entry.id}-exp`} className="bg-orange-50">
+                          <td colSpan={9} className="px-4 py-1.5">
+                            <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                              <span className="text-xs font-medium text-orange-700 shrink-0">Расходы:</span>
+                              {expenseItems.map((item) => (
+                                <span key={item.id} className="text-xs text-orange-800">
+                                  <strong>{fmt(item.amount)}</strong>
+                                  {item.comment && <span className="text-orange-600"> — {item.comment}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+
+                      {/* Общий комментарий */}
+                      {entry.generalComment && (
+                        <tr key={`${entry.id}-note`} className="bg-gray-50">
+                          <td colSpan={9} className="px-4 py-1 text-xs text-gray-400">
+                            {entry.generalComment}
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {/* Итого по отфильтрованным записям */}
-          <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex gap-6 text-sm">
-            <span className="text-gray-500">Итого по выбранным записям:</span>
-            <span>
-              Выручка:{' '}
-              <strong className="text-blue-700">
-                {fmt(entries.reduce((s, e) => s + e.totalRevenue, 0))}
-              </strong>
-            </span>
-            <span>
-              Бонусы:{' '}
-              <strong className="text-violet-700">
-                {fmt(entries.reduce((s, e) => s + e.bonusRevenue, 0))}
-              </strong>
-            </span>
-            <span>
-              Расходы:{' '}
-              <strong className="text-red-600">
-                {fmt(entries.reduce((s, e) => s + e.additionalExpenses, 0))}
-              </strong>
-            </span>
-          </div>
+          {/* Итого */}
+          {(() => {
+            const totalRevenue  = entries.reduce((s, e) => s + e.totalRevenue, 0);
+            const totalIncomes  = entries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
+            const totalBonuses  = entries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
+            const totalExpenses = entries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
+            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses;
+            return (
+              <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-6 text-sm">
+                <span className="text-gray-500">Итого по выбранным записям:</span>
+                <span>Выручка: <strong className="text-blue-700">{fmt(totalRevenue)}</strong></span>
+                {totalIncomes > 0 && (
+                  <span>Доходы: <strong className="text-green-700">+{fmt(totalIncomes)}</strong></span>
+                )}
+                {totalBonuses > 0 && (
+                  <span>Бонусы: <strong className="text-violet-700">{fmt(totalBonuses)}</strong></span>
+                )}
+                {totalExpenses > 0 && (
+                  <span>Расходы: <strong className="text-red-600">{fmt(totalExpenses)}</strong></span>
+                )}
+                <span className="border-l border-gray-300 pl-6">
+                  Итого: <strong className={total >= 0 ? 'text-gray-900' : 'text-red-700'}>{fmt(total)}</strong>
+                </span>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

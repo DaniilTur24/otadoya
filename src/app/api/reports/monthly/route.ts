@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   const dateFrom = new Date(year, month - 1, 1);
   const dateTo   = new Date(year, month, 0, 23, 59, 59, 999);
 
-  const [pharmacies, revenueEntries, expenseEntries, importedValues, overrides, pdfReports] = await Promise.all([
+  const [pharmacies, revenueEntries, expenseEntries, importedValues, overrides, pdfReports, shiftEntries] = await Promise.all([
     prisma.pharmacy.findMany({ orderBy: { name: 'asc' } }),
     prisma.dailyRevenueEntry.findMany({
       where: { status: 'approved', date: { gte: dateFrom, lte: dateTo } },
@@ -33,6 +33,16 @@ export async function GET(request: NextRequest) {
     }),
     prisma.monthlyReportOverride.findMany({ where: { year, month } }),
     prisma.pharmacyPdfReport.findMany({ where: { year, month, status: 'confirmed' } }),
+    // Записи с привязанным сотрудником и типом смены — для расчёта окладной части
+    prisma.dailyRevenueEntry.findMany({
+      where: {
+        status: 'approved',
+        date: { gte: dateFrom, lte: dateTo },
+        employeeId: { not: null },
+        shiftType: { in: ['day', 'full_day'] },
+      },
+      include: { employee: { select: { baseSalary: true } } },
+    }),
   ]);
 
   // Системные значения по аптекам
@@ -42,7 +52,7 @@ export async function GET(request: NextRequest) {
   for (const p of pharmacies) {
     systemData[p.id] = {
       retailRevenue: 0, kaspiRevenue: 0, wholesaleRevenue: 0, coefficient: Number(p.coefficient ?? 0),
-      avgDailyRevenue: 0, terminalRent: Number(p.terminalRent ?? 0), procedureRent: Number(p.procedureRent ?? 0), legalEntityProfit: 0,
+      avgDailyRevenue: 0, terminalRent: 0, procedureRent: 0, legalEntityProfit: 0,
       stockRetail: 0, stockWholesale: 0, consignment: 0, consignmentOverdue: 0,
       goodsExpenses: 0, pharmaBonus: 0, pharmaSalary: 0, officeSalary: 0,
       association: 0, charity: 0, accountingServices: 0, stationery: 0,
@@ -56,9 +66,29 @@ export async function GET(request: NextRequest) {
 
   for (const e of revenueEntries) {
     if (!systemData[e.pharmacyId]) continue;
-    systemData[e.pharmacyId].retailRevenue += Number(e.cashRevenue) + Number(e.terminalRevenue);
-    systemData[e.pharmacyId].pharmaBonus   += Number((e as unknown as Record<string, unknown>).bonusRevenue ?? 0);
-    systemData[e.pharmacyId].otherExpenses += Number(e.additionalExpenses);
+    const kaspi = Number((e as unknown as Record<string, unknown>).kaspiRevenue ?? 0);
+    systemData[e.pharmacyId].retailRevenue += Number(e.cashRevenue) + Number(e.terminalRevenue) + kaspi;
+    systemData[e.pharmacyId].kaspiRevenue  += kaspi;
+
+    // Расходы распределяем по выбранной категории; старые записи без категории → otherExpenses
+    for (const item of e.expenseItems) {
+      const cat = (item as unknown as Record<string, unknown>).category as string | null;
+      const amt = Number(item.amount);
+      if (cat && cat in systemData[e.pharmacyId]) {
+        systemData[e.pharmacyId][cat] += amt;
+      } else {
+        systemData[e.pharmacyId].otherExpenses += amt;
+      }
+    }
+  }
+
+  // Оклады сотрудников по сменам (без бонусов — они уже в pharmaBonus через expenseItems)
+  // pharmaSalary = baseSalary/15 * дневных смен + baseSalary/10 * суточных смен
+  for (const e of shiftEntries) {
+    if (!e.employee || !systemData[e.pharmacyId]) continue;
+    const base = Number(e.employee.baseSalary);
+    if (e.shiftType === 'day')      systemData[e.pharmacyId].pharmaSalary += base / 15;
+    else if (e.shiftType === 'full_day') systemData[e.pharmacyId].pharmaSalary += base / 10;
   }
 
   // Считаем оптовую выручку: розничная / коэффициент

@@ -48,6 +48,19 @@ model PharmacyAlias {
   @@map("pharmacy_aliases")
 }
 
+model Employee {
+  id         Int      @id @default(autoincrement())
+  name       String
+  baseSalary Decimal  @default(0) @map("base_salary")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  revenueEntries DailyRevenueEntry[]
+
+  @@map("employees")
+}
+
 model DailyRevenueEntry {
   id                 Int      @id @default(autoincrement())
   pharmacyId         Int      @map("pharmacy_id")
@@ -55,11 +68,16 @@ model DailyRevenueEntry {
   // Decimal хранится как TEXT в SQLite для точности; в PostgreSQL — настоящий DECIMAL
   cashRevenue        Decimal  @map("cash_revenue")
   terminalRevenue    Decimal  @map("terminal_revenue")
+  kaspiRevenue       Decimal  @default(0) @map("kaspi_revenue")
   bonusRevenue       Decimal  @default(0) @map("bonus_revenue")
   additionalExpenses Decimal  @default(0) @map("additional_expenses")
   expenseComment     String?  @map("expense_comment")
   generalComment     String?  @map("general_comment")
   employeeName       String   @map("employee_name")
+  // FK к сотруднику (опционально — для записей до внедрения системы сотрудников)
+  employeeId         Int?     @map("employee_id")
+  // Тип смены: 'day' (дневная) | 'full_day' (суточная)
+  shiftType          String?  @map("shift_type")
   // Статусы: pending | approved | rejected
   status             String   @default("pending")
   bookkeeperComment  String?  @map("bookkeeper_comment")
@@ -67,17 +85,20 @@ model DailyRevenueEntry {
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   pharmacy     Pharmacy           @relation(fields: [pharmacyId], references: [id])
+  employee     Employee?          @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   expenseItems DailyExpenseItem[]
 
+  @@index([employeeId])
   @@map("daily_revenue_entries")
 }
 
 // Детализация дополнительных расходов по каждой записи выручки
 model DailyExpenseItem {
-  id      Int     @id @default(autoincrement())
-  entryId Int     @map("entry_id")
-  amount  Decimal
-  comment String?
+  id       Int     @id @default(autoincrement())
+  entryId  Int     @map("entry_id")
+  amount   Decimal
+  category String? // ключ из MONTHLY_EXPENSE_KEYS, например 'repairs', 'cleaning'
+  comment  String?
 
   entry DailyRevenueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
@@ -92,8 +113,8 @@ model UploadedFile {
   month        Int?
   year         Int?
   uploadedAt   DateTime @default(now()) @map("uploaded_at")
-  // Опционально: привязать файл к конкретной аптеке
   pharmacyId   Int?     @map("pharmacy_id")
+  fileHash     String?  @map("file_hash")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -246,4 +267,13 @@ model ImportedReportValue {
   @@index([fieldKey])
   @@index([status])
   @@map("imported_report_values")
+}
+
+// Тип строки в закрытии месяца: доход / расход / нейтрально
+model MonthlyFieldConfig {
+  fieldKey  String   @id @map("field_key")
+  rowType   String   @map("row_type") // income | expense | neutral
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("monthly_field_configs")
 }
