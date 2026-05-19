@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
-import { MONTHLY_EXPENSE_KEYS, MONTHLY_REPORT_ROWS } from '@/lib/monthly-report-fields';
+import { MONTHLY_REPORT_ROWS, MonthlyReportRow, RowType } from '@/lib/monthly-report-fields';
 
 interface Pharmacy { id: number; name: string }
 type DataMap = Record<number, Record<string, number>>;
@@ -17,17 +17,18 @@ function fmtN(n: number, decimals = 0): string {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-// ─── Компонент редактируемой ячейки ────────────────────────────────────────
+// ─── Редактируемая ячейка ──────────────────────────────────────────────────
 
 function Cell({
   pharmacyId, fieldKey, systemValue, overrideValue,
-  onSave, onReset, decimals = 0,
+  onSave, onReset, decimals = 0, rowType,
 }: {
   pharmacyId: number; fieldKey: string;
   systemValue: number; overrideValue: number | undefined;
   onSave: (pharmacyId: number, key: string, val: number) => Promise<void>;
   onReset: (pharmacyId: number, key: string) => Promise<void>;
   decimals?: number;
+  rowType?: RowType;
 }) {
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
@@ -71,19 +72,21 @@ function Cell({
     );
   }
 
+  let valueColor = '';
+  if (isOverridden) {
+    valueColor = 'text-amber-700 font-medium';
+  } else if (displayValue !== 0) {
+    if (rowType === 'income') valueColor = 'text-green-700';
+    else if (rowType === 'expense') valueColor = 'text-red-600';
+  }
+
   return (
     <td
       className={`px-2 py-1.5 text-right tabular-nums group cursor-pointer select-none ${
-        isOverridden
-          ? 'bg-yellow-50'
-          : displayValue === 0
-          ? 'text-gray-200'
-          : ''
-      } ${
-        displayValue < 0 ? 'text-red-600 font-medium' : ''
+        isOverridden ? 'bg-yellow-50' : displayValue === 0 ? 'text-gray-200' : ''
       }`}
       onClick={startEdit}
-      title={isOverridden ? `Изменено вручную. Системное значение: ${fmtN(systemValue, decimals) || '0'}` : 'Нажмите для редактирования'}
+      title={isOverridden ? `Изменено вручную. Системное: ${fmtN(systemValue, decimals) || '0'}` : 'Нажмите для редактирования'}
     >
       <div className="flex items-center justify-end gap-1">
         {isOverridden && (
@@ -95,18 +98,18 @@ function Cell({
             ↩
           </button>
         )}
-        <span className={isOverridden ? 'text-amber-700 font-medium' : ''}>
+        <span className={valueColor}>
           {displayValue === 0 ? '—' : fmtN(displayValue, decimals)}
         </span>
         {isOverridden && (
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Изменено вручную" />
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
         )}
       </div>
     </td>
   );
 }
 
-// ─── Главная страница ───────────────────────────────────────────────────────
+// ─── Главная страница ──────────────────────────────────────────────────────
 
 export default function MonthlyReportPage() {
   const now = new Date();
@@ -115,10 +118,34 @@ export default function MonthlyReportPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [systemData, setSystemData] = useState<DataMap>({});
   const [totalOnlyData, setTotalOnlyData] = useState<Record<string, number>>({});
-  // overrideMap: "pharmacyId:fieldKey" → number
   const [overrideMap, setOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Конфиги типов полей из БД: fieldKey → rowType
+  const [fieldConfigs, setFieldConfigs] = useState<Record<string, string>>({});
+  const [configMode, setConfigMode] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  // Строки с применёнными типами из БД (перекрывают defaults)
+  const effectiveRows = useMemo<MonthlyReportRow[]>(
+    () =>
+      MONTHLY_REPORT_ROWS.map((row) => ({
+        ...row,
+        rowType: (fieldConfigs[row.key] as RowType | undefined) ?? row.rowType,
+      })),
+    [fieldConfigs]
+  );
+
+  useEffect(() => {
+    fetch('/api/monthly-field-configs')
+      .then((r) => r.json())
+      .then((configs: { fieldKey: string; rowType: string }[]) => {
+        const map: Record<string, string> = {};
+        for (const c of configs) map[c.fieldKey] = c.rowType;
+        setFieldConfigs(map);
+      });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -151,10 +178,16 @@ export default function MonthlyReportPage() {
       return 0;
     }
     if (key === 'totalExpenses') {
-      return MONTHLY_EXPENSE_KEYS.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0);
+      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
+      return expKeys.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0);
     }
     if (key === 'netIncome') {
-      return getCurrentValue(pharmacyId, 'retailRevenue') - getCurrentValue(pharmacyId, 'totalExpenses');
+      const incKeys = effectiveRows.filter((r) => r.rowType === 'income' && !r.section).map((r) => r.key);
+      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
+      return (
+        incKeys.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0) -
+        expKeys.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0)
+      );
     }
     return getSystemValue(pharmacyId, key);
   }
@@ -162,9 +195,20 @@ export default function MonthlyReportPage() {
   function rowTotal(key: string): number {
     if (key.startsWith('_')) return 0;
     const pharmacyTotal = pharmacies.reduce((s, p) => s + getCurrentValue(p.id, key), 0);
-    const totalOnlyExpenses = MONTHLY_EXPENSE_KEYS.reduce((s, expenseKey) => s + (totalOnlyData[expenseKey] ?? 0), 0);
-    if (key === 'totalExpenses') return pharmacyTotal + totalOnlyExpenses;
-    if (key === 'netIncome') return pharmacyTotal - totalOnlyExpenses;
+
+    if (key === 'totalExpenses') {
+      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
+      const totalOnlyExp = expKeys.reduce((s, k) => s + (totalOnlyData[k] ?? 0), 0);
+      return pharmacyTotal + totalOnlyExp;
+    }
+    if (key === 'netIncome') {
+      const incKeys = effectiveRows.filter((r) => r.rowType === 'income' && !r.section).map((r) => r.key);
+      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
+      const adj =
+        incKeys.reduce((s, k) => s + (totalOnlyData[k] ?? 0), 0) -
+        expKeys.reduce((s, k) => s + (totalOnlyData[k] ?? 0), 0);
+      return pharmacyTotal + adj;
+    }
     return pharmacyTotal + (totalOnlyData[key] ?? 0);
   }
 
@@ -192,13 +236,11 @@ export default function MonthlyReportPage() {
     setSaving(false);
   }
 
-  // Сброс ВСЕХ изменений за этот месяц
   async function resetAll() {
     if (!confirm('Сбросить все ручные изменения за этот месяц?')) return;
     setSaving(true);
-    const allKeys = Object.keys(overrideMap);
     await Promise.all(
-      allKeys.map((k) => {
+      Object.keys(overrideMap).map((k) => {
         const [pId, ...rest] = k.split(':');
         return fetch(`/api/reports/monthly`, {
           method: 'PUT',
@@ -211,7 +253,20 @@ export default function MonthlyReportPage() {
     setSaving(false);
   }
 
+  async function saveFieldConfig(fieldKey: string, rowType: string) {
+    setSavingConfig(true);
+    setFieldConfigs((prev) => ({ ...prev, [fieldKey]: rowType }));
+    await fetch('/api/monthly-field-configs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fieldKey, rowType }),
+    });
+    setSavingConfig(false);
+  }
+
   const overrideCount = Object.keys(overrideMap).length;
+  const UNCONFIGURABLE = new Set(['totalExpenses', 'netIncome', 'divideBy2', 'directorShare',
+    'wholesaleRevenue', 'coefficient', 'avgDailyRevenue']);
 
   return (
     <div>
@@ -219,6 +274,7 @@ export default function MonthlyReportPage() {
         <h1 className="text-xl font-bold text-gray-900">Закрытие месяца</h1>
         <Link href="/reports" className="text-sm text-gray-400 hover:text-gray-600">← Обычные отчёты</Link>
         {saving && <span className="text-xs text-blue-500">Сохранение...</span>}
+        {savingConfig && <span className="text-xs text-purple-500">Сохранение типа...</span>}
       </div>
       <p className="text-gray-500 text-sm mb-5">
         Нажмите на любую ячейку чтобы изменить значение. Кнопка <strong>↩</strong> сбрасывает ячейку к системному значению.
@@ -242,25 +298,42 @@ export default function MonthlyReportPage() {
         <div className="pb-0.5 text-sm text-gray-600 font-medium">
           {MONTH_NAMES[month - 1]} {year}
         </div>
-        {overrideCount > 0 && (
-          <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-amber-600">
-              <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1" />
-              {overrideCount} {overrideCount === 1 ? 'ячейка изменена' : 'ячеек изменено'} вручную
-            </span>
-            <button className="btn-secondary text-xs" onClick={resetAll} disabled={saving}>
-              Сбросить все изменения
-            </button>
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-3 flex-wrap">
+          <button
+            className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+              configMode
+                ? 'bg-purple-600 text-white border-purple-600'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+            }`}
+            onClick={() => setConfigMode((v) => !v)}
+          >
+            {configMode ? '✓ Готово' : 'Настроить типы полей'}
+          </button>
+          {overrideCount > 0 && (
+            <>
+              <span className="text-xs text-amber-600">
+                <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1" />
+                {overrideCount} {overrideCount === 1 ? 'ячейка изменена' : 'ячеек изменено'} вручную
+              </span>
+              <button className="btn-secondary text-xs" onClick={resetAll} disabled={saving}>
+                Сбросить все
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Легенда */}
       <div className="flex flex-wrap gap-4 text-xs mb-3 text-gray-500">
         <span><span className="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1" />Данные из системы</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1" />Пока пусто — нажмите чтобы ввести</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1" />Пусто — нажмите чтобы ввести</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1" />Вычисляется автоматически</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1" />Изменено вручную</span>
+        {configMode && (
+          <span className="text-purple-600 font-medium">
+            Режим настройки: укажите тип каждой строки
+          </span>
+        )}
       </div>
 
       {loading ? (
@@ -273,6 +346,7 @@ export default function MonthlyReportPage() {
                 <tr className="bg-gray-800 text-white">
                   <th className="px-3 py-2 text-left font-medium sticky left-0 bg-gray-800 z-10 min-w-[220px]">
                     Показатель
+                    {configMode && <span className="ml-2 text-gray-400 font-normal">тип</span>}
                   </th>
                   {pharmacies.map((p) => (
                     <th key={p.id} className="px-2 py-2 text-right font-medium whitespace-nowrap min-w-[90px]">
@@ -283,7 +357,7 @@ export default function MonthlyReportPage() {
                 </tr>
               </thead>
               <tbody>
-                {MONTHLY_REPORT_ROWS.map((row) => {
+                {effectiveRows.map((row) => {
                   if (row.section) {
                     return (
                       <tr key={row.key} className="bg-gray-100">
@@ -297,63 +371,79 @@ export default function MonthlyReportPage() {
 
                   const total = rowTotal(row.key);
                   const isCalc = row.source === 'calc';
+                  const isSummaryRow = row.key === 'totalExpenses' || row.key === 'netIncome';
+                  const canConfigure = configMode && !UNCONFIGURABLE.has(row.key);
+
+                  // Цвет колонки ИТОГО
+                  let totalCellClass = 'text-gray-800';
+                  if (total === 0) {
+                    totalCellClass = 'text-gray-300';
+                  } else if (row.rowType === 'income') {
+                    totalCellClass = 'text-green-700 font-semibold';
+                  } else if (row.rowType === 'expense') {
+                    totalCellClass = 'text-red-600 font-semibold';
+                  } else if (row.key === 'totalExpenses') {
+                    totalCellClass = 'text-red-700 font-bold';
+                  } else if (row.key === 'netIncome') {
+                    totalCellClass = total >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold';
+                  }
 
                   return (
-                    <tr key={row.key} className={`border-b border-gray-100 ${
-                      row.key === 'totalExpenses' || row.key === 'netIncome' ? 'bg-gray-50' : ''
-                    }`}>
-                      {/* Название */}
+                    <tr key={row.key} className={`border-b border-gray-100 ${isSummaryRow ? 'bg-gray-50' : ''}`}>
+                      {/* Название + настройка типа */}
                       <td className={`px-3 py-1.5 sticky left-0 bg-white border-r border-gray-200 ${
-                        row.key === 'totalExpenses' || row.key === 'netIncome' ? 'bg-gray-50' : ''
+                        isSummaryRow ? 'bg-gray-50' : ''
                       } ${row.bold ? 'font-semibold text-gray-800' : 'text-gray-700'} ${row.indent ? 'pl-6' : ''}`}>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-2">
                           <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
                             row.source === 'db' ? 'bg-blue-400' :
                             isCalc ? 'bg-green-400' : 'bg-gray-200'
                           }`} />
-                          {row.label}
+                          <span className="flex-1">{row.label}</span>
+                          {canConfigure && (
+                            <span className="flex gap-0.5 shrink-0">
+                              {(['income', 'neutral', 'expense'] as const).map((t) => (
+                                <button
+                                  key={t}
+                                  onClick={() => saveFieldConfig(row.key, t)}
+                                  title={t === 'income' ? 'Доход' : t === 'expense' ? 'Расход' : 'Нейтрально'}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded leading-none transition-colors ${
+                                    row.rowType === t
+                                      ? t === 'income' ? 'bg-green-600 text-white'
+                                        : t === 'expense' ? 'bg-red-600 text-white'
+                                        : 'bg-gray-500 text-white'
+                                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {t === 'income' ? 'Д' : t === 'expense' ? 'Р' : '—'}
+                                </button>
+                              ))}
+                            </span>
+                          )}
                         </div>
                       </td>
 
                       {/* Ячейки по аптекам */}
                       {pharmacies.map((p) => {
-                        if (isCalc) {
-                          const sysVal = getCurrentValue(p.id, row.key);
-                          const ov = getOverride(p.id, row.key);
-                          return (
-                            <Cell
-                              key={p.id}
-                              pharmacyId={p.id}
-                              fieldKey={row.key}
-                              systemValue={sysVal}
-                              overrideValue={ov}
-                              onSave={handleSave}
-                              onReset={handleReset}
-                              decimals={row.decimals}
-                            />
-                          );
-                        }
+                        const sysVal = isCalc ? getCurrentValue(p.id, row.key) : getSystemValue(p.id, row.key);
+                        const ov = getOverride(p.id, row.key);
                         return (
                           <Cell
                             key={p.id}
                             pharmacyId={p.id}
                             fieldKey={row.key}
-                            systemValue={getSystemValue(p.id, row.key)}
-                            overrideValue={getOverride(p.id, row.key)}
+                            systemValue={sysVal}
+                            overrideValue={ov}
                             onSave={handleSave}
                             onReset={handleReset}
                             decimals={row.decimals}
+                            rowType={row.rowType}
                           />
                         );
                       })}
 
                       {/* ИТОГО */}
-                      <td className={`px-2 py-1.5 text-right tabular-nums font-semibold border-l border-gray-200 ${
-                        total === 0 ? 'text-gray-300' :
-                        total < 0  ? 'text-red-600' :
-                        row.key === 'retailRevenue' || row.key === 'netIncome' ? 'text-blue-700' :
-                        row.key === 'totalExpenses' ? 'text-red-700' : 'text-gray-800'
-                      }`}>
+                      <td className={`px-2 py-1.5 text-right tabular-nums border-l border-gray-200 ${totalCellClass}`}>
                         {total === 0 ? '—' : fmtN(total, row.decimals)}
                       </td>
                     </tr>

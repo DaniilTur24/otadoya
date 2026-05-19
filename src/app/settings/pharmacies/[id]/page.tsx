@@ -10,8 +10,6 @@ interface Pharmacy {
   isActive: boolean;
   keywords: string;
   coefficient: number;
-  terminalRent: number;
-  procedureRent: number;
 }
 
 export default function PharmacyEditPage() {
@@ -30,12 +28,7 @@ export default function PharmacyEditPage() {
     isActive: true,
     keywords: '',
     coefficient: '',
-    terminalRent: '',
-    procedureRent: '',
   });
-
-  const [terminalOn, setTerminalOn]     = useState(false);
-  const [procedureOn, setProcedureOn]   = useState(false);
 
   useEffect(() => {
     fetch(`/api/pharmacies/${id}`)
@@ -43,15 +36,11 @@ export default function PharmacyEditPage() {
       .then((p: Pharmacy) => {
         setOriginal(p);
         setForm({
-          name:          p.name,
-          isActive:      p.isActive ?? true,
-          keywords:      p.keywords ?? '',
-          coefficient:   p.coefficient   ? String(p.coefficient)   : '',
-          terminalRent:  p.terminalRent  ? String(p.terminalRent)  : '',
-          procedureRent: p.procedureRent ? String(p.procedureRent) : '',
+          name:        p.name,
+          isActive:    p.isActive ?? true,
+          keywords:    p.keywords ?? '',
+          coefficient: p.coefficient ? String(p.coefficient) : '',
         });
-        setTerminalOn(Number(p.terminalRent) > 0);
-        setProcedureOn(Number(p.procedureRent) > 0);
         setLoading(false);
       });
   }, [id]);
@@ -71,12 +60,10 @@ export default function PharmacyEditPage() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name:          form.name.trim(),
-        isActive:      form.isActive,
-        keywords:      form.keywords.trim(),
-        coefficient:   form.coefficient   ? parseFloat(form.coefficient)   : 0,
-        terminalRent:  terminalOn  && form.terminalRent  ? parseFloat(form.terminalRent)  : 0,
-        procedureRent: procedureOn && form.procedureRent ? parseFloat(form.procedureRent) : 0,
+        name:        form.name.trim(),
+        isActive:    form.isActive,
+        keywords:    form.keywords.trim(),
+        coefficient: form.coefficient ? parseFloat(form.coefficient) : 0,
       }),
     });
 
@@ -176,68 +163,6 @@ export default function PharmacyEditPage() {
             value={form.coefficient}
             onChange={(e) => set('coefficient', e.target.value)}
           />
-        </div>
-
-        {/* Фиксированные расходы по аренде */}
-        <div>
-          <p className="label mb-3">Фиксированные расходы по аренде</p>
-          <div className="space-y-3">
-            {/* Аренда терминал */}
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="terminalOn"
-                className="w-4 h-4 accent-blue-600 cursor-pointer"
-                checked={terminalOn}
-                onChange={(e) => {
-                  setTerminalOn(e.target.checked);
-                  if (!e.target.checked) set('terminalRent', '');
-                }}
-              />
-              <label htmlFor="terminalOn" className="text-sm text-gray-700 cursor-pointer w-40">
-                Аренда терминал
-              </label>
-              {terminalOn && (
-                <input
-                  type="number"
-                  className="input w-40"
-                  placeholder="Сумма"
-                  min="0"
-                  step="0.01"
-                  value={form.terminalRent}
-                  onChange={(e) => set('terminalRent', e.target.value)}
-                />
-              )}
-            </div>
-
-            {/* Процедурная аренда */}
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="procedureOn"
-                className="w-4 h-4 accent-blue-600 cursor-pointer"
-                checked={procedureOn}
-                onChange={(e) => {
-                  setProcedureOn(e.target.checked);
-                  if (!e.target.checked) set('procedureRent', '');
-                }}
-              />
-              <label htmlFor="procedureOn" className="text-sm text-gray-700 cursor-pointer w-40">
-                Процедурная аренда
-              </label>
-              {procedureOn && (
-                <input
-                  type="number"
-                  className="input w-40"
-                  placeholder="Сумма"
-                  min="0"
-                  step="0.01"
-                  value={form.procedureRent}
-                  onChange={(e) => set('procedureRent', e.target.value)}
-                />
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Кнопки */}

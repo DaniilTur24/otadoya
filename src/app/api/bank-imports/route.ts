@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
+import { createHash } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import {
   importParsedBankTransactions,
@@ -41,6 +42,18 @@ export async function POST(request: NextRequest) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  const fileHash = createHash('sha256').update(buffer).digest('hex');
+
+  const duplicate = await prisma.uploadedFile.findFirst({
+    where: { fileHash, fileType: 'bank_transactions_excel', month, year },
+  });
+  if (duplicate) {
+    return NextResponse.json(
+      { error: 'Этот файл уже был загружен для данного месяца' },
+      { status: 409 }
+    );
+  }
+
   const transactions = parseBankTransactionsExcel(buffer);
 
   if (transactions.length === 0) {
@@ -65,6 +78,7 @@ export async function POST(request: NextRequest) {
         fileType: 'bank_transactions_excel',
         month,
         year,
+        fileHash,
       },
     });
 
