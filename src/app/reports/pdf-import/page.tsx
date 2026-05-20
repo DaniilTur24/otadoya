@@ -83,6 +83,14 @@ export default function PdfImportPage() {
   // Шаг 3: сохранение
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [existingReport, setExistingReport] = useState<SavedReport | null>(null);
+
+  // Редактирование сохранённых отчётов
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editMarkupRow, setEditMarkupRow] = useState('');
+  const [editRetailRow, setEditRetailRow] = useState('');
+  const [editWholesaleRow, setEditWholesaleRow] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   const loadReports = useCallback(async () => {
     const res = await fetch('/api/reports/pdf-import');
@@ -121,6 +129,10 @@ export default function PdfImportPage() {
     setEditMarkup(   data.markupPercent  != null ? String(data.markupPercent)  : '');
     setEditRetail(   data.stockRetail    != null ? String(data.stockRetail)    : '');
     setEditWholesale(data.stockWholesale != null ? String(data.stockWholesale) : '');
+    const found = savedReports.find(
+      (r) => r.pharmacyId === Number(pharmacyId) && r.year === year && r.month === month
+    );
+    setExistingReport(found ?? null);
     setUploading(false);
   }
 
@@ -161,11 +173,48 @@ export default function PdfImportPage() {
   function cancelPreview() {
     setPreview(null);
     setUploadError('');
+    setExistingReport(null);
   }
 
   async function deleteReport(id: number) {
     if (!confirm('Удалить импортированный отчёт?')) return;
     await fetch(`/api/reports/pdf-import/${id}`, { method: 'DELETE' });
+    loadReports();
+  }
+
+  function startEdit(r: SavedReport) {
+    setEditingId(r.id);
+    setEditMarkupRow(r.markupPercent != null ? String(r.markupPercent) : '');
+    setEditRetailRow(r.stockRetail != null ? String(r.stockRetail) : '');
+    setEditWholesaleRow(r.stockWholesale != null ? String(r.stockWholesale) : '');
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function handleEditSave(r: SavedReport) {
+    setEditSaving(true);
+    const parseInput = (v: string) => {
+      const n = parseFloat(v.replace(/\s/g, '').replace(',', '.'));
+      return isNaN(n) ? null : n;
+    };
+    await fetch(`/api/reports/pdf-import/${r.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pharmacyId:    r.pharmacyId,
+        year:          r.year,
+        month:         r.month,
+        markupPercent:  parseInput(editMarkupRow),
+        stockRetail:    parseInput(editRetailRow),
+        stockWholesale: parseInput(editWholesaleRow),
+        sourceFile:    r.sourceFile,
+        confident:     r.confident,
+      }),
+    });
+    setEditingId(null);
+    setEditSaving(false);
     loadReports();
   }
 
@@ -257,6 +306,16 @@ export default function PdfImportPage() {
             <button onClick={cancelPreview} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
           </div>
 
+          {existingReport && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-300 rounded-md text-red-800 text-sm">
+              <strong>Внимание:</strong> для {selectedPharmacy?.name} за {MONTH_NAMES[preview.month - 1]} {preview.year} уже загружен отчёт
+              {existingReport.sourceFile && (
+                <span className="text-red-600"> ({existingReport.sourceFile})</span>
+              )}
+              . При сохранении старый отчёт будет заменён новым.
+            </div>
+          )}
+
           {!preview.confident && (
             <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm">
               Система не уверена в правильности некоторых значений — проверьте и при необходимости исправьте вручную.
@@ -303,9 +362,19 @@ export default function PdfImportPage() {
           </div>
 
           <div className="flex gap-3">
-            <button className="btn-primary" onClick={handleConfirm} disabled={saving}>
-              {saving ? 'Сохранение...' : 'Подтвердить и сохранить'}
-            </button>
+            {existingReport ? (
+              <button
+                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={handleConfirm}
+                disabled={saving}
+              >
+                {saving ? 'Сохранение...' : 'Да, заменить старый отчёт'}
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={handleConfirm} disabled={saving}>
+                {saving ? 'Сохранение...' : 'Подтвердить и сохранить'}
+              </button>
+            )}
             <button className="btn-secondary" onClick={cancelPreview}>Отмена</button>
           </div>
         </div>
@@ -335,23 +404,82 @@ export default function PdfImportPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {savedReports.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="td font-medium">{r.pharmacy.name}</td>
-                  <td className="td text-gray-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
-                  <td className="td text-right">{r.markupPercent != null ? fmtN(r.markupPercent) + '%' : '—'}</td>
-                  <td className="td text-right">{fmtN(r.stockRetail)}</td>
-                  <td className="td text-right">{fmtN(r.stockWholesale)}</td>
-                  <td className="td text-right">
-                    <button
-                      className="text-red-400 hover:text-red-600 text-xs"
-                      onClick={() => deleteReport(r.id)}
-                    >
-                      Удалить
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {savedReports.map((r) => {
+                const isEditing = editingId === r.id;
+                if (isEditing) {
+                  return (
+                    <tr key={r.id} className="bg-blue-50">
+                      <td className="td font-medium">{r.pharmacy.name}</td>
+                      <td className="td text-gray-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
+                      <td className="td">
+                        <input
+                          type="text"
+                          className="w-full text-right text-xs border border-blue-300 rounded px-1 py-0.5 bg-white"
+                          value={editMarkupRow}
+                          onChange={(e) => setEditMarkupRow(e.target.value)}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="td">
+                        <input
+                          type="text"
+                          className="w-full text-right text-xs border border-blue-300 rounded px-1 py-0.5 bg-white"
+                          value={editRetailRow}
+                          onChange={(e) => setEditRetailRow(e.target.value)}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="td">
+                        <input
+                          type="text"
+                          className="w-full text-right text-xs border border-blue-300 rounded px-1 py-0.5 bg-white"
+                          value={editWholesaleRow}
+                          onChange={(e) => setEditWholesaleRow(e.target.value)}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="td text-right whitespace-nowrap">
+                        <button
+                          className="text-blue-600 hover:text-blue-800 text-xs font-medium mr-2"
+                          onClick={() => handleEditSave(r)}
+                          disabled={editSaving}
+                        >
+                          {editSaving ? 'Сохр...' : 'Сохранить'}
+                        </button>
+                        <button
+                          className="text-gray-400 hover:text-gray-600 text-xs"
+                          onClick={cancelEdit}
+                        >
+                          Отмена
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+                return (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className="td font-medium">{r.pharmacy.name}</td>
+                    <td className="td text-gray-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
+                    <td className="td text-right">{r.markupPercent != null ? fmtN(r.markupPercent) + '%' : '—'}</td>
+                    <td className="td text-right">{fmtN(r.stockRetail)}</td>
+                    <td className="td text-right">{fmtN(r.stockWholesale)}</td>
+                    <td className="td text-right whitespace-nowrap">
+                      <button
+                        className="text-blue-400 hover:text-blue-600 text-xs mr-3"
+                        onClick={() => startEdit(r)}
+                      >
+                        Изменить
+                      </button>
+                      <button
+                        className="text-red-400 hover:text-red-600 text-xs"
+                        onClick={() => deleteReport(r.id)}
+                      >
+                        Удалить
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

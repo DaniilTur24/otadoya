@@ -7,9 +7,10 @@ function serialize(entry: Record<string, unknown>) {
     ...entry,
     cashRevenue: Number(entry.cashRevenue),
     terminalRevenue: Number(entry.terminalRevenue),
+    kaspiRevenue: Number(entry.kaspiRevenue ?? 0),
     bonusRevenue: Number(entry.bonusRevenue ?? 0),
     additionalExpenses: Number(entry.additionalExpenses),
-    totalRevenue: Number(entry.cashRevenue) + Number(entry.terminalRevenue),
+    totalRevenue: Number(entry.cashRevenue) + Number(entry.terminalRevenue) + Number(entry.kaspiRevenue ?? 0),
     expenseItems: items.map((i) => ({ ...i, amount: Number(i.amount) })),
   };
 }
@@ -22,18 +23,6 @@ export async function DELETE(
   return NextResponse.json({ ok: true });
 }
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const entry = await prisma.dailyRevenueEntry.findUnique({
-    where: { id: Number(params.id) },
-    include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
-  });
-  if (!entry) return NextResponse.json({ error: 'Не найдено' }, { status: 404 });
-  return NextResponse.json(serialize(entry as unknown as Record<string, unknown>));
-}
-
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -42,7 +31,7 @@ export async function PUT(
   const {
     pharmacyId, date, cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue,
     expenseItems, generalComment, employeeName, employeeId, shiftType,
-    bookkeeperComment, status,
+    bookkeeperComment, status, excludedFromReport,
   } = body;
 
   // Скалярные поля записи
@@ -59,6 +48,7 @@ export async function PUT(
   if (shiftType !== undefined) data.shiftType = shiftType || null;
   if (bookkeeperComment !== undefined) data.bookkeeperComment = bookkeeperComment || null;
   if (status) data.status = status;
+  if (excludedFromReport !== undefined) data.excludedFromReport = excludedFromReport;
 
   // Если переданы строки расходов — пересохраняем их и пересчитываем сумму
   if (Array.isArray(expenseItems)) {

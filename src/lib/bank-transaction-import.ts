@@ -6,9 +6,7 @@ type ImportTx = Prisma.TransactionClient;
 export type DistributionType =
   | 'specific_pharmacy'
   | 'detect_pharmacy_from_text'
-  | 'split_equally'
-  | 'total_only'
-  | 'ignore';
+  | 'split_equally';
 
 export interface ParsedBankTransaction {
   rowIndex: number;
@@ -389,10 +387,6 @@ async function createReportValues(
 ): Promise<{ status: string; detectedPharmacyId: number | null }> {
   const { importedTransactionId, uploadId, amount, fieldKey, distributionType, pharmacyId, activePharmacies } = params;
 
-  if (distributionType === 'ignore') {
-    return { status: 'ignored', detectedPharmacyId: null };
-  }
-
   if (!fieldKey || !distributionType) {
     return { status: 'needs_review', detectedPharmacyId: pharmacyId };
   }
@@ -432,21 +426,6 @@ async function createReportValues(
     return { status: 'pending', detectedPharmacyId: null };
   }
 
-  if (distributionType === 'total_only') {
-    await tx.importedReportValue.create({
-      data: {
-        importedTransactionId,
-        uploadId,
-        pharmacyId: null,
-        fieldKey,
-        amount: String(amount),
-        status: 'pending',
-        distributionType,
-      },
-    });
-    return { status: 'pending', detectedPharmacyId: null };
-  }
-
   return { status: 'needs_review', detectedPharmacyId: pharmacyId };
 }
 
@@ -471,78 +450,128 @@ export async function importParsedBankTransactions(
     }),
   ]);
 
-  let needsReviewCount = 0;
-  let ignoredCount = 0;
+  type TxInput = {
+    uploadId: number;
+    transactionDate: Date | null;
+    amount: string;
+    counterparty: string | null;
+    binIin: string | null;
+    paymentPurpose: string | null;
+    rawRowJson: string;
+    searchableText: string;
+    matchedRuleId: number | null;
+    detectedPharmacyId: number | null;
+    targetFieldKey: string | null;
+    distributionType: string | null;
+    status: string;
+  };
 
-  for (const transaction of transactions) {
+  type RvSpec = {
+    txIndex: number;
+    pharmacyId: number | null;
+    fieldKey: string;
+    amount: string;
+    distributionType: string;
+  };
+
+  const txInputs: TxInput[] = [];
+  const rvSpecs: RvSpec[] = [];
+  let needsReviewCount = 0;
+
+  for (let i = 0; i < transactions.length; i++) {
+    const transaction = transactions[i];
     const rule = matchTransactionRule(transaction, rules);
+
     let distributionType = rule?.distributionType ?? null;
     let fieldKey = rule?.targetFieldKey ?? null;
     let detectedPharmacyId: number | null = null;
-    let status = rule ? 'pending' : 'needs_review';
+    let status: string;
 
-    if (rule?.distributionType === 'specific_pharmacy') {
+    if (!rule) {
+      status = 'needs_review';
+    } else if (!fieldKey || !distributionType) {
+      status = 'needs_review';
+    } else if (distributionType === 'specific_pharmacy') {
       detectedPharmacyId = rule.pharmacyId;
-    }
-
-    if (rule?.distributionType === 'detect_pharmacy_from_text') {
+      if (!detectedPharmacyId) {
+        status = 'needs_review';
+      } else {
+        status = 'pending';
+        rvSpecs.push({ txIndex: i, pharmacyId: detectedPharmacyId, fieldKey, amount: transaction.amount, distributionType });
+      }
+    } else if (distributionType === 'detect_pharmacy_from_text') {
       const detection = detectPharmacyFromAliases(transaction.searchableText, aliases);
       detectedPharmacyId = detection.pharmacyId;
-      if (!detection.pharmacyId || detection.ambiguous) status = 'needs_review';
-    }
-
-    if (rule?.distributionType === 'ignore') {
-      status = 'ignored';
-    }
-
-    const created = await tx.importedTransaction.create({
-      data: {
-        uploadId,
-        transactionDate: transaction.transactionDate,
-        amount: transaction.amount,
-        counterparty: transaction.counterparty,
-        binIin: transaction.binIin,
-        paymentPurpose: transaction.paymentPurpose,
-        rawRowJson: transaction.rawRowJson,
-        searchableText: transaction.searchableText,
-        matchedRuleId: rule?.id ?? null,
-        detectedPharmacyId,
-        targetFieldKey: fieldKey,
-        distributionType,
-        status,
-      },
-    });
-
-    if (status !== 'needs_review') {
-      const result = await createReportValues(tx, {
-        importedTransactionId: created.id,
-        uploadId,
-        amount: transaction.amount,
-        fieldKey,
-        distributionType,
-        pharmacyId: detectedPharmacyId,
-        activePharmacies,
-      });
-
-      status = result.status;
-      detectedPharmacyId = result.detectedPharmacyId ?? detectedPharmacyId;
-
-      if (status !== created.status || detectedPharmacyId !== created.detectedPharmacyId) {
-        await tx.importedTransaction.update({
-          where: { id: created.id },
-          data: { status, detectedPharmacyId },
-        });
+      if (!detection.pharmacyId || detection.ambiguous) {
+        status = 'needs_review';
+      } else {
+        status = 'pending';
+        rvSpecs.push({ txIndex: i, pharmacyId: detection.pharmacyId, fieldKey, amount: transaction.amount, distributionType });
       }
+    } else if (distributionType === 'split_equally') {
+      if (activePharmacies.length === 0) {
+        status = 'needs_review';
+      } else {
+        status = 'pending';
+        const shares = splitAmountEqually(transaction.amount, activePharmacies.length);
+        for (let j = 0; j < activePharmacies.length; j++) {
+          rvSpecs.push({ txIndex: i, pharmacyId: activePharmacies[j].id, fieldKey, amount: shares[j], distributionType });
+        }
+      }
+    } else {
+      status = 'needs_review';
     }
 
     if (status === 'needs_review') needsReviewCount++;
-    if (status === 'ignored') ignoredCount++;
+
+    txInputs.push({
+      uploadId,
+      transactionDate: transaction.transactionDate,
+      amount: transaction.amount,
+      counterparty: transaction.counterparty,
+      binIin: transaction.binIin,
+      paymentPurpose: transaction.paymentPurpose,
+      rawRowJson: transaction.rawRowJson,
+      searchableText: transaction.searchableText,
+      matchedRuleId: rule?.id ?? null,
+      detectedPharmacyId,
+      targetFieldKey: fieldKey,
+      distributionType,
+      status,
+    });
+  }
+
+  const BATCH_SIZE = 200;
+
+  for (let i = 0; i < txInputs.length; i += BATCH_SIZE) {
+    await tx.importedTransaction.createMany({ data: txInputs.slice(i, i + BATCH_SIZE) });
+  }
+
+  if (rvSpecs.length > 0) {
+    const created = await tx.importedTransaction.findMany({
+      where: { uploadId },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+
+    const rvInputs = rvSpecs.map((spec) => ({
+      importedTransactionId: created[spec.txIndex].id,
+      uploadId,
+      pharmacyId: spec.pharmacyId,
+      fieldKey: spec.fieldKey,
+      amount: spec.amount,
+      status: 'pending',
+      distributionType: spec.distributionType,
+    }));
+
+    for (let i = 0; i < rvInputs.length; i += BATCH_SIZE) {
+      await tx.importedReportValue.createMany({ data: rvInputs.slice(i, i + BATCH_SIZE) });
+    }
   }
 
   return {
     importedCount: transactions.length,
     needsReviewCount,
-    ignoredCount,
   };
 }
 
@@ -583,9 +612,7 @@ export async function regenerateImportedReportValues(
   });
 
   const status =
-    result.status === 'ignored'
-      ? 'ignored'
-      : params.status === 'rejected'
+    params.status === 'rejected'
       ? 'rejected'
       : params.status === 'approved' && result.status === 'pending'
       ? 'approved'

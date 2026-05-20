@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -46,15 +46,12 @@ interface Draft {
   fieldKey: string;
   pharmacyId: string;
   distributionType: string;
-  accountantComment: string;
 }
 
 const DISTRIBUTIONS = [
   ['specific_pharmacy', 'Конкретная аптека'],
   ['detect_pharmacy_from_text', 'Определять по тексту'],
   ['split_equally', 'Разделить поровну'],
-  ['total_only', 'Только общий отчёт'],
-  ['ignore', 'Игнорировать'],
 ];
 
 const STATUS_FILTERS = [
@@ -63,7 +60,6 @@ const STATUS_FILTERS = [
   ['pending', 'Ожидают'],
   ['approved', 'Подтверждены'],
   ['rejected', 'Отклонены'],
-  ['ignored', 'Игнорированы'],
 ];
 
 function fmtAmount(value: string | number) {
@@ -117,7 +113,6 @@ export default function FileReviewPage() {
         fieldKey: transaction.targetFieldKey ?? '',
         pharmacyId: transaction.detectedPharmacyId ? String(transaction.detectedPharmacyId) : '',
         distributionType: transaction.distributionType || 'detect_pharmacy_from_text',
-        accountantComment: transaction.accountantComment || '',
       }
     );
   }
@@ -128,21 +123,20 @@ export default function FileReviewPage() {
     setDrafts((current) => ({ ...current, [id]: { ...draftFor(transaction), ...patch } }));
   }
 
-  async function saveTransaction(transaction: ImportedTransaction, status?: string, override?: Partial<Draft>) {
-    const draft = { ...draftFor(transaction), ...override };
+  async function saveTransaction(transaction: ImportedTransaction, status?: string) {
+    const draft = draftFor(transaction);
     setSavingId(transaction.id);
 
     await fetch(`/api/imported-transactions/${transaction.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        fieldKey: draft.distributionType === 'ignore' ? null : draft.fieldKey || null,
+        fieldKey: draft.fieldKey || null,
         pharmacyId:
           draft.distributionType === 'specific_pharmacy' || draft.distributionType === 'detect_pharmacy_from_text'
             ? draft.pharmacyId || null
             : null,
         distributionType: draft.distributionType,
-        accountantComment: draft.accountantComment,
         status,
       }),
     });
@@ -160,67 +154,6 @@ export default function FileReviewPage() {
     }
   }
 
-  async function createAlias(transaction: ImportedTransaction) {
-    const draft = draftFor(transaction);
-    if (!draft.pharmacyId) {
-      alert('Сначала выберите аптеку для этой транзакции.');
-      return;
-    }
-
-    const defaultAlias = transaction.counterparty || transaction.binIin || '';
-    const alias = prompt('Новый алиас аптеки', defaultAlias);
-    if (!alias?.trim()) return;
-
-    await fetch('/api/pharmacy-aliases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pharmacyId: draft.pharmacyId,
-        alias: alias.trim(),
-        aliasType: transaction.binIin && alias.includes(transaction.binIin) ? 'bin_iin' : 'keyword',
-      }),
-    });
-    await load();
-  }
-
-  async function createRule(transaction: ImportedTransaction) {
-    const draft = draftFor(transaction);
-    const selectedField = BANK_IMPORT_TARGET_FIELDS.find((field) => field.key === draft.fieldKey);
-    const defaultPattern = transaction.paymentPurpose?.slice(0, 60) || transaction.counterparty || '';
-    const pattern = prompt('Что искать в транзакции', defaultPattern);
-    if (!pattern?.trim()) return;
-
-    const name = prompt('Название правила', selectedField ? `${selectedField.label}: ${pattern.trim()}` : pattern.trim());
-    if (!name?.trim()) return;
-
-    await fetch('/api/transaction-import-rules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name.trim(),
-        sourceField: 'any_text',
-        pattern: pattern.trim(),
-        matchType: 'contains',
-        targetFieldKey: draft.distributionType === 'ignore' ? null : draft.fieldKey || null,
-        distributionType: draft.distributionType,
-        pharmacyId: draft.distributionType === 'specific_pharmacy' ? draft.pharmacyId || null : null,
-        priority: 100,
-        isActive: true,
-      }),
-    });
-  }
-
-  const totals = useMemo(() => {
-    return transactions.reduce(
-      (acc, transaction) => {
-        acc.amount += Number(transaction.amount) || 0;
-        acc.values += transaction.reportValues.reduce((sum, value) => sum + (Number(value.amount) || 0), 0);
-        return acc;
-      },
-      { amount: 0, values: 0 }
-    );
-  }, [transactions]);
-
   const needsReviewCount = counts.needs_review ?? 0;
   const pendingCount = counts.pending ?? 0;
 
@@ -236,7 +169,7 @@ export default function FileReviewPage() {
         Подтвердите распознанные строки. После подтверждения суммы попадут в существующее закрытие месяца.
       </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 gap-3 mb-5">
         <div className="card p-4">
           <div className="text-xs text-gray-400">Нераспознанные</div>
           <div className="text-2xl font-bold text-amber-700">{needsReviewCount}</div>
@@ -244,14 +177,6 @@ export default function FileReviewPage() {
         <div className="card p-4">
           <div className="text-xs text-gray-400">Ожидают</div>
           <div className="text-2xl font-bold text-blue-700">{pendingCount}</div>
-        </div>
-        <div className="card p-4">
-          <div className="text-xs text-gray-400">Сумма строк</div>
-          <div className="text-lg font-semibold text-gray-800">{fmtAmount(totals.amount)}</div>
-        </div>
-        <div className="card p-4">
-          <div className="text-xs text-gray-400">Сгенерировано в отчёт</div>
-          <div className="text-lg font-semibold text-gray-800">{fmtAmount(totals.values)}</div>
         </div>
       </div>
 
@@ -333,7 +258,6 @@ export default function FileReviewPage() {
                       <select
                         className="input text-xs py-1.5"
                         value={draft.fieldKey}
-                        disabled={draft.distributionType === 'ignore'}
                         onChange={(e) => updateDraft(transaction.id, { fieldKey: e.target.value })}
                       >
                         <option value="">— выбрать —</option>
@@ -380,54 +304,38 @@ export default function FileReviewPage() {
                   </div>
                 </div>
 
-                {transaction.reportValues.length > 0 && (
-                  <div className="mt-4 border-t border-gray-100 pt-3">
-                    <div className="text-xs text-gray-400 mb-2">Сгенерированные значения для закрытия месяца</div>
-                    <div className="flex flex-wrap gap-2">
-                      {transaction.reportValues.map((value) => (
-                        <span key={value.id} className="text-xs bg-white border border-gray-200 rounded-md px-2 py-1">
-                          {value.pharmacy?.name ?? 'Общий отчёт'} · {monthlyFieldLabel(value.fieldKey)} · {fmtAmount(value.amount)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-4 flex flex-wrap gap-2 items-center">
-                  <input
-                    className="input text-xs py-1.5 flex-1 min-w-[220px]"
-                    placeholder="Комментарий бухгалтера"
-                    value={draft.accountantComment}
-                    onChange={(e) => updateDraft(transaction.id, { accountantComment: e.target.value })}
-                  />
-                  <button className="btn-secondary text-xs" disabled={isSaving} onClick={() => saveTransaction(transaction)}>
-                    {isSaving ? 'Сохранение...' : 'Сохранить'}
-                  </button>
+                <div className="mt-4 flex gap-2 items-center">
                   <button className="btn-success text-xs" disabled={isSaving} onClick={() => saveTransaction(transaction, 'approved')}>
-                    Подтвердить
+                    {isSaving ? 'Сохранение...' : 'Подтвердить'}
                   </button>
                   <button className="btn-danger text-xs" disabled={isSaving} onClick={() => saveTransaction(transaction, 'rejected')}>
                     Отклонить
                   </button>
-                  <button
-                    className="btn-warning text-xs"
-                    disabled={isSaving}
-                    onClick={() =>
-                      saveTransaction(transaction, 'ignored', {
-                        distributionType: 'ignore',
-                        fieldKey: '',
-                        pharmacyId: '',
-                      })
-                    }
-                  >
-                    Игнорировать
-                  </button>
-                  <button className="btn-secondary text-xs" onClick={() => createRule(transaction)}>
-                    Создать правило
-                  </button>
-                  <button className="btn-secondary text-xs" onClick={() => createAlias(transaction)}>
-                    Добавить алиас
-                  </button>
+
+                  {transaction.reportValues.length > 0 && (
+                    <div className="relative group ml-1">
+                      <span className="text-xs text-gray-400 hover:text-gray-600 cursor-default underline decoration-dotted select-none">
+                        как попадёт в отчёт?
+                      </span>
+                      <div className="absolute hidden group-hover:block bottom-full left-0 mb-2 z-30 bg-white border border-gray-200 shadow-xl rounded-lg p-3 min-w-[280px]">
+                        <div className="text-xs font-medium text-gray-600 mb-2">При подтверждении попадёт в закрытие месяца:</div>
+                        <div className="space-y-1.5">
+                          {transaction.reportValues.map((value) => (
+                            <div key={value.id} className="flex items-center justify-between gap-4">
+                              <div className="text-xs text-gray-700">
+                                <span className="font-medium">{value.pharmacy?.name ?? 'Общий итог'}</span>
+                                <span className="text-gray-400 mx-1">→</span>
+                                <span>{monthlyFieldLabel(value.fieldKey)}</span>
+                              </div>
+                              <span className="text-xs font-semibold tabular-nums text-gray-900 shrink-0">
+                                {fmtAmount(value.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );

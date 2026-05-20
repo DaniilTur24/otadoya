@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       sourceField: String(body.sourceField || 'any_text'),
       pattern,
       matchType: String(body.matchType || 'contains'),
-      targetFieldKey: distributionType === 'ignore' ? null : String(body.targetFieldKey || '') || null,
+      targetFieldKey: String(body.targetFieldKey || '') || null,
       distributionType,
       pharmacyId:
         distributionType === 'specific_pharmacy' && body.pharmacyId

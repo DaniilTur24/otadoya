@@ -12,10 +12,17 @@ export async function GET(request: NextRequest) {
   const dateFrom = new Date(year, month - 1, 1);
   const dateTo   = new Date(year, month, 0, 23, 59, 59, 999);
 
+  const closed = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
+  if (closed) {
+    const snapshot = JSON.parse(closed.snapshotJson) as Record<string, Record<string, number>>;
+    const pharmacies = await prisma.pharmacy.findMany({ orderBy: { name: 'asc' } });
+    return NextResponse.json({ pharmacies, isClosed: true, closedAt: closed.closedAt, snapshotData: snapshot, overrideMap: {} });
+  }
+
   const [pharmacies, revenueEntries, expenseEntries, importedValues, overrides, pdfReports, shiftEntries] = await Promise.all([
     prisma.pharmacy.findMany({ orderBy: { name: 'asc' } }),
     prisma.dailyRevenueEntry.findMany({
-      where: { status: 'approved', date: { gte: dateFrom, lte: dateTo } },
+      where: { status: 'approved', excludedFromReport: false, date: { gte: dateFrom, lte: dateTo } },
       include: { expenseItems: true },
     }),
     prisma.extractedExpenseEntry.findMany({
@@ -37,6 +44,7 @@ export async function GET(request: NextRequest) {
     prisma.dailyRevenueEntry.findMany({
       where: {
         status: 'approved',
+        excludedFromReport: false,
         date: { gte: dateFrom, lte: dateTo },
         employeeId: { not: null },
         shiftType: { in: ['day', 'full_day'] },
@@ -58,7 +66,7 @@ export async function GET(request: NextRequest) {
       association: 0, charity: 0, accountingServices: 0, stationery: 0,
       utilities: 0, deferredTax: 0, vat: 0, security: 0,
       otherExpenses: 0, householdExpenses: 0, advertising: 0, repairs: 0,
-      rentExpenses: 0, fixedAssets: 0, standardKaspibot: 0, daribar: 0,
+      rentExpenses: 0, standardKaspibot: 0, daribar: 0,
       communications: 0, equipment: 0, transport: 0, cleaning: 0, bankServices: 0,
       totalExpenses: 0, netIncome: 0, divideBy2: 0, directorShare: 0,
     };
@@ -105,13 +113,10 @@ export async function GET(request: NextRequest) {
     if (e.category === 'expense') systemData[e.pharmacyId].bankServices  += Number(e.amount);
   }
 
-  const totalOnlyData: Record<string, number> = {};
   for (const value of importedValues) {
     const amount = Number(value.amount);
     if (value.pharmacyId && systemData[value.pharmacyId] && value.fieldKey in systemData[value.pharmacyId]) {
       systemData[value.pharmacyId][value.fieldKey] += amount;
-    } else if (!value.pharmacyId) {
-      totalOnlyData[value.fieldKey] = (totalOnlyData[value.fieldKey] ?? 0) + amount;
     }
   }
 
@@ -137,7 +142,7 @@ export async function GET(request: NextRequest) {
     overrideMap[`${o.pharmacyId}:${o.fieldKey}`] = Number(o.value);
   }
 
-  return NextResponse.json({ pharmacies, systemData, overrideMap, totalOnlyData });
+  return NextResponse.json({ pharmacies, systemData, overrideMap, isClosed: false });
 }
 
 // PUT — сохранить или удалить override для одной ячейки
@@ -145,6 +150,11 @@ export async function GET(request: NextRequest) {
 // value === null → удалить override (сброс на системное значение)
 export async function PUT(request: NextRequest) {
   const { year, month, pharmacyId, fieldKey, value } = await request.json();
+
+  const closed = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
+  if (closed) {
+    return NextResponse.json({ error: 'Месяц закрыт — изменения невозможны' }, { status: 423 });
+  }
 
   if (value === null || value === undefined) {
     await prisma.monthlyReportOverride.deleteMany({

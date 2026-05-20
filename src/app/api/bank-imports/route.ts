@@ -93,7 +93,6 @@ export async function POST(request: NextRequest) {
       originalName: result.upload.originalName,
       importedCount: result.stats.importedCount,
       needsReviewCount: result.stats.needsReviewCount,
-      ignoredCount: result.stats.ignoredCount,
     },
     { status: 201 }
   );

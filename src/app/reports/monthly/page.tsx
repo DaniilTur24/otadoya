@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MonthlyReportRow, RowType } from '@/lib/monthly-report-fields';
 
@@ -21,7 +21,7 @@ function fmtN(n: number, decimals = 0): string {
 
 function Cell({
   pharmacyId, fieldKey, systemValue, overrideValue,
-  onSave, onReset, decimals = 0, rowType,
+  onSave, onReset, decimals = 0, rowType, locked,
 }: {
   pharmacyId: number; fieldKey: string;
   systemValue: number; overrideValue: number | undefined;
@@ -29,6 +29,7 @@ function Cell({
   onReset: (pharmacyId: number, key: string) => Promise<void>;
   decimals?: number;
   rowType?: RowType;
+  locked?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
@@ -54,6 +55,15 @@ function Cell({
   function handleKey(e: React.KeyboardEvent) {
     if (e.key === 'Enter') commit();
     if (e.key === 'Escape') setEditing(false);
+  }
+
+  if (locked) {
+    const lockedColor = displayValue === 0 ? 'text-gray-200' : rowType === 'income' ? 'text-green-700' : rowType === 'expense' ? 'text-red-600' : '';
+    return (
+      <td className="px-2 py-1.5 text-right tabular-nums">
+        <span className={lockedColor}>{displayValue === 0 ? '—' : fmtN(displayValue, decimals)}</span>
+      </td>
+    );
   }
 
   if (editing) {
@@ -101,9 +111,6 @@ function Cell({
         <span className={valueColor}>
           {displayValue === 0 ? '—' : fmtN(displayValue, decimals)}
         </span>
-        {isOverridden && (
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-        )}
       </div>
     </td>
   );
@@ -117,44 +124,27 @@ export default function MonthlyReportPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [systemData, setSystemData] = useState<DataMap>({});
-  const [totalOnlyData, setTotalOnlyData] = useState<Record<string, number>>({});
   const [overrideMap, setOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  // Конфиги типов полей из БД: fieldKey → rowType
-  const [fieldConfigs, setFieldConfigs] = useState<Record<string, string>>({});
-  const [configMode, setConfigMode] = useState(false);
-  const [savingConfig, setSavingConfig] = useState(false);
-
-  // Строки с применёнными типами из БД (перекрывают defaults)
-  const effectiveRows = useMemo<MonthlyReportRow[]>(
-    () =>
-      MONTHLY_REPORT_ROWS.map((row) => ({
-        ...row,
-        rowType: (fieldConfigs[row.key] as RowType | undefined) ?? row.rowType,
-      })),
-    [fieldConfigs]
-  );
-
-  useEffect(() => {
-    fetch('/api/monthly-field-configs')
-      .then((r) => r.json())
-      .then((configs: { fieldKey: string; rowType: string }[]) => {
-        const map: Record<string, string> = {};
-        for (const c of configs) map[c.fieldKey] = c.rowType;
-        setFieldConfigs(map);
-      });
-  }, []);
+  const [isClosed, setIsClosed] = useState(false);
+  const [closedAt, setClosedAt] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     const res = await fetch(`/api/reports/monthly?year=${year}&month=${month}`);
     const json = await res.json();
     setPharmacies(json.pharmacies ?? []);
-    setSystemData(json.systemData ?? {});
-    setTotalOnlyData(json.totalOnlyData ?? {});
-    setOverrideMap(json.overrideMap ?? {});
+    setIsClosed(json.isClosed ?? false);
+    setClosedAt(json.closedAt ?? null);
+    if (json.isClosed && json.snapshotData) {
+      setSystemData(json.snapshotData);
+      setOverrideMap({});
+    } else {
+      setSystemData(json.systemData ?? {});
+      setOverrideMap(json.overrideMap ?? {});
+    }
     setLoading(false);
   }, [year, month]);
 
@@ -170,6 +160,7 @@ export default function MonthlyReportPage() {
   }
 
   function getCurrentValue(pharmacyId: number, key: string): number {
+    if (isClosed) return systemData[pharmacyId]?.[key] ?? 0;
     const ov = getOverride(pharmacyId, key);
     if (ov !== undefined) return ov;
     if (key === 'wholesaleRevenue') {
@@ -178,12 +169,12 @@ export default function MonthlyReportPage() {
       return 0;
     }
     if (key === 'totalExpenses') {
-      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
+      const expKeys = MONTHLY_REPORT_ROWS.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
       return expKeys.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0);
     }
     if (key === 'netIncome') {
-      const incKeys = effectiveRows.filter((r) => r.rowType === 'income' && !r.section).map((r) => r.key);
-      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
+      const incKeys = MONTHLY_REPORT_ROWS.filter((r) => r.rowType === 'income' && !r.section).map((r) => r.key);
+      const expKeys = MONTHLY_REPORT_ROWS.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
       return (
         incKeys.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0) -
         expKeys.reduce((s, k) => s + getCurrentValue(pharmacyId, k), 0)
@@ -192,24 +183,43 @@ export default function MonthlyReportPage() {
     return getSystemValue(pharmacyId, key);
   }
 
+  async function closeMonth() {
+    if (!confirm(`Закрыть ${MONTH_NAMES[month - 1]} ${year}? После закрытия данные нельзя будет изменить.`)) return;
+    setClosing(true);
+    const snapshot: Record<string, Record<string, number>> = {};
+    for (const p of pharmacies) {
+      snapshot[String(p.id)] = {};
+      for (const row of MONTHLY_REPORT_ROWS) {
+        if (row.section) continue;
+        snapshot[String(p.id)][row.key] = getCurrentValue(p.id, row.key);
+      }
+    }
+    await fetch('/api/months/close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ year, month, snapshot }),
+    });
+    setClosing(false);
+    await load();
+  }
+
+  async function reopenMonth() {
+    if (!confirm(`Открыть ${MONTH_NAMES[month - 1]} ${year} снова? Снимок данных будет удалён.`)) return;
+    setClosing(true);
+    await fetch('/api/months/close', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ year, month }),
+    });
+    setClosing(false);
+    await load();
+  }
+
   function rowTotal(key: string): number {
     if (key.startsWith('_')) return 0;
     const pharmacyTotal = pharmacies.reduce((s, p) => s + getCurrentValue(p.id, key), 0);
 
-    if (key === 'totalExpenses') {
-      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
-      const totalOnlyExp = expKeys.reduce((s, k) => s + (totalOnlyData[k] ?? 0), 0);
-      return pharmacyTotal + totalOnlyExp;
-    }
-    if (key === 'netIncome') {
-      const incKeys = effectiveRows.filter((r) => r.rowType === 'income' && !r.section).map((r) => r.key);
-      const expKeys = effectiveRows.filter((r) => r.rowType === 'expense' && !r.section).map((r) => r.key);
-      const adj =
-        incKeys.reduce((s, k) => s + (totalOnlyData[k] ?? 0), 0) -
-        expKeys.reduce((s, k) => s + (totalOnlyData[k] ?? 0), 0);
-      return pharmacyTotal + adj;
-    }
-    return pharmacyTotal + (totalOnlyData[key] ?? 0);
+    return pharmacyTotal;
   }
 
   async function handleSave(pharmacyId: number, key: string, value: number) {
@@ -253,28 +263,13 @@ export default function MonthlyReportPage() {
     setSaving(false);
   }
 
-  async function saveFieldConfig(fieldKey: string, rowType: string) {
-    setSavingConfig(true);
-    setFieldConfigs((prev) => ({ ...prev, [fieldKey]: rowType }));
-    await fetch('/api/monthly-field-configs', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fieldKey, rowType }),
-    });
-    setSavingConfig(false);
-  }
-
   const overrideCount = Object.keys(overrideMap).length;
-  const UNCONFIGURABLE = new Set(['totalExpenses', 'netIncome', 'divideBy2', 'directorShare',
-    'wholesaleRevenue', 'coefficient', 'avgDailyRevenue']);
 
   return (
     <div>
       <div className="flex items-center gap-4 mb-1 flex-wrap">
         <h1 className="text-xl font-bold text-gray-900">Закрытие месяца</h1>
-        <Link href="/reports" className="text-sm text-gray-400 hover:text-gray-600">← Обычные отчёты</Link>
         {saving && <span className="text-xs text-blue-500">Сохранение...</span>}
-        {savingConfig && <span className="text-xs text-purple-500">Сохранение типа...</span>}
       </div>
       <p className="text-gray-500 text-sm mb-5">
         Нажмите на любую ячейку чтобы изменить значение. Кнопка <strong>↩</strong> сбрасывает ячейку к системному значению.
@@ -299,20 +294,9 @@ export default function MonthlyReportPage() {
           {MONTH_NAMES[month - 1]} {year}
         </div>
         <div className="ml-auto flex items-center gap-3 flex-wrap">
-          <button
-            className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-              configMode
-                ? 'bg-purple-600 text-white border-purple-600'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-            }`}
-            onClick={() => setConfigMode((v) => !v)}
-          >
-            {configMode ? '✓ Готово' : 'Настроить типы полей'}
-          </button>
-          {overrideCount > 0 && (
+          {!isClosed && overrideCount > 0 && (
             <>
               <span className="text-xs text-amber-600">
-                <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1" />
                 {overrideCount} {overrideCount === 1 ? 'ячейка изменена' : 'ячеек изменено'} вручную
               </span>
               <button className="btn-secondary text-xs" onClick={resetAll} disabled={saving}>
@@ -320,21 +304,34 @@ export default function MonthlyReportPage() {
               </button>
             </>
           )}
+          {isClosed ? (
+            <button
+              className="text-xs px-3 py-1.5 rounded border bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+              onClick={reopenMonth}
+              disabled={closing}
+            >
+              {closing ? 'Открытие...' : 'Открыть месяц'}
+            </button>
+          ) : (
+            <button
+              className="text-xs px-3 py-1.5 rounded border bg-green-600 text-white border-green-600 hover:bg-green-700"
+              onClick={closeMonth}
+              disabled={closing || loading}
+            >
+              {closing ? 'Закрытие...' : 'Закрыть месяц'}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Легенда */}
-      <div className="flex flex-wrap gap-4 text-xs mb-3 text-gray-500">
-        <span><span className="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1" />Данные из системы</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 mr-1" />Пусто — нажмите чтобы ввести</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1" />Вычисляется автоматически</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1" />Изменено вручную</span>
-        {configMode && (
-          <span className="text-purple-600 font-medium">
-            Режим настройки: укажите тип каждой строки
+      {isClosed && closedAt && (
+        <div className="mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
+          <span className="text-green-700 text-sm font-medium">
+            Месяц закрыт {new Date(closedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
           </span>
-        )}
-      </div>
+          <span className="text-green-600 text-xs">Данные зафиксированы и недоступны для изменения</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
@@ -346,7 +343,6 @@ export default function MonthlyReportPage() {
                 <tr className="bg-gray-800 text-white">
                   <th className="px-3 py-2 text-left font-medium sticky left-0 bg-gray-800 z-10 min-w-[220px]">
                     Показатель
-                    {configMode && <span className="ml-2 text-gray-400 font-normal">тип</span>}
                   </th>
                   {pharmacies.map((p) => (
                     <th key={p.id} className="px-2 py-2 text-right font-medium whitespace-nowrap min-w-[90px]">
@@ -357,7 +353,7 @@ export default function MonthlyReportPage() {
                 </tr>
               </thead>
               <tbody>
-                {effectiveRows.map((row) => {
+                {MONTHLY_REPORT_ROWS.map((row) => {
                   if (row.section) {
                     return (
                       <tr key={row.key} className="bg-gray-100">
@@ -372,7 +368,6 @@ export default function MonthlyReportPage() {
                   const total = rowTotal(row.key);
                   const isCalc = row.source === 'calc';
                   const isSummaryRow = row.key === 'totalExpenses' || row.key === 'netIncome';
-                  const canConfigure = configMode && !UNCONFIGURABLE.has(row.key);
 
                   // Цвет колонки ИТОГО
                   let totalCellClass = 'text-gray-800';
@@ -394,33 +389,7 @@ export default function MonthlyReportPage() {
                       <td className={`px-3 py-1.5 sticky left-0 bg-white border-r border-gray-200 ${
                         isSummaryRow ? 'bg-gray-50' : ''
                       } ${row.bold ? 'font-semibold text-gray-800' : 'text-gray-700'} ${row.indent ? 'pl-6' : ''}`}>
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
-                            row.source === 'db' ? 'bg-blue-400' :
-                            isCalc ? 'bg-green-400' : 'bg-gray-200'
-                          }`} />
-                          <span className="flex-1">{row.label}</span>
-                          {canConfigure && (
-                            <span className="flex gap-0.5 shrink-0">
-                              {(['income', 'neutral', 'expense'] as const).map((t) => (
-                                <button
-                                  key={t}
-                                  onClick={() => saveFieldConfig(row.key, t)}
-                                  title={t === 'income' ? 'Доход' : t === 'expense' ? 'Расход' : 'Нейтрально'}
-                                  className={`text-[10px] px-1.5 py-0.5 rounded leading-none transition-colors ${
-                                    row.rowType === t
-                                      ? t === 'income' ? 'bg-green-600 text-white'
-                                        : t === 'expense' ? 'bg-red-600 text-white'
-                                        : 'bg-gray-500 text-white'
-                                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                                  }`}
-                                >
-                                  {t === 'income' ? 'Д' : t === 'expense' ? 'Р' : '—'}
-                                </button>
-                              ))}
-                            </span>
-                          )}
-                        </div>
+                        {row.label}
                       </td>
 
                       {/* Ячейки по аптекам */}
@@ -438,6 +407,7 @@ export default function MonthlyReportPage() {
                             onReset={handleReset}
                             decimals={row.decimals}
                             rowType={row.rowType}
+                            locked={isClosed}
                           />
                         );
                       })}

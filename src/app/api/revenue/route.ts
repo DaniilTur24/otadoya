@@ -88,11 +88,19 @@ export async function POST(request: Request) {
           .join('; ')
       : null;
 
+  const entryDate = new Date(date);
+  const entryYear = entryDate.getFullYear();
+  const entryMonth = entryDate.getMonth() + 1;
+  const closedMonth = await prisma.closedMonth.findUnique({
+    where: { year_month: { year: entryYear, month: entryMonth } },
+  });
+  const isMonthClosed = !!closedMonth;
+
   const entry = await prisma.$transaction(async (tx) => {
     const created = await tx.dailyRevenueEntry.create({
       data: {
         pharmacyId: Number(pharmacyId),
-        date: new Date(date),
+        date: entryDate,
         cashRevenue: String(cashRevenue || 0),
         terminalRevenue: String(terminalRevenue || 0),
         kaspiRevenue: String(kaspiRevenue || 0),
@@ -104,6 +112,7 @@ export async function POST(request: Request) {
         employeeId: employeeId ? Number(employeeId) : null,
         shiftType: shiftType || null,
         status: 'approved',
+        excludedFromReport: isMonthClosed,
       },
     });
 
@@ -125,7 +134,7 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json(
-    serializeEntry(entry as unknown as Record<string, unknown>),
+    { ...serializeEntry(entry as unknown as Record<string, unknown>), monthClosed: isMonthClosed },
     { status: 201 }
   );
 }

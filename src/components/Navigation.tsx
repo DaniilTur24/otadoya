@@ -4,12 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const links = [
-  { href: '/', label: 'Главная' },
   { href: '/revenue/new', label: '+ Добавить выручку' },
   { href: '/revenue', label: 'Записи выручки' },
   { href: '/employees', label: 'Сотрудники' },
   { href: '/files', label: 'Банк / Импорт' },
-  { href: '/reports', label: 'Отчёты' },
   { href: '/reports/monthly', label: 'Закрытие месяца' },
   { href: '/reports/pdf-import', label: 'Импорт PDF' },
   { href: '/settings', label: 'Настройки' },

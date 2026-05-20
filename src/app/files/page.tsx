@@ -85,7 +85,7 @@ export default function FilesPage() {
 
     if (res.ok) {
       setMessage(
-        `Импортировано строк: ${data.importedCount}. На проверку: ${data.needsReviewCount}. Игнорировано: ${data.ignoredCount}.`
+        `Импортировано строк: ${data.importedCount}. На проверку: ${data.needsReviewCount}.`
       );
       setSelectedFile(null);
       const input = document.getElementById('bankFileInput') as HTMLInputElement | null;

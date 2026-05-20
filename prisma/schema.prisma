@@ -80,6 +80,7 @@ model DailyRevenueEntry {
   shiftType          String?  @map("shift_type")
   // Статусы: pending | approved | rejected
   status             String   @default("pending")
+  excludedFromReport Boolean  @default(false) @map("excluded_from_report")
   bookkeeperComment  String?  @map("bookkeeper_comment")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
@@ -276,4 +277,16 @@ model MonthlyFieldConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("monthly_field_configs")
+}
+
+// Закрытый месяц: хранит финальные цифры как снимок
+model ClosedMonth {
+  id           Int      @id @default(autoincrement())
+  year         Int
+  month        Int
+  closedAt     DateTime @default(now()) @map("closed_at")
+  snapshotJson String   @map("snapshot_json")
+
+  @@unique([year, month])
+  @@map("closed_months")
 }

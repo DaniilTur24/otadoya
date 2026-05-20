@@ -22,8 +22,16 @@ interface ExpenseItem {
   comment: string;
 }
 
-const EXPENSE_CATEGORY_OPTIONS = MONTHLY_REPORT_ROWS.filter(
+const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
+).map((row) => ({ key: row.key, label: row.label }));
+
+const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
+  (row) =>
+    !row.section &&
+    row.rowType === 'income' &&
+    row.source !== 'calc' &&
+    !['retailRevenue', 'kaspiRevenue', 'wholesaleRevenue'].includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
 let nextId = 1;
@@ -38,6 +46,8 @@ export default function NewRevenuePage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [monthClosedWarning, setMonthClosedWarning] = useState(false);
+  const [selectedMonthClosed, setSelectedMonthClosed] = useState(false);
   const [error, setError] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
@@ -65,6 +75,16 @@ export default function NewRevenuePage() {
       setEmployees(emps);
     });
   }, []);
+
+  useEffect(() => {
+    if (!form.date) return;
+    const d = new Date(form.date);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    fetch(`/api/months/close?year=${year}&month=${month}`)
+      .then((r) => r.json())
+      .then((data) => setSelectedMonthClosed(data.isClosed));
+  }, [form.date]);
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -153,7 +173,9 @@ export default function NewRevenuePage() {
     });
 
     if (res.ok) {
+      const data = await res.json();
       setSuccess(true);
+      setMonthClosedWarning(data.monthClosed === true);
       setForm({
         pharmacyId: form.pharmacyId,
         date: today,
@@ -181,9 +203,19 @@ export default function NewRevenuePage() {
         Бухгалтер вводит данные с бумажного листочка сотрудника. Запись сразу сохраняется в отчёт.
       </p>
 
-      {success && (
+      {selectedMonthClosed && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-md text-amber-800 text-sm">
+          <strong>Этот месяц уже закрыт.</strong> Запись будет сохранена, но не будет учитываться в закрытии месяца и будет помечена как исключённая.
+        </div>
+      )}
+      {success && !monthClosedWarning && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-green-800 text-sm">
           Запись сохранена.
+        </div>
+      )}
+      {success && monthClosedWarning && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-md text-amber-800 text-sm">
+          <strong>Запись сохранена, но этот месяц уже закрыт.</strong> Данная запись не будет учитываться в закрытии месяца и помечена как исключённая.
         </div>
       )}
       {error && (
@@ -391,9 +423,16 @@ export default function NewRevenuePage() {
                       required
                     >
                       <option value="">— статья —</option>
-                      {EXPENSE_CATEGORY_OPTIONS.map((opt) => (
-                        <option key={opt.key} value={opt.key}>{opt.label}</option>
-                      ))}
+                      <optgroup label="Расходы">
+                        {EXPENSE_OPTIONS.map((opt) => (
+                          <option key={opt.key} value={opt.key}>{opt.label}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Доходы">
+                        {INCOME_OPTIONS.map((opt) => (
+                          <option key={opt.key} value={opt.key}>{opt.label}</option>
+                        ))}
+                      </optgroup>
                     </select>
                     <input
                       type="text"

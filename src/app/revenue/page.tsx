@@ -5,8 +5,16 @@ import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 
-const EXPENSE_CATEGORY_OPTIONS = MONTHLY_REPORT_ROWS.filter(
+const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
+).map((row) => ({ key: row.key, label: row.label }));
+
+const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
+  (row) =>
+    !row.section &&
+    row.rowType === 'income' &&
+    row.source !== 'calc' &&
+    !['retailRevenue', 'kaspiRevenue', 'wholesaleRevenue'].includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
 interface Pharmacy { id: number; name: string }
@@ -34,6 +42,7 @@ interface RevenueEntry {
   employeeName: string;
   shiftType: string | null;
   status: string;
+  excludedFromReport: boolean;
 }
 
 interface EditExpenseItem { id: number; amount: string; category: string; comment: string }
@@ -403,9 +412,16 @@ export default function RevenueListPage() {
                       <select className="input" value={item.category} required
                         onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}>
                         <option value="">— статья —</option>
-                        {EXPENSE_CATEGORY_OPTIONS.map((opt) => (
-                          <option key={opt.key} value={opt.key}>{opt.label}</option>
-                        ))}
+                        <optgroup label="Расходы">
+                          {EXPENSE_OPTIONS.map((opt) => (
+                            <option key={opt.key} value={opt.key}>{opt.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Доходы">
+                          {INCOME_OPTIONS.map((opt) => (
+                            <option key={opt.key} value={opt.key}>{opt.label}</option>
+                          ))}
+                        </optgroup>
                       </select>
                       <input type="text" placeholder="необязательно"
                         className="input" value={item.comment}
@@ -464,6 +480,7 @@ export default function RevenueListPage() {
                   <th className="th">Аптека</th>
                   <th className="th text-right">Наличные</th>
                   <th className="th text-right">Терминал</th>
+                  <th className="th text-right">Каспи</th>
                   <th className="th text-right">Бонусы</th>
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
@@ -485,9 +502,12 @@ export default function RevenueListPage() {
                         className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}>
                         <td className="td">{fmtDate(entry.date)}</td>
                         <td className="td font-medium">{entry.pharmacy.name}</td>
-                        <td className="td text-right">{fmt(entry.cashRevenue)}</td>
-                        <td className="td text-right">{fmt(entry.terminalRevenue)}</td>
-                        <td className="td text-right text-violet-700">
+                        <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
+                        <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
+                        <td className="td text-right text-green-700">
+                          {entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}
+                        </td>
+                        <td className="td text-right text-red-600">
                           {bonuses > 0 ? fmt(bonuses) : '—'}
                         </td>
                         <td className="td text-right font-semibold text-blue-700">
@@ -497,7 +517,33 @@ export default function RevenueListPage() {
                           {expenses > 0 ? fmt(expenses) : '—'}
                         </td>
                         <td className="td text-gray-500">
-                          <div>{entry.employeeName}</div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>{entry.employeeName}</span>
+                            {entry.excludedFromReport && (
+                              <button
+                                className="text-xs px-1.5 py-0.5 rounded font-medium bg-gray-100 text-gray-500 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                title="Нажмите чтобы включить в отчёт за этот месяц"
+                                onClick={async () => {
+                                  const d = new Date(entry.date);
+                                  const year = d.getFullYear();
+                                  const month = d.getMonth() + 1;
+                                  const { isClosed } = await fetch(`/api/months/close?year=${year}&month=${month}`).then((r) => r.json());
+                                  if (isClosed) {
+                                    alert('Месяц закрыт. Чтобы включить эту запись в отчёт, сначала откройте месяц в разделе «Закрытие месяца».');
+                                    return;
+                                  }
+                                  await fetch(`/api/revenue/${entry.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ excludedFromReport: false }),
+                                  });
+                                  load();
+                                }}
+                              >
+                                не учитывается
+                              </button>
+                            )}
+                          </div>
                           {entry.shiftType && (
                             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                               entry.shiftType === 'full_day'
@@ -527,7 +573,7 @@ export default function RevenueListPage() {
                       {/* Доходные статьи под записью */}
                       {incomeItems.length > 0 && (
                         <tr key={`${entry.id}-inc`} className="bg-green-50">
-                          <td colSpan={9} className="px-4 py-1.5">
+                          <td colSpan={10} className="px-4 py-1.5">
                             <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                               <span className="text-xs font-medium text-green-700 shrink-0">Доходы:</span>
                               {incomeItems.map((item) => (
@@ -544,7 +590,7 @@ export default function RevenueListPage() {
                       {/* Бонусы под записью */}
                       {bonusItems.length > 0 && (
                         <tr key={`${entry.id}-bonus`} className="bg-violet-50">
-                          <td colSpan={9} className="px-4 py-1.5">
+                          <td colSpan={10} className="px-4 py-1.5">
                             <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                               <span className="text-xs font-medium text-violet-700 shrink-0">Бонусы:</span>
                               {bonusItems.map((item) => (
@@ -561,7 +607,7 @@ export default function RevenueListPage() {
                       {/* Расходы под записью */}
                       {expenseItems.length > 0 && (
                         <tr key={`${entry.id}-exp`} className="bg-orange-50">
-                          <td colSpan={9} className="px-4 py-1.5">
+                          <td colSpan={10} className="px-4 py-1.5">
                             <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                               <span className="text-xs font-medium text-orange-700 shrink-0">Расходы:</span>
                               {expenseItems.map((item) => (
@@ -578,7 +624,7 @@ export default function RevenueListPage() {
                       {/* Общий комментарий */}
                       {entry.generalComment && (
                         <tr key={`${entry.id}-note`} className="bg-gray-50">
-                          <td colSpan={9} className="px-4 py-1 text-xs text-gray-400">
+                          <td colSpan={10} className="px-4 py-1 text-xs text-gray-400">
                             {entry.generalComment}
                           </td>
                         </tr>
@@ -600,18 +646,18 @@ export default function RevenueListPage() {
             return (
               <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-6 text-sm">
                 <span className="text-gray-500">Итого по выбранным записям:</span>
-                <span>Выручка: <strong className="text-blue-700">{fmt(totalRevenue)}</strong></span>
+                <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
                 {totalIncomes > 0 && (
                   <span>Доходы: <strong className="text-green-700">+{fmt(totalIncomes)}</strong></span>
                 )}
                 {totalBonuses > 0 && (
-                  <span>Бонусы: <strong className="text-violet-700">{fmt(totalBonuses)}</strong></span>
+                  <span>Бонусы: <strong className="text-red-600">{fmt(totalBonuses)}</strong></span>
                 )}
                 {totalExpenses > 0 && (
                   <span>Расходы: <strong className="text-red-600">{fmt(totalExpenses)}</strong></span>
                 )}
                 <span className="border-l border-gray-300 pl-6">
-                  Итого: <strong className={total >= 0 ? 'text-gray-900' : 'text-red-700'}>{fmt(total)}</strong>
+                  Итого: <strong className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</strong>
                 </span>
               </div>
             );

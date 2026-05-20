@@ -53,8 +53,6 @@ const DISTRIBUTIONS = [
   ['specific_pharmacy', 'Конкретная аптека'],
   ['detect_pharmacy_from_text', 'Определять аптеку по тексту'],
   ['split_equally', 'Разделить между всеми активными аптеками'],
-  ['total_only', 'Только общий отчёт'],
-  ['ignore', 'Игнорировать'],
 ];
 
 const emptyForm: RuleForm = {
@@ -112,7 +110,7 @@ export default function TransactionRulesSettingsPage() {
     e.preventDefault();
     const payload = {
       ...form,
-      targetFieldKey: form.distributionType === 'ignore' ? null : form.targetFieldKey || null,
+      targetFieldKey: form.targetFieldKey || null,
       pharmacyId: form.distributionType === 'specific_pharmacy' ? form.pharmacyId || null : null,
       priority: Number(form.priority || 0),
     };
@@ -209,17 +207,15 @@ export default function TransactionRulesSettingsPage() {
             </select>
           </div>
 
-          {form.distributionType !== 'ignore' && (
-            <div>
-              <label className="label">Поле отчёта</label>
-              <select className="input" value={form.targetFieldKey} onChange={(e) => set('targetFieldKey', e.target.value)}>
-                <option value="">— выбрать —</option>
-                {BANK_IMPORT_TARGET_FIELDS.map((field) => (
-                  <option key={field.key} value={field.key}>{field.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="label">Поле отчёта</label>
+            <select className="input" value={form.targetFieldKey} onChange={(e) => set('targetFieldKey', e.target.value)}>
+              <option value="">— выбрать —</option>
+              {BANK_IMPORT_TARGET_FIELDS.map((field) => (
+                <option key={field.key} value={field.key}>{field.label}</option>
+              ))}
+            </select>
+          </div>
 
           {form.distributionType === 'specific_pharmacy' && (
             <div>
