@@ -141,17 +141,41 @@ export default function FileReviewPage() {
       }),
     });
 
+    const updated: ImportedTransaction = await fetch(`/api/imported-transactions/${transaction.id}`).then((r) => r.json());
+
+    setTransactions((prev) => prev.map((tx) => (tx.id === transaction.id ? updated : tx)));
+
+    if (status && status !== transaction.status) {
+      setCounts((prev) => ({
+        ...prev,
+        [transaction.status]: Math.max(0, (prev[transaction.status] ?? 0) - 1),
+        [status]: (prev[status] ?? 0) + 1,
+      }));
+    }
+
     setSavingId(null);
-    await load();
   }
 
   async function approveAllPending() {
     const ready = transactions.filter((tx) => tx.status === 'pending');
     if (!ready.length || !confirm(`Подтвердить ${ready.length} распознанных транзакций?`)) return;
 
-    for (const transaction of ready) {
-      await saveTransaction(transaction, 'approved');
-    }
+    await Promise.all(
+      ready.map((tx) =>
+        fetch(`/api/imported-transactions/${tx.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fieldKey: draftFor(tx).fieldKey || null,
+            pharmacyId: draftFor(tx).pharmacyId || null,
+            distributionType: draftFor(tx).distributionType,
+            status: 'approved',
+          }),
+        })
+      )
+    );
+
+    await load();
   }
 
   const needsReviewCount = counts.needs_review ?? 0;

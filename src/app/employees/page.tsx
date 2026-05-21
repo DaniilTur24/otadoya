@@ -86,7 +86,7 @@ export default function EmployeesPage() {
           {error && (
             <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Имя *</label>
               <input
@@ -171,7 +171,7 @@ function EmployeeRow({
   onDelete: (id: number, name: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 hover:bg-gray-50">
       <div className="flex-1 min-w-0">
         <div className={`font-medium ${emp.isActive ? 'text-gray-900' : 'text-gray-400'}`}>
           {emp.name}
@@ -183,7 +183,7 @@ function EmployeeRow({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-2 shrink-0 flex-wrap">
         <Link
           href={`/employees/${emp.id}`}
           className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50"
