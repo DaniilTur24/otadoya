@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mkdir, writeFile } from 'fs/promises';
-import path from 'path';
+import { uploadFile } from '@/lib/storage';
 import { createHash } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import {
@@ -63,12 +62,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const uploadsDir = path.join(process.cwd(), 'uploads');
-  await mkdir(uploadsDir, { recursive: true });
-
   const safeName = file.name.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]/g, '_');
   const filename = `${Date.now()}_${safeName}`;
-  await writeFile(path.join(uploadsDir, filename), buffer);
+  await uploadFile(filename, buffer);
 
   const result = await prisma.$transaction(async (tx) => {
     const upload = await tx.uploadedFile.create({

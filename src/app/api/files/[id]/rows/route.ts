@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseAllFileRows } from '@/lib/excel-parser';
-import { readFile } from 'fs/promises';
-import path from 'path';
+import { downloadFile } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,13 +26,11 @@ export async function GET(
     return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
   }
 
-  // Читаем файл с диска
-  const filePath = path.join(process.cwd(), 'uploads', uploadedFile.filename);
   let buffer: Buffer;
   try {
-    buffer = await readFile(filePath);
+    buffer = await downloadFile(uploadedFile.filename);
   } catch {
-    return NextResponse.json({ error: 'Файл не найден на диске' }, { status: 404 });
+    return NextResponse.json({ error: 'Файл не найден в хранилище' }, { status: 404 });
   }
 
   // Парсим все строки

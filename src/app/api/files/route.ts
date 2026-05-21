@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseExcelFile } from '@/lib/excel-parser';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { uploadFile } from '@/lib/storage';
 
 // Принудительно динамический роут (не кешируем)
 export const dynamic = 'force-dynamic';
@@ -32,15 +31,10 @@ export async function POST(request: NextRequest) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // Сохраняем файл на диск
-  const uploadsDir = path.join(process.cwd(), 'uploads');
-  await mkdir(uploadsDir, { recursive: true });
-
   const timestamp = Date.now();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const filename = `${timestamp}_${safeName}`;
-  const filepath = path.join(uploadsDir, filename);
-  await writeFile(filepath, buffer);
+  await uploadFile(filename, buffer);
 
   // Парсим Excel и извлекаем расходы/аренду
   let parsedExpenses: Awaited<ReturnType<typeof parseExcelFile>> = [];
