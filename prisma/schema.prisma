@@ -3,9 +3,7 @@ generator client {
 }
 
 datasource db {
-  // Для перехода на PostgreSQL: замени "sqlite" на "postgresql"
-  // и DATABASE_URL в .env на строку подключения PostgreSQL
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
