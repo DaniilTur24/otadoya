@@ -226,7 +226,7 @@ export default function NewRevenuePage() {
 
       <form onSubmit={handleSubmit} className="card p-6 space-y-4">
         {/* Аптека и дата */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="col-span-2">
             <label className="label">Аптека *</label>
             <select
@@ -263,7 +263,7 @@ export default function NewRevenuePage() {
         </div>
 
         {/* Сотрудник и смена */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Сотрудник *</label>
             {employees.length > 0 ? (
@@ -320,7 +320,7 @@ export default function NewRevenuePage() {
         </div>
 
         {/* Выручка */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Выручка наличными *</label>
             <input
@@ -392,7 +392,7 @@ export default function NewRevenuePage() {
             </p>
           ) : (
             <div className="space-y-2">
-              <div className="grid gap-2 text-xs text-gray-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
+              <div className="hidden sm:grid gap-2 text-xs text-gray-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
                 <span></span>
                 <span>Сумма</span>
                 <span>Статья *</span>
@@ -401,7 +401,57 @@ export default function NewRevenuePage() {
               </div>
               {expenseItems.map((item, idx) => (
                 <div key={item.id}>
-                  <div className="grid gap-2 items-start" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
+                  {/* Mobile layout */}
+                  <div className="sm:hidden bg-gray-50 rounded-md p-3 space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <span className="text-xs text-gray-400 w-5 shrink-0">{idx + 1}.</span>
+                      <input
+                        type="number"
+                        value={item.amount}
+                        onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)}
+                        min="0"
+                        step="0.01"
+                        placeholder="Сумма"
+                        className="input flex-1"
+                        autoFocus={idx === expenseItems.length - 1}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeExpenseItem(item.id)}
+                        className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                        title="Удалить"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <select
+                      value={item.category}
+                      onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}
+                      className="input w-full"
+                      required
+                    >
+                      <option value="">— статья —</option>
+                      <optgroup label="Расходы">
+                        {EXPENSE_OPTIONS.map((opt) => (
+                          <option key={opt.key} value={opt.key}>{opt.label}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Доходы">
+                        {INCOME_OPTIONS.map((opt) => (
+                          <option key={opt.key} value={opt.key}>{opt.label}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <input
+                      type="text"
+                      value={item.comment}
+                      onChange={(e) => updateExpenseItem(item.id, 'comment', e.target.value)}
+                      placeholder="Примечание (необязательно)"
+                      className="input w-full"
+                    />
+                  </div>
+                  {/* Desktop layout */}
+                  <div className="hidden sm:grid gap-2 items-start" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
                     <span className="text-xs text-gray-400 mt-2.5 text-right pr-1">
                       {idx + 1}.
                     </span>
@@ -450,7 +500,7 @@ export default function NewRevenuePage() {
                     </button>
                   </div>
                   {item.category === 'pharmaBonus' && (
-                    <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mt-1 ml-8">
+                    <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mt-1 sm:ml-8">
                       Эта сумма пойдёт в расходы и будет автоматически учтена в зарплате сотрудника за месяц.
                     </p>
                   )}
