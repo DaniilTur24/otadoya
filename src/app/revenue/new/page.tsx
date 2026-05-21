@@ -197,7 +197,7 @@ export default function NewRevenuePage() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <h1 className="text-xl font-bold text-gray-900 mb-1">Добавить дневную выручку</h1>
       <p className="text-gray-500 text-sm mb-6">
         Бухгалтер вводит данные с бумажного листочка сотрудника. Запись сразу сохраняется в отчёт.
@@ -226,7 +226,7 @@ export default function NewRevenuePage() {
 
       <form onSubmit={handleSubmit} className="card p-6 space-y-4">
         {/* Аптека и дата */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="col-span-2">
             <label className="label">Аптека *</label>
             <select
@@ -260,11 +260,10 @@ export default function NewRevenuePage() {
             )}
           </div>
 
-          <div>{/* пустая ячейка для выравнивания */}</div>
         </div>
 
         {/* Сотрудник и смена */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="label">Сотрудник *</label>
             {employees.length > 0 ? (

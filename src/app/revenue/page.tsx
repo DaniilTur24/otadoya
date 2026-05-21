@@ -86,6 +86,10 @@ function expenseItemsSum(items: ExpenseItem[]) {
     .reduce((s, i) => s + i.amount, 0);
 }
 
+const ROW_LABEL: Record<string, string> = Object.fromEntries(
+  MONTHLY_REPORT_ROWS.filter((r) => !r.section).map((r) => [r.key, r.label])
+);
+
 export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -100,6 +104,9 @@ export default function RevenueListPage() {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
+
+  const [tooltipEntry, setTooltipEntry] = useState<RevenueEntry | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
@@ -481,6 +488,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Наличные</th>
                   <th className="th text-right">Терминал</th>
                   <th className="th text-right">Каспи</th>
+                  <th className="th text-right">Доп. доходы</th>
                   <th className="th text-right">Бонусы</th>
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
@@ -493,13 +501,17 @@ export default function RevenueListPage() {
                   const bonuses  = pharmaBonusSum(entry.expenseItems);
                   const incomes  = incomeItemsSum(entry.expenseItems);
                   const expenses = expenseItemsSum(entry.expenseItems);
-                  const bonusItems   = entry.expenseItems.filter((i) => i.category === 'pharmaBonus');
-                  const incomeItems  = entry.expenseItems.filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) === 'income');
-                  const expenseItems = entry.expenseItems.filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) !== 'income');
                   return (
                     <>
                       <tr key={entry.id}
-                        className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                        className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}
+                        onMouseEnter={(e) => {
+                          if (entry.expenseItems.some(i => i.category !== 'pharmaBonus') || entry.generalComment) {
+                            setTooltipEntry(entry);
+                            setTooltipPos({ x: e.clientX, y: e.clientY });
+                          }
+                        }}
+                        onMouseLeave={() => setTooltipEntry(null)}>
                         <td className="td">{fmtDate(entry.date)}</td>
                         <td className="td font-medium">{entry.pharmacy.name}</td>
                         <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
@@ -507,10 +519,13 @@ export default function RevenueListPage() {
                         <td className="td text-right text-green-700">
                           {entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}
                         </td>
+                        <td className="td text-right text-green-700">
+                          {incomes > 0 ? fmt(incomes) : '—'}
+                        </td>
                         <td className="td text-right text-red-600">
                           {bonuses > 0 ? fmt(bonuses) : '—'}
                         </td>
-                        <td className="td text-right font-semibold text-blue-700">
+                        <td className="td text-right font-semibold text-green-700">
                           {fmt(entry.totalRevenue)}
                         </td>
                         <td className="td text-right text-red-600">
@@ -570,65 +585,6 @@ export default function RevenueListPage() {
                         </td>
                       </tr>
 
-                      {/* Доходные статьи под записью */}
-                      {incomeItems.length > 0 && (
-                        <tr key={`${entry.id}-inc`} className="bg-green-50">
-                          <td colSpan={10} className="px-4 py-1.5">
-                            <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                              <span className="text-xs font-medium text-green-700 shrink-0">Доходы:</span>
-                              {incomeItems.map((item) => (
-                                <span key={item.id} className="text-xs text-green-800">
-                                  <strong>{fmt(item.amount)}</strong>
-                                  {item.comment && <span className="text-green-600"> — {item.comment}</span>}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-
-                      {/* Бонусы под записью */}
-                      {bonusItems.length > 0 && (
-                        <tr key={`${entry.id}-bonus`} className="bg-violet-50">
-                          <td colSpan={10} className="px-4 py-1.5">
-                            <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                              <span className="text-xs font-medium text-violet-700 shrink-0">Бонусы:</span>
-                              {bonusItems.map((item) => (
-                                <span key={item.id} className="text-xs text-violet-800">
-                                  <strong>{fmt(item.amount)}</strong>
-                                  {item.comment && <span className="text-violet-600"> — {item.comment}</span>}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-
-                      {/* Расходы под записью */}
-                      {expenseItems.length > 0 && (
-                        <tr key={`${entry.id}-exp`} className="bg-orange-50">
-                          <td colSpan={10} className="px-4 py-1.5">
-                            <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                              <span className="text-xs font-medium text-orange-700 shrink-0">Расходы:</span>
-                              {expenseItems.map((item) => (
-                                <span key={item.id} className="text-xs text-orange-800">
-                                  <strong>{fmt(item.amount)}</strong>
-                                  {item.comment && <span className="text-orange-600"> — {item.comment}</span>}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-
-                      {/* Общий комментарий */}
-                      {entry.generalComment && (
-                        <tr key={`${entry.id}-note`} className="bg-gray-50">
-                          <td colSpan={10} className="px-4 py-1 text-xs text-gray-400">
-                            {entry.generalComment}
-                          </td>
-                        </tr>
-                      )}
                     </>
                   );
                 })}
@@ -648,7 +604,7 @@ export default function RevenueListPage() {
                 <span className="text-gray-500">Итого по выбранным записям:</span>
                 <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
                 {totalIncomes > 0 && (
-                  <span>Доходы: <strong className="text-green-700">+{fmt(totalIncomes)}</strong></span>
+                  <span>Доп. доходы: <strong className="text-green-700">{fmt(totalIncomes)}</strong></span>
                 )}
                 {totalBonuses > 0 && (
                   <span>Бонусы: <strong className="text-red-600">{fmt(totalBonuses)}</strong></span>
@@ -664,6 +620,40 @@ export default function RevenueListPage() {
           })()}
         </div>
       )}
+
+      {tooltipEntry && (() => {
+        const items = tooltipEntry.expenseItems.filter(i => i.category !== 'pharmaBonus');
+        const hasContent = items.length > 0 || tooltipEntry.generalComment;
+        if (!hasContent) return null;
+        return (
+          <div
+            style={{ position: 'fixed', left: tooltipPos.x + 16, top: tooltipPos.y + 8, zIndex: 9999 }}
+            className="bg-white shadow-xl border border-gray-200 rounded-lg p-3 text-xs max-w-sm pointer-events-none"
+          >
+            {items.length > 0 && (
+              <div className="space-y-1.5">
+                {items.map((item) => {
+                  const type = monthlyFieldType(item.category);
+                  const colorClass = type === 'income' ? 'text-green-700' : 'text-orange-700';
+                  const label = ROW_LABEL[item.category ?? ''] ?? item.category ?? 'Без статьи';
+                  return (
+                    <div key={item.id} className="flex gap-2 items-baseline">
+                      <span className={`font-semibold shrink-0 ${colorClass}`}>{fmt(item.amount)}</span>
+                      <span className="text-gray-700">{label}</span>
+                      {item.comment && <span className="text-gray-400">— {item.comment}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {tooltipEntry.generalComment && (
+              <div className={`text-gray-400 italic ${items.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
+                {tooltipEntry.generalComment}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

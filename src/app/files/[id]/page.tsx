@@ -212,6 +212,13 @@ export default function FileReviewPage() {
         )}
       </div>
 
+      {!loading && (search.trim() || statusFilter !== 'all') && (
+        <div className="mb-3 text-sm text-gray-500">
+          Найдено: <strong className="text-gray-800">{transactions.length}</strong>
+          {search.trim() && <span className="ml-1">по запросу «{search.trim()}»</span>}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
       ) : transactions.length === 0 ? (

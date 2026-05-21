@@ -40,7 +40,7 @@ export async function GET(
         orderBy: [{ pharmacy: { name: 'asc' } }, { id: 'asc' }],
       },
     },
-    orderBy: [{ status: 'desc' }, { transactionDate: 'asc' }, { id: 'asc' }],
+    orderBy: [{ transactionDate: 'asc' }, { id: 'asc' }],
   });
 
   const counts = await prisma.importedTransaction.groupBy({
