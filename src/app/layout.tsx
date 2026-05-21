@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Navigation } from '@/components/Navigation';
+import { AuthGuard } from '@/components/AuthGuard';
 
 export const metadata: Metadata = {
   title: 'Аптека — Учёт выручки',
@@ -15,8 +16,9 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body>
+        <AuthGuard />
         <Navigation />
-        <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
+        <main className="max-w-screen-2xl mx-auto px-4 py-6">{children}</main>
       </body>
     </html>
   );
