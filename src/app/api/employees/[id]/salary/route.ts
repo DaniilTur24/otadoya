@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateEmployeeMonthlySalary, getEmployeeMonthlyShifts } from '@/lib/salary-calculator';
+import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const month = Number(searchParams.get('month') || new Date().getMonth() + 1);
   const year  = Number(searchParams.get('year')  || new Date().getFullYear());
@@ -14,7 +18,7 @@ export async function GET(
     ? Number(searchParams.get('pharmacyId'))
     : undefined;
 
-  const employeeId = Number(params.id);
+  const employeeId = Number((await params).id);
 
   const [summary, shifts] = await Promise.all([
     calculateEmployeeMonthlySalary(employeeId, month, year, pharmacyId),

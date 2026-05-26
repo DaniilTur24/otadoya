@@ -132,7 +132,7 @@ export default function FilesPage() {
               <input
                 id="bankFileInput"
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx"
                 required
                 className="input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700"
                 onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}

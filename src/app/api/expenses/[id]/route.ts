@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin } from '@/lib/api-auth';
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const body = await request.json();
   const { category, pharmacyId, reviewerComment, status, amount } = body;
 
@@ -16,7 +20,7 @@ export async function PUT(
   if (amount != null) data.amount = String(amount);
 
   const entry = await prisma.extractedExpenseEntry.update({
-    where: { id: Number(params.id) },
+    where: { id: Number((await params).id) },
     data,
     include: { pharmacy: true },
   });

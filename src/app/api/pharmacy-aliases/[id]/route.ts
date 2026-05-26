@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
   const body = await request.json();
 
   const alias = await prisma.pharmacyAlias.update({
@@ -24,9 +28,12 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  await prisma.pharmacyAlias.delete({ where: { id: Number(params.id) } });
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  await prisma.pharmacyAlias.delete({ where: { id: Number((await params).id) } });
   return NextResponse.json({ ok: true });
 }

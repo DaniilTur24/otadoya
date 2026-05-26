@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
+import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown }[] | undefined) ?? [];
@@ -20,6 +21,9 @@ function serializeEntry(entry: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
   const pharmacyId = searchParams.get('pharmacyId');
@@ -37,7 +41,10 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(entries.map((e) => serializeEntry(e as unknown as Record<string, unknown>)));
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
   const body = await request.json();
   const {
     pharmacyId,

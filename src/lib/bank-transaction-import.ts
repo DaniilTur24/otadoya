@@ -1,5 +1,5 @@
-import * as XLSX from 'xlsx';
 import { Prisma } from '@prisma/client';
+import { excelSerialDateToDate, readFirstWorksheetRows } from '@/lib/xlsx-reader';
 
 type ImportTx = Prisma.TransactionClient;
 
@@ -138,8 +138,7 @@ function parseDate(value: unknown): Date | null {
   if (value instanceof Date && !isNaN(value.getTime())) return value;
 
   if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d);
+    return excelSerialDateToDate(value);
   }
 
   const text = visibleText(value);
@@ -173,18 +172,8 @@ function parseAmount(value: unknown): string {
   return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
 }
 
-function parseStructure(buffer: Buffer): ColumnMap | null {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) return null;
-
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    raw: false,
-    dateNF: 'YYYY-MM-DD',
-  }) as unknown[][];
-
+async function parseStructure(buffer: Buffer): Promise<ColumnMap | null> {
+  const rows = await readFirstWorksheetRows(buffer);
   if (rows.length < 2) return null;
 
   const headerKeywords = [
@@ -258,8 +247,8 @@ function collectSearchableText(row: unknown[]): string {
   return row.map(visibleText).filter(Boolean).join(' ');
 }
 
-export function parseBankTransactionsExcel(buffer: Buffer): ParsedBankTransaction[] {
-  const structure = parseStructure(buffer);
+export async function parseBankTransactionsExcel(buffer: Buffer): Promise<ParsedBankTransaction[]> {
+  const structure = await parseStructure(buffer);
   if (!structure) return [];
 
   const {

@@ -13,12 +13,28 @@ const BOOKKEEPER_ALLOWED = [
   '/api/months/close',
 ];
 
+const MAX_EXCEL_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_PDF_UPLOAD_BYTES = 15 * 1024 * 1024;
+
 function isBookkeeperAllowed(pathname: string): boolean {
   return BOOKKEEPER_ALLOWED.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/') || pathname.startsWith(prefix + '?'));
 }
 
+function getUploadLimit(pathname: string, method: string): number | null {
+  if (method !== 'POST') return null;
+  if (pathname === '/api/files' || pathname === '/api/bank-imports') return MAX_EXCEL_UPLOAD_BYTES;
+  if (pathname === '/api/reports/pdf-import') return MAX_PDF_UPLOAD_BYTES;
+  return null;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  const uploadLimit = getUploadLimit(pathname, request.method);
+  const contentLength = Number(request.headers.get('content-length') || 0);
+  if (uploadLimit && contentLength > uploadLimit) {
+    return NextResponse.json({ error: 'Файл слишком большой' }, { status: 413 });
+  }
 
   // Пропускаем страницу входа и её API
   if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 async function isMonthClosed(date: Date): Promise<boolean> {
   const year  = date.getFullYear();
@@ -23,25 +24,33 @@ function serialize(entry: Record<string, unknown>) {
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const entry = await prisma.dailyRevenueEntry.findUnique({ where: { id: Number(params.id) } });
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
+  const entry = await prisma.dailyRevenueEntry.findUnique({ where: { id } });
   if (!entry) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 });
 
   if (await isMonthClosed(entry.date)) {
     return NextResponse.json({ error: 'Месяц закрыт — удаление невозможно' }, { status: 423 });
   }
 
-  await prisma.dailyRevenueEntry.delete({ where: { id: Number(params.id) } });
+  await prisma.dailyRevenueEntry.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const existing = await prisma.dailyRevenueEntry.findUnique({ where: { id: Number(params.id) } });
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
+  const existing = await prisma.dailyRevenueEntry.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 });
 
   if (await isMonthClosed(existing.date)) {
@@ -96,12 +105,12 @@ export async function PUT(
         : null;
 
     const entry = await prisma.$transaction(async (tx) => {
-      await tx.dailyExpenseItem.deleteMany({ where: { entryId: Number(params.id) } });
+      await tx.dailyExpenseItem.deleteMany({ where: { entryId: id } });
 
       if (filled.length > 0) {
         await tx.dailyExpenseItem.createMany({
           data: filled.map((i: { amount: string; category?: string; comment?: string }) => ({
-            entryId: Number(params.id),
+            entryId: id,
             amount: i.amount,
             category: i.category || null,
             comment: i.comment || null,
@@ -110,7 +119,7 @@ export async function PUT(
       }
 
       return tx.dailyRevenueEntry.update({
-        where: { id: Number(params.id) },
+        where: { id },
         data,
         include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
       });
@@ -121,7 +130,7 @@ export async function PUT(
 
   // Если строки расходов не переданы — обновляем только скалярные поля
   const entry = await prisma.dailyRevenueEntry.update({
-    where: { id: Number(params.id) },
+    where: { id },
     data,
     include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
   });

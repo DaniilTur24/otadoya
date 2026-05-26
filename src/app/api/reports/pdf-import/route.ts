@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parsePdfReport } from '@/lib/pdf-report-parser';
+import { requireAdmin } from '@/lib/api-auth';
+import { validatePdfFile } from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
 
 // GET — список всех загруженных PDF-отчётов
 export async function GET(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const pharmacyId = searchParams.get('pharmacyId');
   const year       = searchParams.get('year');
@@ -34,6 +39,9 @@ export async function GET(request: NextRequest) {
 
 // POST — загрузить PDF, извлечь данные (НЕ сохранять — только вернуть превью)
 export async function POST(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const formData   = await request.formData();
   const file       = formData.get('file') as File | null;
   const pharmacyId = formData.get('pharmacyId') as string | null;
@@ -47,9 +55,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    return NextResponse.json({ error: 'Принимается только PDF-файл' }, { status: 400 });
-  }
+  const fileValidation = validatePdfFile(file);
+  if (fileValidation) return fileValidation;
 
   const buffer = Buffer.from(await file.arrayBuffer());
 

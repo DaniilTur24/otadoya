@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 function serialize(emp: Record<string, unknown>) {
   return { ...emp, baseSalary: Number(emp.baseSalary) };
 }
 
 export async function GET(request: NextRequest) {
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const isActiveParam = searchParams.get('isActive');
 
@@ -21,7 +25,10 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(employees.map((e) => serialize(e as unknown as Record<string, unknown>)));
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { name, baseSalary, isActive } = await request.json();
 
   if (!name?.trim()) {

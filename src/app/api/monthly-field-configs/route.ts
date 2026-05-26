@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { MONTHLY_REPORT_ROWS } from '@/lib/monthly-report-fields';
+import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const saved = await prisma.monthlyFieldConfig.findMany();
   const savedMap = Object.fromEntries(saved.map((c) => [c.fieldKey, c.rowType]));
 
@@ -20,6 +24,9 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { fieldKey, rowType } = await request.json();
 
   if (!fieldKey || !['income', 'expense', 'neutral'].includes(rowType)) {

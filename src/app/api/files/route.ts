@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseExcelFile } from '@/lib/excel-parser';
 import { uploadFile } from '@/lib/storage';
+import { requireAdmin } from '@/lib/api-auth';
+import { validateXlsxFile } from '@/lib/upload-limits';
 
 // Принудительно динамический роут (не кешируем)
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const files = await prisma.uploadedFile.findMany({
     where: {
       fileType: { not: 'bank_transactions_excel' },
@@ -21,6 +26,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const formData = await request.formData();
   const file = formData.get('file') as File | null;
   const pharmacyId = formData.get('pharmacyId') as string | null;
@@ -28,6 +36,9 @@ export async function POST(request: NextRequest) {
   if (!file) {
     return NextResponse.json({ error: 'Файл обязателен' }, { status: 400 });
   }
+
+  const fileValidation = validateXlsxFile(file);
+  if (fileValidation) return fileValidation;
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
@@ -40,7 +51,7 @@ export async function POST(request: NextRequest) {
   let parsedExpenses: Awaited<ReturnType<typeof parseExcelFile>> = [];
   let parseError: string | null = null;
   try {
-    parsedExpenses = parseExcelFile(buffer);
+    parsedExpenses = await parseExcelFile(buffer);
   } catch (e) {
     parseError = e instanceof Error ? e.message : 'Ошибка парсинга файла';
   }

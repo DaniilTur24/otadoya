@@ -15,7 +15,7 @@ No test suite exists in this project.
 
 ## Architecture
 
-**Next.js 14 App Router** with Prisma ORM. Two environments:
+**Next.js 15 App Router** with Prisma ORM. Two environments:
 - **Local dev**: SQLite (`prisma/dev.db`), files saved to `uploads/` folder
 - **Production (Railway)**: PostgreSQL, files stored in Cloudflare R2
 
