@@ -35,6 +35,14 @@ export async function PUT(
   const fieldKey = body.fieldKey ? String(body.fieldKey) : null;
   const pharmacyId = body.pharmacyId ? Number(body.pharmacyId) : null;
   const status = body.status ? String(body.status) : undefined;
+  const customDistribution = Array.isArray(body.customDistribution)
+    ? (body.customDistribution as { pharmacyId: number; amount: string }[])
+    : null;
+
+  const VALID_STATUSES = ['pending', 'approved', 'rejected', 'needs_review'];
+  if (status && !VALID_STATUSES.includes(status)) {
+    return NextResponse.json({ error: `Некорректный статус: ${status}` }, { status: 400 });
+  }
   const accountantComment =
     typeof body.accountantComment === 'string' ? body.accountantComment.trim() || null : undefined;
 
@@ -44,6 +52,7 @@ export async function PUT(
       distributionType,
       pharmacyId,
       status,
+      customDistribution,
     });
 
     if (accountantComment !== undefined) {

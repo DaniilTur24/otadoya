@@ -1,12 +1,18 @@
 import * as XLSX from 'xlsx';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 type ImportTx = Prisma.TransactionClient;
 
 export type DistributionType =
   | 'specific_pharmacy'
   | 'detect_pharmacy_from_text'
-  | 'split_equally';
+  | 'split_equally'
+  | 'split_custom';
+
+export interface CustomDistributionItem {
+  pharmacyId: number;
+  amount: string;
+}
 
 export interface ParsedBankTransaction {
   rowIndex: number;
@@ -383,9 +389,10 @@ async function createReportValues(
     distributionType: string | null;
     pharmacyId: number | null;
     activePharmacies: PharmacyLike[];
+    customDistribution?: CustomDistributionItem[] | null;
   }
 ): Promise<{ status: string; detectedPharmacyId: number | null }> {
-  const { importedTransactionId, uploadId, amount, fieldKey, distributionType, pharmacyId, activePharmacies } = params;
+  const { importedTransactionId, uploadId, amount, fieldKey, distributionType, pharmacyId, activePharmacies, customDistribution } = params;
 
   if (!fieldKey || !distributionType) {
     return { status: 'needs_review', detectedPharmacyId: pharmacyId };
@@ -419,6 +426,24 @@ async function createReportValues(
         pharmacyId: pharmacy.id,
         fieldKey,
         amount: shares[index],
+        status: 'pending',
+        distributionType,
+      })),
+    });
+    return { status: 'pending', detectedPharmacyId: null };
+  }
+
+  if (distributionType === 'split_custom') {
+    if (!customDistribution || customDistribution.length === 0) {
+      return { status: 'needs_review', detectedPharmacyId: null };
+    }
+    await tx.importedReportValue.createMany({
+      data: customDistribution.map((item) => ({
+        importedTransactionId,
+        uploadId,
+        pharmacyId: item.pharmacyId,
+        fieldKey,
+        amount: item.amount,
         status: 'pending',
         distributionType,
       })),
@@ -583,6 +608,7 @@ export async function regenerateImportedReportValues(
     distributionType: string | null;
     pharmacyId: number | null;
     status?: string;
+    customDistribution?: CustomDistributionItem[] | null;
   }
 ) {
   const transaction = await tx.importedTransaction.findUnique({
@@ -609,6 +635,7 @@ export async function regenerateImportedReportValues(
     distributionType: params.distributionType,
     pharmacyId: params.pharmacyId,
     activePharmacies,
+    customDistribution: params.customDistribution,
   });
 
   const status =
@@ -624,6 +651,7 @@ export async function regenerateImportedReportValues(
       targetFieldKey: params.fieldKey ?? null,
       distributionType: params.distributionType,
       detectedPharmacyId: result.detectedPharmacyId ?? params.pharmacyId,
+      customDistribution: (params.customDistribution as Prisma.InputJsonValue | null) ?? Prisma.DbNull,
       status,
     },
   });

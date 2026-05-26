@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+async function isMonthClosed(date: Date): Promise<boolean> {
+  const year  = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const closed = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
+  return !!closed;
+}
+
 function serialize(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown }[] | undefined) ?? [];
   return {
@@ -19,6 +26,13 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const entry = await prisma.dailyRevenueEntry.findUnique({ where: { id: Number(params.id) } });
+  if (!entry) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 });
+
+  if (await isMonthClosed(entry.date)) {
+    return NextResponse.json({ error: 'Месяц закрыт — удаление невозможно' }, { status: 423 });
+  }
+
   await prisma.dailyRevenueEntry.delete({ where: { id: Number(params.id) } });
   return NextResponse.json({ ok: true });
 }
@@ -27,12 +41,24 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const existing = await prisma.dailyRevenueEntry.findUnique({ where: { id: Number(params.id) } });
+  if (!existing) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 });
+
+  if (await isMonthClosed(existing.date)) {
+    return NextResponse.json({ error: 'Месяц закрыт — изменения невозможны' }, { status: 423 });
+  }
+
   const body = await request.json();
   const {
     pharmacyId, date, cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue,
     expenseItems, generalComment, employeeName, employeeId, shiftType,
     bookkeeperComment, status, excludedFromReport,
   } = body;
+
+  const VALID_STATUSES = ['pending', 'approved', 'rejected'];
+  if (status && !VALID_STATUSES.includes(status)) {
+    return NextResponse.json({ error: `Некорректный статус: ${status}` }, { status: 400 });
+  }
 
   // Скалярные поля записи
   const data: Record<string, unknown> = {};

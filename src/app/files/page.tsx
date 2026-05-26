@@ -81,7 +81,7 @@ export default function FilesPage() {
       method: 'POST',
       body: formData,
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
 
     if (res.ok) {
       setMessage(
@@ -101,7 +101,13 @@ export default function FilesPage() {
 
   async function remove(id: number, name: string) {
     if (!confirm(`Удалить импорт «${name}» и все связанные транзакции?`)) return;
-    await fetch(`/api/bank-imports/${id}`, { method: 'DELETE' });
+    setError('');
+    const res = await fetch(`/api/bank-imports/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error || 'Не удалось удалить импорт');
+      return;
+    }
     loadImports();
   }
 

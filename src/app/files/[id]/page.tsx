@@ -37,21 +37,29 @@ interface ImportedTransaction {
   targetFieldKey: string | null;
   detectedPharmacyId: number | null;
   distributionType: string | null;
+  customDistribution: CustomDistributionItem[] | null;
   status: string;
   accountantComment: string | null;
   reportValues: ReportValue[];
+}
+
+interface CustomDistributionItem {
+  pharmacyId: number;
+  amount: string;
 }
 
 interface Draft {
   fieldKey: string;
   pharmacyId: string;
   distributionType: string;
+  customDistribution: CustomDistributionItem[];
 }
 
 const DISTRIBUTIONS = [
   ['specific_pharmacy', 'Конкретная аптека'],
   ['detect_pharmacy_from_text', 'Определять по тексту'],
   ['split_equally', 'Разделить поровну'],
+  ['split_custom', 'Произвольное распределение'],
 ];
 
 const STATUS_FILTERS = [
@@ -61,6 +69,14 @@ const STATUS_FILTERS = [
   ['approved', 'Подтверждены'],
   ['rejected', 'Отклонены'],
 ];
+
+function splitEqually(total: number, parts: number): string[] {
+  if (parts <= 0) return [];
+  const totalCents = Math.round(total * 100);
+  const base = Math.trunc(totalCents / parts);
+  const remainder = totalCents - base * parts;
+  return Array.from({ length: parts }, (_, i) => ((base + (i < remainder ? 1 : 0)) / 100).toFixed(2));
+}
 
 function fmtAmount(value: string | number) {
   const number = Number(value);
@@ -113,6 +129,7 @@ export default function FileReviewPage() {
         fieldKey: transaction.targetFieldKey ?? '',
         pharmacyId: transaction.detectedPharmacyId ? String(transaction.detectedPharmacyId) : '',
         distributionType: transaction.distributionType || 'detect_pharmacy_from_text',
+        customDistribution: transaction.customDistribution ?? [],
       }
     );
   }
@@ -137,6 +154,7 @@ export default function FileReviewPage() {
             ? draft.pharmacyId || null
             : null,
         distributionType: draft.distributionType,
+        customDistribution: draft.distributionType === 'split_custom' ? draft.customDistribution : null,
         status,
       }),
     });
@@ -161,18 +179,20 @@ export default function FileReviewPage() {
     if (!ready.length || !confirm(`Подтвердить ${ready.length} распознанных транзакций?`)) return;
 
     await Promise.all(
-      ready.map((tx) =>
-        fetch(`/api/imported-transactions/${tx.id}`, {
+      ready.map((tx) => {
+        const d = draftFor(tx);
+        return fetch(`/api/imported-transactions/${tx.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            fieldKey: draftFor(tx).fieldKey || null,
-            pharmacyId: draftFor(tx).pharmacyId || null,
-            distributionType: draftFor(tx).distributionType,
+            fieldKey: d.fieldKey || null,
+            pharmacyId: d.pharmacyId || null,
+            distributionType: d.distributionType,
+            customDistribution: d.distributionType === 'split_custom' ? d.customDistribution : null,
             status: 'approved',
           }),
-        })
-      )
+        });
+      })
     );
 
     await load();
@@ -330,6 +350,74 @@ export default function FileReviewPage() {
                             </option>
                           ))}
                         </select>
+                      </div>
+                    )}
+
+                    {draft.distributionType === 'split_custom' && (
+                      <div>
+                        <label className="label text-xs">Распределение по аптекам</label>
+                        <div className="border border-gray-200 rounded-md overflow-hidden mb-2">
+                          {pharmacies.map((pharmacy) => {
+                            const entry = draft.customDistribution.find((d) => d.pharmacyId === pharmacy.id);
+                            const isChecked = !!entry;
+                            return (
+                              <div
+                                key={pharmacy.id}
+                                className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-100 last:border-0 bg-white"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="shrink-0"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    const next = e.target.checked
+                                      ? [...draft.customDistribution, { pharmacyId: pharmacy.id, amount: '' }]
+                                      : draft.customDistribution.filter((d) => d.pharmacyId !== pharmacy.id);
+                                    updateDraft(transaction.id, { customDistribution: next });
+                                  }}
+                                />
+                                <span className="text-xs flex-1 truncate">{pharmacy.name}</span>
+                                {isChecked && (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    className="input text-xs py-0.5 w-28 text-right"
+                                    placeholder="0.00"
+                                    value={entry.amount}
+                                    onChange={(e) => {
+                                      const next = draft.customDistribution.map((d) =>
+                                        d.pharmacyId === pharmacy.id ? { ...d, amount: e.target.value } : d
+                                      );
+                                      updateDraft(transaction.id, { customDistribution: next });
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            className="btn-secondary text-xs"
+                            onClick={() => {
+                              const checked = draft.customDistribution;
+                              if (checked.length === 0) return;
+                              const shares = splitEqually(Number(transaction.amount), checked.length);
+                              updateDraft(transaction.id, {
+                                customDistribution: checked.map((d, i) => ({ ...d, amount: shares[i] })),
+                              });
+                            }}
+                          >
+                            Поровну
+                          </button>
+                          <span className="text-xs text-gray-500 tabular-nums">
+                            {fmtAmount(draft.customDistribution.reduce((s, d) => s + Number(d.amount || 0), 0))}
+                            {' / '}
+                            {fmtAmount(transaction.amount)}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>
