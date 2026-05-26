@@ -230,6 +230,7 @@ model ImportedTransaction {
   detectedPharmacyId Int?      @map("detected_pharmacy_id")
   targetFieldKey     String?   @map("target_field_key")
   distributionType   String?   @map("distribution_type")
+  customDistribution Json?     @map("custom_distribution")
   status             String    @default("pending")
   accountantComment  String?   @map("accountant_comment")
   createdAt          DateTime  @default(now()) @map("created_at")

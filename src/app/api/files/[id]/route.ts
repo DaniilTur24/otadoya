@@ -11,10 +11,12 @@ export async function DELETE(
   });
   if (!file) return NextResponse.json({ error: 'Не найдено' }, { status: 404 });
 
-  // Удаляем запись из БД (расходы удалятся каскадно)
   await prisma.uploadedFile.delete({ where: { id: Number(params.id) } });
-
-  await deleteFile(file.filename);
+  try {
+    await deleteFile(file.filename);
+  } catch (err) {
+    console.error('Не удалось удалить файл из хранилища (сиротский файл):', file.filename, err);
+  }
 
   return NextResponse.json({ ok: true });
 }

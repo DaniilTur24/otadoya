@@ -27,69 +27,75 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData();
-  const file = formData.get('file') as File | null;
-  const month = Number(formData.get('month'));
-  const year = Number(formData.get('year'));
+  try {
+    const formData = await request.formData();
+    const file = formData.get('file') as File | null;
+    const month = Number(formData.get('month'));
+    const year = Number(formData.get('year'));
 
-  if (!file) {
-    return NextResponse.json({ error: 'Файл обязателен' }, { status: 400 });
-  }
+    if (!file) {
+      return NextResponse.json({ error: 'Файл обязателен' }, { status: 400 });
+    }
 
-  if (!month || month < 1 || month > 12 || !year || year < 2000) {
-    return NextResponse.json({ error: 'Выберите корректный месяц и год' }, { status: 400 });
-  }
+    if (!month || month < 1 || month > 12 || !year || year < 2000) {
+      return NextResponse.json({ error: 'Выберите корректный месяц и год' }, { status: 400 });
+    }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const fileHash = createHash('sha256').update(buffer).digest('hex');
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const fileHash = createHash('sha256').update(buffer).digest('hex');
 
-  const duplicate = await prisma.uploadedFile.findFirst({
-    where: { fileHash, fileType: 'bank_transactions_excel', month, year },
-  });
-  if (duplicate) {
-    return NextResponse.json(
-      { error: 'Этот файл уже был загружен для данного месяца' },
-      { status: 409 }
-    );
-  }
+    const duplicate = await prisma.uploadedFile.findFirst({
+      where: { fileHash, fileType: 'bank_transactions_excel', month, year },
+    });
+    if (duplicate) {
+      return NextResponse.json(
+        { error: 'Этот файл уже был загружен для данного месяца' },
+        { status: 409 }
+      );
+    }
 
-  const transactions = parseBankTransactionsExcel(buffer);
+    const transactions = parseBankTransactionsExcel(buffer);
 
-  if (transactions.length === 0) {
-    return NextResponse.json(
-      { error: 'Не удалось найти строки транзакций в файле' },
-      { status: 400 }
-    );
-  }
+    if (transactions.length === 0) {
+      return NextResponse.json(
+        { error: 'Не удалось найти строки транзакций в файле' },
+        { status: 400 }
+      );
+    }
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]/g, '_');
-  const filename = `${Date.now()}_${safeName}`;
-  await uploadFile(filename, buffer);
+    const safeName = file.name.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]/g, '_');
+    const filename = `${Date.now()}_${safeName}`;
+    await uploadFile(filename, buffer);
 
-  const result = await prisma.$transaction(async (tx) => {
-    const upload = await tx.uploadedFile.create({
-      data: {
-        filename,
-        originalName: file.name,
-        fileType: 'bank_transactions_excel',
-        month,
-        year,
-        fileHash,
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      const upload = await tx.uploadedFile.create({
+        data: {
+          filename,
+          originalName: file.name,
+          fileType: 'bank_transactions_excel',
+          month,
+          year,
+          fileHash,
+        },
+      });
+
+      const stats = await importParsedBankTransactions(tx, upload.id, transactions);
+
+      return { upload, stats };
     });
 
-    const stats = await importParsedBankTransactions(tx, upload.id, transactions);
-
-    return { upload, stats };
-  });
-
-  return NextResponse.json(
-    {
-      id: result.upload.id,
-      originalName: result.upload.originalName,
-      importedCount: result.stats.importedCount,
-      needsReviewCount: result.stats.needsReviewCount,
-    },
-    { status: 201 }
-  );
+    return NextResponse.json(
+      {
+        id: result.upload.id,
+        originalName: result.upload.originalName,
+        importedCount: result.stats.importedCount,
+        needsReviewCount: result.stats.needsReviewCount,
+      },
+      { status: 201 }
+    );
+  } catch (err) {
+    console.error('Ошибка импорта банковской выписки:', err);
+    const message = err instanceof Error ? err.message : 'Внутренняя ошибка сервера';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
