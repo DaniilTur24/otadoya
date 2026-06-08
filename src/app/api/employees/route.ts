@@ -22,7 +22,15 @@ export async function GET(request: NextRequest) {
 
   // Для менеджера — показываем только сотрудников, привязанных к его аптекам
   if (allowedIds !== null) {
-    where.pharmacies = { some: { pharmacyId: { in: allowedIds } } };
+    if (pharmacyIdParam) {
+      const pharmacyId = Number(pharmacyIdParam);
+      if (!allowedIds.includes(pharmacyId)) {
+        return NextResponse.json({ error: 'Аптека вне зоны ответственности' }, { status: 403 });
+      }
+      where.pharmacies = { some: { pharmacyId } };
+    } else {
+      where.pharmacies = { some: { pharmacyId: { in: allowedIds } } };
+    }
   } else if (pharmacyIdParam) {
     // Admin/bookkeeper могут фильтровать по конкретной аптеке
     where.pharmacies = { some: { pharmacyId: Number(pharmacyIdParam) } };
