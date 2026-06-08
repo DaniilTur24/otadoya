@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
   const router = useRouter();
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -14,10 +15,13 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
+    const body: Record<string, string> = { password };
+    if (username.trim()) body.username = username.trim();
+
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify(body),
     });
 
     if (res.ok) {
@@ -35,7 +39,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Аптека Учёт</h1>
-          <p className="text-sm text-gray-500 mt-1">Введите пароль для входа</p>
+          <p className="text-sm text-gray-500 mt-1">Введите данные для входа</p>
         </div>
 
         <form onSubmit={handleSubmit} className="card p-6 space-y-4">
@@ -46,14 +50,27 @@ export default function LoginPage() {
           )}
 
           <div>
+            <label className="label">Логин (только для заведующих)</label>
+            <input
+              type="text"
+              className="input"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+              autoComplete="username"
+              placeholder="Оставьте пустым для admin/бухгалтер"
+            />
+          </div>
+
+          <div>
             <label className="label">Пароль</label>
             <input
               type="password"
               className="input"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoFocus
               required
+              autoComplete="current-password"
               placeholder="••••••••"
             />
           </div>

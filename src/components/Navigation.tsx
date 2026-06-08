@@ -5,14 +5,21 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 const ALL_LINKS = [
-  { href: '/revenue/new', label: '+ Добавить выручку', roles: ['admin', 'bookkeeper'] },
-  { href: '/revenue', label: 'Записи выручки', roles: ['admin', 'bookkeeper'] },
+  { href: '/revenue/new', label: '+ Добавить выручку', roles: ['admin', 'bookkeeper', 'manager'], exact: true },
+  { href: '/revenue', label: 'Записи выручки', roles: ['admin', 'bookkeeper', 'manager'], exact: true },
   { href: '/employees', label: 'Сотрудники', roles: ['admin', 'bookkeeper'] },
+  { href: '/users', label: 'Заведующие', roles: ['admin', 'bookkeeper'] },
   { href: '/files', label: 'Банк / Импорт', roles: ['admin'] },
   { href: '/reports/monthly', label: 'Закрытие месяца', roles: ['admin'] },
   { href: '/reports/pdf-import', label: 'Импорт PDF', roles: ['admin'] },
   { href: '/settings', label: 'Настройки', roles: ['admin'] },
 ];
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: 'Администратор',
+  bookkeeper: 'Бухгалтер',
+  manager: 'Заведующий',
+};
 
 export function Navigation() {
   const pathname = usePathname();
@@ -39,20 +46,18 @@ export function Navigation() {
 
   if (!role) return null;
 
-  const links = ALL_LINKS.filter((l) => l.roles.includes(role));
-  const roleLabel = role === 'admin' ? 'Администратор' : 'Бухгалтер';
+  const links = ALL_LINKS.filter((l) => role && l.roles.includes(role));
+  const roleLabel = ROLE_LABELS[role] ?? role;
 
   return (
     <nav className="bg-white border-b border-gray-200 shadow-sm">
       <div className="max-w-7xl mx-auto px-4">
-        {/* Desktop + mobile top bar */}
         <div className="flex items-center h-14 gap-1">
           <span className="font-bold text-blue-700 mr-2 text-sm shrink-0">Аптека Учёт</span>
 
-          {/* Desktop links */}
           <div className="hidden md:flex items-center gap-1 flex-1 flex-wrap">
             {links.map((link) => {
-              const active = pathname.startsWith(link.href);
+              const active = link.exact ? pathname === link.href : pathname.startsWith(link.href);
               return (
                 <Link
                   key={link.href}
@@ -67,7 +72,6 @@ export function Navigation() {
             })}
           </div>
 
-          {/* Desktop role + logout */}
           <div className="hidden md:flex ml-auto items-center gap-3">
             <span className="text-xs text-gray-400">{roleLabel}</span>
             <button
@@ -78,7 +82,6 @@ export function Navigation() {
             </button>
           </div>
 
-          {/* Mobile: role label + hamburger */}
           <div className="flex md:hidden ml-auto items-center gap-2">
             <span className="text-xs text-gray-400">{roleLabel}</span>
             <button
@@ -99,11 +102,10 @@ export function Navigation() {
           </div>
         </div>
 
-        {/* Mobile dropdown menu */}
         {menuOpen && (
           <div className="md:hidden border-t border-gray-100 py-2 space-y-0.5">
             {links.map((link) => {
-              const active = pathname.startsWith(link.href);
+              const active = link.exact ? pathname === link.href : pathname.startsWith(link.href);
               return (
                 <Link
                   key={link.href}

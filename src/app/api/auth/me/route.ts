@@ -11,8 +11,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, secret);
-    return NextResponse.json({ role: payload.role });
+    return NextResponse.json({
+      role: payload.role ?? null,
+      userId: payload.userId ?? null,
+    });
   } catch {
-    return NextResponse.json({ role: null });
+    return NextResponse.json({ role: null, userId: null });
   }
 }

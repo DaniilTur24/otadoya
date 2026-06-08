@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
 import { timingSafeEqual } from 'crypto';
+import { prisma } from '@/lib/prisma';
+import { verifyPassword } from '@/lib/password';
 import {
   checkLoginRateLimit,
   clearLoginRateLimit,
@@ -12,10 +14,8 @@ const secret = new TextEncoder().encode(process.env.AUTH_SECRET!);
 
 function passwordMatches(input: unknown, expected: string | undefined): boolean {
   if (typeof input !== 'string' || !expected) return false;
-
   const inputBuffer = Buffer.from(input);
   const expectedBuffer = Buffer.from(expected);
-
   if (inputBuffer.length !== expectedBuffer.length) return false;
   return timingSafeEqual(inputBuffer, expectedBuffer);
 }
@@ -26,29 +26,40 @@ export async function POST(request: NextRequest) {
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: 'Слишком много попыток входа. Попробуйте позже' },
-      {
-        status: 429,
-        headers: {
-          'Retry-After': String(rateLimit.retryAfterSeconds ?? 60),
-        },
-      }
+      { status: 429, headers: { 'Retry-After': String(rateLimit.retryAfterSeconds ?? 60) } }
     );
   }
 
-  const { password } = await request.json().catch(() => ({ password: null }));
+  const body = await request.json().catch(() => ({ password: null }));
+  const { password, username } = body;
 
   let role: string | null = null;
-  if (passwordMatches(password, process.env.ADMIN_PASSWORD)) role = 'admin';
-  else if (passwordMatches(password, process.env.BOOKKEEPER_PASSWORD)) role = 'bookkeeper';
+  let userId: number | null = null;
+
+  // Менеджер: логин по username + password через БД
+  if (username && typeof username === 'string') {
+    const user = await prisma.user.findUnique({ where: { username: username.trim() } });
+    if (user && user.isActive && verifyPassword(password, user.passwordHash)) {
+      role = user.role;
+      userId = user.id;
+    }
+  } else {
+    // Admin / Bookkeeper: env-пароли
+    if (passwordMatches(password, process.env.ADMIN_PASSWORD)) role = 'admin';
+    else if (passwordMatches(password, process.env.BOOKKEEPER_PASSWORD)) role = 'bookkeeper';
+  }
 
   if (!role) {
     recordFailedLogin(clientIp);
-    return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
+    return NextResponse.json({ error: 'Неверные данные для входа' }, { status: 401 });
   }
 
   clearLoginRateLimit(clientIp);
 
-  const token = await new SignJWT({ role })
+  const jwtPayload: Record<string, unknown> = { role };
+  if (userId !== null) jwtPayload.userId = userId;
+
+  const token = await new SignJWT(jwtPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('7d')
     .sign(secret);

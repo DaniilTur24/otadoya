@@ -12,6 +12,7 @@ export interface MonthlySalaryResult {
   salaryFromDayShifts: number;
   salaryFromFullDayShifts: number;
   totalBonuses: number;
+  totalAdvances: number;
   totalSalary: number;
   revenueTotal: number;
   recordsCount: number;
@@ -36,7 +37,10 @@ export interface ShiftEntry {
  * Формула:
  *   salaryFromFullDayShifts = baseSalary / 10 * fullDayShiftsCount
  *   salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
- *   totalSalary             = salaryFromFullDayShifts + salaryFromDayShifts + totalBonuses
+ *   totalSalary             = salaryFromFullDayShifts + salaryFromDayShifts + totalBonuses - totalAdvances
+ *
+ * Авансы (категория 'employeeAdvance') вычитаются из накопленной зарплаты;
+ * если авансов больше заработанного — итоговая зарплата уходит в минус.
  *
  * Учитывает только записи со статусом 'approved'.
  * Если передан pharmacyId — фильтрует по аптеке.
@@ -60,7 +64,15 @@ export async function calculateEmployeeMonthlySalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const [entries, pharmaBonusAgg] = await Promise.all([
+  // Авансы привязаны напрямую к сотруднику-получателю (DailyExpenseItem.employeeId),
+  // а не к employeeId записи выручки — выдать аванс может за смену другого сотрудника.
+  const advanceEntryFilter = {
+    status: 'approved',
+    date: { gte: dateFrom, lte: dateTo },
+    ...(pharmacyId ? { pharmacyId } : {}),
+  };
+
+  const [entries, pharmaBonusAgg, advanceAgg] = await Promise.all([
     prisma.dailyRevenueEntry.findMany({
       where: entryFilter,
       select: {
@@ -76,12 +88,19 @@ export async function calculateEmployeeMonthlySalary(
       _sum: { amount: true },
       where: { category: 'pharmaBonus', entry: entryFilter },
     }),
+    // Авансы берутся из строк расходов с категорией 'employeeAdvance',
+    // привязанных к этому сотруднику как получателю (может отличаться от сотрудника записи).
+    prisma.dailyExpenseItem.aggregate({
+      _sum: { amount: true },
+      where: { category: 'employeeAdvance', employeeId, entry: advanceEntryFilter },
+    }),
   ]);
 
   const baseSalary = Number(employee.baseSalary);
   let dayShiftsCount = 0;
   let fullDayShiftsCount = 0;
   const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
+  const totalAdvances = Number(advanceAgg._sum.amount ?? 0);
   let revenueTotal = 0;
 
   for (const e of entries) {
@@ -93,7 +112,7 @@ export async function calculateEmployeeMonthlySalary(
 
   const salaryFromFullDayShifts = baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0;
   const salaryFromDayShifts = baseSalary > 0 ? (baseSalary / 15) * dayShiftsCount : 0;
-  const totalSalary = salaryFromFullDayShifts + salaryFromDayShifts + totalBonuses;
+  const totalSalary = salaryFromFullDayShifts + salaryFromDayShifts + totalBonuses - totalAdvances;
 
   return {
     employeeId,
@@ -106,6 +125,7 @@ export async function calculateEmployeeMonthlySalary(
     salaryFromDayShifts,
     salaryFromFullDayShifts,
     totalBonuses,
+    totalAdvances,
     totalSalary,
     revenueTotal,
     recordsCount: entries.length,
@@ -150,6 +170,51 @@ export async function getEmployeeMonthlyShifts(
     cashRevenue: Number(e.cashRevenue),
     terminalRevenue: Number(e.terminalRevenue),
     kaspiRevenue: Number((e as unknown as Record<string, unknown>).kaspiRevenue ?? 0),
+  }));
+}
+
+export interface AdvanceEntry {
+  id: number;
+  date: Date;
+  pharmacyName: string;
+  amount: number;
+  comment: string | null;
+}
+
+/**
+ * Возвращает список авансов, выданных сотруднику за месяц.
+ * Аванс привязан к сотруднику напрямую (DailyExpenseItem.employeeId) — он может
+ * быть записан в записи выручки другого сотрудника (например, по смене коллеги).
+ */
+export async function getEmployeeMonthlyAdvances(
+  employeeId: number,
+  month: number,
+  year: number,
+  pharmacyId?: number,
+): Promise<AdvanceEntry[]> {
+  const dateFrom = new Date(year, month - 1, 1);
+  const dateTo = new Date(year, month, 0, 23, 59, 59, 999);
+
+  const items = await prisma.dailyExpenseItem.findMany({
+    where: {
+      category: 'employeeAdvance',
+      employeeId,
+      entry: {
+        status: 'approved',
+        date: { gte: dateFrom, lte: dateTo },
+        ...(pharmacyId ? { pharmacyId } : {}),
+      },
+    },
+    include: { entry: { select: { date: true, pharmacy: { select: { name: true } } } } },
+    orderBy: { entry: { date: 'asc' } },
+  });
+
+  return items.map((i) => ({
+    id: i.id,
+    date: i.entry.date,
+    pharmacyName: i.entry.pharmacy.name,
+    amount: Number(i.amount),
+    comment: i.comment,
   }));
 }
 

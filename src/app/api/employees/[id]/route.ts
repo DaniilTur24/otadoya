@@ -13,9 +13,15 @@ export async function GET(
   const auth = requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const employee = await prisma.employee.findUnique({ where: { id: Number((await params).id) } });
+  const employee = await prisma.employee.findUnique({
+    where: { id: Number((await params).id) },
+    include: { pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } } },
+  });
   if (!employee) return NextResponse.json({ error: 'Не найдено' }, { status: 404 });
-  return NextResponse.json(serialize(employee as unknown as Record<string, unknown>));
+  return NextResponse.json({
+    ...serialize(employee as unknown as Record<string, unknown>),
+    pharmacies: employee.pharmacies.map((p) => p.pharmacy),
+  });
 }
 
 export async function PUT(

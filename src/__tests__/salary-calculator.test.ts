@@ -11,6 +11,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     dailyExpenseItem: {
       aggregate: vi.fn(),
+      findMany: vi.fn(),
     },
   },
 }));
@@ -19,6 +20,7 @@ import { prisma } from '@/lib/prisma';
 import {
   calculateEmployeeMonthlySalary,
   calculateAllEmployeesSalaries,
+  getEmployeeMonthlyAdvances,
 } from '@/lib/salary-calculator';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -29,10 +31,16 @@ function mockShifts(shifts: { shiftType: string; cashRevenue: number; terminalRe
   vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(shifts);
 }
 
+function mockAggregates(bonuses: number, advances = 0) {
+  vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockImplementation(
+    (args: { where?: { category?: string } }) => {
+      const amount = args?.where?.category === 'employeeAdvance' ? advances : bonuses;
+      return Promise.resolve({ _sum: { amount } });
+    }
+  );
+}
 function mockBonuses(amount: number) {
-  vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
-    _sum: { amount },
-  });
+  mockAggregates(amount, 0);
 }
 
 // ─── calculateEmployeeMonthlySalary ──────────────────────────────────────────
@@ -108,6 +116,19 @@ describe('calculateEmployeeMonthlySalary', () => {
     expect(result!.salaryFromFullDayShifts).toBe(0);
   });
 
+  it('subtracts advances from totalSalary and can go negative', async () => {
+    mockShifts([
+      { shiftType: 'day', cashRevenue: 10000, terminalRevenue: 0, kaspiRevenue: 0 },
+    ]);
+    mockAggregates(0, 200000);
+
+    const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
+    const expected = 150000 / 15 - 200000;
+    expect(result!.totalAdvances).toBe(200000);
+    expect(result!.totalSalary).toBeCloseTo(expected, 5);
+    expect(result!.totalSalary).toBeLessThan(0);
+  });
+
   it('returns correct meta fields', async () => {
     mockShifts([]);
     const result = await calculateEmployeeMonthlySalary(1, 3, 2025);
@@ -153,5 +174,45 @@ describe('calculateAllEmployeesSalaries', () => {
     const result = await calculateAllEmployeesSalaries(1, 2025);
     expect(result).toHaveLength(1);
     expect(result[0].employeeName).toBe('Работник');
+  });
+});
+
+// ─── getEmployeeMonthlyAdvances ──────────────────────────────────────────────
+
+describe('getEmployeeMonthlyAdvances', () => {
+  it('returns empty array when employee has no advances', async () => {
+    vi.mocked(prisma.dailyExpenseItem.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const result = await getEmployeeMonthlyAdvances(1, 5, 2025);
+    expect(result).toEqual([]);
+  });
+
+  it('maps advance items to AdvanceEntry with date, pharmacy and amount', async () => {
+    const entryDate = new Date('2025-05-10');
+    vi.mocked(prisma.dailyExpenseItem.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 11,
+        amount: 15000,
+        comment: 'Аванс: Иван Петров',
+        entry: { date: entryDate, pharmacy: { name: 'Аптека на Абая' } },
+      },
+    ]);
+
+    const result = await getEmployeeMonthlyAdvances(2, 5, 2025);
+    expect(result).toEqual([
+      { id: 11, date: entryDate, pharmacyName: 'Аптека на Абая', amount: 15000, comment: 'Аванс: Иван Петров' },
+    ]);
+  });
+
+  it('queries by recipient employeeId, not the entry employee', async () => {
+    const findMany = vi.mocked(prisma.dailyExpenseItem.findMany as ReturnType<typeof vi.fn>);
+    findMany.mockResolvedValue([]);
+
+    await getEmployeeMonthlyAdvances(7, 6, 2025, 3);
+
+    const where = findMany.mock.calls[findMany.mock.calls.length - 1][0].where;
+    expect(where.category).toBe('employeeAdvance');
+    expect(where.employeeId).toBe(7);
+    expect(where.entry.pharmacyId).toBe(3);
+    expect(where.entry.status).toBe('approved');
   });
 });

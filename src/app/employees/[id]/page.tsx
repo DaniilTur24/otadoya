@@ -9,6 +9,7 @@ interface Employee {
   name: string;
   baseSalary: number;
   isActive: boolean;
+  pharmacies: Pharmacy[];
 }
 
 interface Pharmacy {
@@ -27,6 +28,14 @@ interface ShiftEntry {
   kaspiRevenue: number;
 }
 
+interface AdvanceEntry {
+  id: number;
+  date: string;
+  pharmacyName: string;
+  amount: number;
+  comment: string | null;
+}
+
 interface SalaryResult {
   employeeId: number;
   employeeName: string;
@@ -38,10 +47,12 @@ interface SalaryResult {
   salaryFromDayShifts: number;
   salaryFromFullDayShifts: number;
   totalBonuses: number;
+  totalAdvances: number;
   totalSalary: number;
   revenueTotal: number;
   recordsCount: number;
   shifts: ShiftEntry[];
+  advances: AdvanceEntry[];
 }
 
 const MONTHS = [
@@ -58,6 +69,9 @@ export default function EmployeeDetailPage() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [form, setForm] = useState({ name: '', baseSalary: '', isActive: true });
+  const [assignedPharmacyIds, setAssignedPharmacyIds] = useState<number[]>([]);
+  const [editingPharmacies, setEditingPharmacies] = useState(false);
+  const [pharmacySaving, setPharmacySaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -74,6 +88,7 @@ export default function EmployeeDetailPage() {
       .then((e: Employee) => {
         setEmployee(e);
         setForm({ name: e.name, baseSalary: String(e.baseSalary), isActive: e.isActive });
+        setAssignedPharmacyIds(e.pharmacies.map((p) => p.id));
       });
     fetch('/api/pharmacies')
       .then((r) => r.json())
@@ -190,6 +205,88 @@ export default function EmployeeDetailPage() {
           <label htmlFor="isActive" className="text-sm text-gray-700">Активен</label>
         </div>
 
+        {pharmacies.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="label mb-0">Аптеки</label>
+              {!editingPharmacies && (
+                <button
+                  type="button"
+                  onClick={() => setEditingPharmacies(true)}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                >
+                  изменить
+                </button>
+              )}
+            </div>
+            {editingPharmacies ? (
+              <div className="mt-1 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                  {pharmacies.map((p) => (
+                    <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={assignedPharmacyIds.includes(p.id)}
+                        onChange={() =>
+                          setAssignedPharmacyIds((ids) =>
+                            ids.includes(p.id) ? ids.filter((x) => x !== p.id) : [...ids, p.id]
+                          )
+                        }
+                        className="rounded"
+                      />
+                      <span>{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn-primary text-xs"
+                    disabled={pharmacySaving}
+                    onClick={async () => {
+                      setPharmacySaving(true);
+                      await fetch(`/api/employees/${id}/pharmacies`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pharmacyIds: assignedPharmacyIds }),
+                      });
+                      setPharmacySaving(false);
+                      setEditingPharmacies(false);
+                      const updated: Employee = await fetch(`/api/employees/${id}`).then((r) => r.json());
+                      setEmployee(updated);
+                      setAssignedPharmacyIds(updated.pharmacies.map((p) => p.id));
+                    }}
+                  >
+                    {pharmacySaving ? 'Сохранение...' : 'Сохранить'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs"
+                    onClick={() => {
+                      setAssignedPharmacyIds(employee?.pharmacies.map((p) => p.id) ?? []);
+                      setEditingPharmacies(false);
+                    }}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {employee?.pharmacies.length === 0 ? (
+                  <span className="text-sm text-amber-600">Аптека не привязана</span>
+                ) : (
+                  employee?.pharmacies.map((p) => (
+                    <span key={p.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                      {p.name}
+                    </span>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex gap-2 pt-1">
           <button type="submit" className="btn-primary text-sm" disabled={saving}>
             {saving ? 'Сохранение...' : 'Сохранить'}
@@ -262,10 +359,17 @@ export default function EmployeeDetailPage() {
                 <span className="text-gray-500">Бонусы</span>
                 <span className="font-medium text-right">{fmt(salary.totalBonuses)} ₸</span>
 
+                {salary.totalAdvances > 0 && (
+                  <>
+                    <span className="text-gray-500">Авансы</span>
+                    <span className="font-medium text-right text-red-600">−{fmt(salary.totalAdvances)} ₸</span>
+                  </>
+                )}
+
                 <div className="col-span-2 border-t border-gray-200 my-1" />
 
                 <span className="font-semibold text-gray-800">Итого зарплата</span>
-                <span className="font-bold text-blue-700 text-right text-base">{fmt(salary.totalSalary)} ₸</span>
+                <span className={`font-bold text-right text-base ${salary.totalSalary < 0 ? 'text-red-700' : 'text-blue-700'}`}>{fmt(salary.totalSalary)} ₸</span>
 
                 <span className="text-gray-500 text-xs">Записей выручки</span>
                 <span className="text-right text-xs text-gray-500">{salary.recordsCount}</span>
@@ -320,6 +424,37 @@ export default function EmployeeDetailPage() {
                 ))}
               </div>
             </div>
+
+            {/* Авансы */}
+            {salary.advances.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Авансы за период</h3>
+                <div className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+                  <div className="grid text-xs text-gray-400 font-medium px-3 py-1.5 bg-gray-50"
+                    style={{ gridTemplateColumns: '6rem 1fr 6rem' }}>
+                    <span>Дата</span>
+                    <span>Аптека / комментарий</span>
+                    <span className="text-right">Сумма</span>
+                  </div>
+                  {salary.advances.map((a) => (
+                    <div
+                      key={a.id}
+                      className="grid text-sm px-3 py-2 hover:bg-gray-50"
+                      style={{ gridTemplateColumns: '6rem 1fr 6rem' }}
+                    >
+                      <span className="text-gray-600">
+                        {new Date(a.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
+                      </span>
+                      <span className="text-gray-800 truncate pr-2">
+                        {a.pharmacyName}
+                        {a.comment && <span className="text-gray-400"> — {a.comment}</span>}
+                      </span>
+                      <span className="text-right font-medium text-red-600">−{fmt(a.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="text-sm text-gray-400 py-4 text-center">

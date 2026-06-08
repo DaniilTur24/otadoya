@@ -27,6 +27,8 @@ model Pharmacy {
   transactionRules     TransactionImportRule[]
   importedTransactions ImportedTransaction[]
   importedReportValues ImportedReportValue[]
+  managers             UserPharmacy[]
+  employeeLinks        EmployeePharmacy[]
 
   @@map("pharmacies")
 }
@@ -46,6 +48,36 @@ model PharmacyAlias {
   @@map("pharmacy_aliases")
 }
 
+// Пользователи-заведующие (admin/bookkeeper остаются через env-переменные)
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  role         String   @default("manager") // 'manager' only for now
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  pharmacies         UserPharmacy[]
+  submittedEntries   DailyRevenueEntry[] @relation("SubmittedBy")
+  approvedEntries    DailyRevenueEntry[] @relation("ApprovedBy")
+
+  @@map("users")
+}
+
+// Связь заведующий ↔ аптека (M:N)
+model UserPharmacy {
+  userId     Int @map("user_id")
+  pharmacyId Int @map("pharmacy_id")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@id([userId, pharmacyId])
+  @@map("user_pharmacies")
+}
+
 model Employee {
   id         Int      @id @default(autoincrement())
   name       String
@@ -55,8 +87,22 @@ model Employee {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   revenueEntries DailyRevenueEntry[]
+  pharmacies     EmployeePharmacy[]
+  expenseItems   DailyExpenseItem[]
 
   @@map("employees")
+}
+
+// Связь сотрудник ↔ аптека (M:N)
+model EmployeePharmacy {
+  employeeId Int @map("employee_id")
+  pharmacyId Int @map("pharmacy_id")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@id([employeeId, pharmacyId])
+  @@map("employee_pharmacies")
 }
 
 model DailyRevenueEntry {
@@ -83,11 +129,20 @@ model DailyRevenueEntry {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
+  // Кто создал запись (заведующий); null = бухгалтер/админ
+  submittedById Int?      @map("submitted_by_id")
+  // Кто утвердил запись
+  approvedById  Int?      @map("approved_by_id")
+  approvedAt    DateTime? @map("approved_at")
+
   pharmacy     Pharmacy           @relation(fields: [pharmacyId], references: [id])
   employee     Employee?          @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   expenseItems DailyExpenseItem[]
+  submittedBy  User?              @relation("SubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  approvedBy   User?              @relation("ApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
 
   @@index([employeeId])
+  @@index([submittedById])
   @@map("daily_revenue_entries")
 }
 
@@ -98,9 +153,14 @@ model DailyExpenseItem {
   amount   Decimal
   category String? // ключ из MONTHLY_EXPENSE_KEYS, например 'repairs', 'cleaning'
   comment  String?
+  // Сотрудник, которому начислена эта строка (например, кому выдан аванс categry='employeeAdvance');
+  // может отличаться от employeeId самой записи выручки (entry.employeeId)
+  employeeId Int? @map("employee_id")
 
-  entry DailyRevenueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  entry    DailyRevenueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  employee Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
+  @@index([employeeId])
   @@map("daily_expense_items")
 }
 
