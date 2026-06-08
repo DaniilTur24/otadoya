@@ -96,8 +96,7 @@ export default function NewRevenuePage() {
       setEmployees([]);
       return;
     }
-    // Для admin/bookkeeper — все активные сотрудники; для менеджера — API сам фильтрует по его аптекам
-    const url = `/api/employees?isActive=true`;
+    const url = `/api/employees?isActive=true&pharmacyId=${form.pharmacyId}`;
     fetch(url)
       .then((r) => r.json())
       .then((emps) => {

@@ -1,0 +1,70 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('next/server', () => ({
+  NextResponse: {
+    json: (data: unknown, init?: { status?: number }) => ({
+      status: init?.status ?? 200,
+      body: data,
+    }),
+  },
+}));
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    employee: {
+      findMany: vi.fn(),
+    },
+    userPharmacy: {
+      findMany: vi.fn(),
+    },
+  },
+}));
+
+import { prisma } from '@/lib/prisma';
+import { GET } from '@/app/api/employees/route';
+
+const findManyEmployees = prisma.employee.findMany as unknown as ReturnType<typeof vi.fn>;
+const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
+
+function makeRequest(url: string, opts: { role?: string; userId?: number } = {}): Request {
+  const headers: Record<string, string> = {};
+  if (opts.role) headers['x-user-role'] = opts.role;
+  if (opts.userId) headers['x-user-id'] = String(opts.userId);
+  return new Request(url, { headers }) as unknown as import('next/server').NextRequest;
+}
+
+beforeEach(() => {
+  findManyEmployees.mockReset();
+  findManyUserPharmacy.mockReset();
+  findManyEmployees.mockResolvedValue([]);
+});
+
+describe('GET /api/employees — фильтрация по аптеке для заведующего', () => {
+  it('заведующий с несколькими аптеками: запрос с pharmacyId фильтрует только по этой аптеке', async () => {
+    findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 1 }, { pharmacyId: 2 }]);
+
+    const res = await GET(makeRequest('http://localhost/api/employees?isActive=true&pharmacyId=2', { role: 'manager', userId: 5 }));
+
+    expect((res as { status: number }).status).toBe(200);
+    const where = findManyEmployees.mock.calls[findManyEmployees.mock.calls.length - 1][0].where;
+    expect(where.pharmacies).toEqual({ some: { pharmacyId: 2 } });
+  });
+
+  it('заведующий не может запросить сотрудников чужой аптеки — 403', async () => {
+    findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 1 }, { pharmacyId: 2 }]);
+
+    const res = await GET(makeRequest('http://localhost/api/employees?isActive=true&pharmacyId=99', { role: 'manager', userId: 5 })) as { status: number };
+
+    expect(res.status).toBe(403);
+    expect(findManyEmployees).not.toHaveBeenCalled();
+  });
+
+  it('заведующий без pharmacyId в запросе видит сотрудников всех своих аптек', async () => {
+    findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 1 }, { pharmacyId: 2 }]);
+
+    await GET(makeRequest('http://localhost/api/employees?isActive=true', { role: 'manager', userId: 5 }));
+
+    const where = findManyEmployees.mock.calls[findManyEmployees.mock.calls.length - 1][0].where;
+    expect(where.pharmacies).toEqual({ some: { pharmacyId: { in: [1, 2] } } });
+  });
+});
