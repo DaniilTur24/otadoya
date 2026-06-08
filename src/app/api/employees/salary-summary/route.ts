@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateAllEmployeesSalaries } from '@/lib/salary-calculator';
+import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,9 @@ export const dynamic = 'force-dynamic';
 // Возвращает зарплаты всех активных сотрудников за указанный месяц.
 // Используется в закрытии месяца для расчёта статьи «Зарплата сотрудников».
 export async function GET(request: NextRequest) {
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const month = Number(searchParams.get('month') || new Date().getMonth() + 1);
   const year  = Number(searchParams.get('year')  || new Date().getFullYear());

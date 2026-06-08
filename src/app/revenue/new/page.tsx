@@ -23,7 +23,10 @@ interface ExpenseItem {
 }
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
-  (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
+  (row) =>
+    !row.section &&
+    row.key !== 'employeeAdvance' &&
+    (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
 const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
@@ -44,6 +47,7 @@ export default function NewRevenuePage() {
   const router = useRouter();
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [role, setRole] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [monthClosedWarning, setMonthClosedWarning] = useState(false);
@@ -62,19 +66,49 @@ export default function NewRevenuePage() {
     employeeId: '',
     employeeName: '',
     shiftType: '',
+    avans: '',
+    avansEmployeeId: '',
   });
 
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
 
   useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => setRole(d.role ?? null));
+  }, []);
+
+  useEffect(() => {
     Promise.all([
       fetch('/api/pharmacies').then((r) => r.json()),
-      fetch('/api/employees?isActive=true').then((r) => r.json()),
-    ]).then(([pharmas, emps]) => {
+    ]).then(([pharmas]) => {
       setPharmacies(pharmas);
-      setEmployees(emps);
+      // Для менеджера с одной аптекой — автовыбор
+      if (pharmas.length === 1) {
+        setForm((f) => ({ ...f, pharmacyId: String(pharmas[0].id) }));
+      }
     });
   }, []);
+
+  // Перезагружаем сотрудников при смене аптеки (для менеджера — фильтрация по аптеке)
+  useEffect(() => {
+    if (!form.pharmacyId) {
+      setEmployees([]);
+      return;
+    }
+    // Для admin/bookkeeper — все активные сотрудники; для менеджера — API сам фильтрует по его аптекам
+    const url = `/api/employees?isActive=true`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((emps) => {
+        setEmployees(emps);
+        // Сбрасываем выбор сотрудника если его нет в новом списке
+        setForm((f) => {
+          const stillValid = emps.some((e: Employee) => e.id === Number(f.employeeId));
+          return stillValid ? f : { ...f, employeeId: '', employeeName: '' };
+        });
+      });
+  }, [form.pharmacyId, role]);
 
   useEffect(() => {
     if (!form.date) return;
@@ -151,6 +185,29 @@ export default function NewRevenuePage() {
       return;
     }
 
+    const avansAmount = parseFloat(form.avans) || 0;
+    if (avansAmount > 0 && !form.avansEmployeeId) {
+      setError('Выберите сотрудника, которому выдан аванс');
+      setSubmitting(false);
+      return;
+    }
+
+    type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId?: number };
+    const allExpenseItems: SubmitExpenseItem[] = validItems.map((i) => ({
+      amount: i.amount,
+      category: i.category,
+      comment: i.comment || null,
+    }));
+    if (avansAmount > 0 && form.avansEmployeeId) {
+      const avansEmployee = employees.find((e) => e.id === Number(form.avansEmployeeId));
+      allExpenseItems.push({
+        amount: form.avans,
+        category: 'employeeAdvance',
+        comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
+        employeeId: Number(form.avansEmployeeId),
+      });
+    }
+
     const res = await fetch('/api/revenue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -163,11 +220,7 @@ export default function NewRevenuePage() {
         employeeId: form.employeeId ? Number(form.employeeId) : null,
         employeeName,
         shiftType: form.shiftType || null,
-        expenseItems: validItems.map((i) => ({
-          amount: i.amount,
-          category: i.category,
-          comment: i.comment || null,
-        })),
+        expenseItems: allExpenseItems,
         generalComment: form.generalComment || null,
       }),
     });
@@ -186,6 +239,8 @@ export default function NewRevenuePage() {
         employeeId: form.employeeId,
         employeeName: form.employeeName,
         shiftType: form.shiftType,
+        avans: '',
+        avansEmployeeId: '',
       });
       setExpenseItems([]);
       setTimeout(() => setSuccess(false), 4000);
@@ -202,6 +257,12 @@ export default function NewRevenuePage() {
       <p className="text-gray-500 text-sm mb-6">
         Бухгалтер вводит данные с бумажного листочка сотрудника. Запись сразу сохраняется в отчёт.
       </p>
+
+      {role === 'manager' && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-800 text-sm">
+          Ваша запись будет отправлена на проверку бухгалтеру и появится в отчёте после подтверждения.
+        </div>
+      )}
 
       {selectedMonthClosed && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-md text-amber-800 text-sm">
@@ -317,6 +378,50 @@ export default function NewRevenuePage() {
               </p>
             )}
           </div>
+        </div>
+
+        {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене */}
+        <div className="rounded-md border border-gray-200 p-4">
+          <label className="label mb-2">Аванс сотруднику <span className="text-gray-400 font-normal">— необязательно</span></label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="col-span-2">
+              <select
+                name="avansEmployeeId"
+                value={form.avansEmployeeId}
+                onChange={handleChange}
+                className="input"
+                disabled={employees.length === 0}
+              >
+                <option value="">— кому выдан аванс —</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <input
+                type="number"
+                name="avans"
+                value={form.avans}
+                onChange={handleChange}
+                min="0"
+                step="0.01"
+                placeholder="Сумма аванса"
+                className="input"
+                disabled={!form.avansEmployeeId}
+              />
+            </div>
+          </div>
+          {form.avansEmployeeId && parseFloat(form.avans) > 0 && (
+            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+              Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
+            </p>
+          )}
+          {employees.length > 0 && !form.avansEmployeeId && form.avans && parseFloat(form.avans) > 0 && (
+            <p className="mt-2 text-xs text-amber-600">
+              Выберите сотрудника, которому выдан аванс
+            </p>
+          )}
         </div>
 
         {/* Выручка */}

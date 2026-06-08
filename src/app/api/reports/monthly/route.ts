@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeMonthlyData } from '@/lib/monthly-report-builder';
+import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const year  = Number(searchParams.get('year')  || new Date().getFullYear());
   const month = Number(searchParams.get('month') || new Date().getMonth() + 1);
@@ -22,6 +26,9 @@ export async function GET(request: NextRequest) {
 
 // PUT — сохранить или удалить override для одной ячейки
 export async function PUT(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { year, month, pharmacyId, fieldKey, value } = await request.json();
 
   const closed = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });

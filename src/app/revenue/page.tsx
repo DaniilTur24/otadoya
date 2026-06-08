@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
@@ -25,6 +25,7 @@ interface ExpenseItem {
   amount: number;
   category: string | null;
   comment: string | null;
+  employeeId: number | null;
 }
 
 interface RevenueEntry {
@@ -45,7 +46,7 @@ interface RevenueEntry {
   excludedFromReport: boolean;
 }
 
-interface EditExpenseItem { id: number; amount: string; category: string; comment: string }
+interface EditExpenseItem { id: number; amount: string; category: string; comment: string; employeeId: string }
 
 interface EditState {
   pharmacyId: string;
@@ -61,7 +62,7 @@ interface EditState {
 }
 
 let nextItemId = 1;
-function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', category: '', comment: '' }; }
+function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', category: '', comment: '', employeeId: '' }; }
 
 function fmt(n: number) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -73,16 +74,19 @@ function fmtDate(s: string) {
 function pharmaBonusSum(items: ExpenseItem[]) {
   return items.filter((i) => i.category === 'pharmaBonus').reduce((s, i) => s + i.amount, 0);
 }
+function advanceSum(items: ExpenseItem[]) {
+  return items.filter((i) => i.category === 'employeeAdvance').reduce((s, i) => s + i.amount, 0);
+}
 // Статьи с rowType 'income' — доходные, прибавляются к выручке
 function incomeItemsSum(items: ExpenseItem[]) {
   return items
-    .filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) === 'income')
+    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) === 'income')
     .reduce((s, i) => s + i.amount, 0);
 }
 // Остальные статьи (expense / neutral) — расходы
 function expenseItemsSum(items: ExpenseItem[]) {
   return items
-    .filter((i) => i.category !== 'pharmaBonus' && monthlyFieldType(i.category) !== 'income')
+    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) !== 'income')
     .reduce((s, i) => s + i.amount, 0);
 }
 
@@ -94,9 +98,14 @@ export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
+  const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
+  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [moderating, setModerating] = useState<number | null>(null);
+  const [moderateComment, setModerateComment] = useState('');
+  const [showModeration, setShowModeration] = useState(true);
 
   const [filterPharmacy, setFilterPharmacy] = useState('');
   const [filterFrom, setFilterFrom] = useState('');
@@ -115,17 +124,61 @@ export default function RevenueListPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const p = new URLSearchParams({ status: 'all' });
-    if (filterPharmacy) p.set('pharmacyId', filterPharmacy);
-    const res = await fetch(`/api/revenue?${p}`);
-    let data: RevenueEntry[] = await res.json();
+    const roleRes = await fetch('/api/auth/me').then((r) => r.json());
+    const currentRole: string = roleRes.role ?? '';
+    setRole(currentRole);
+
+    const isModeratorRole = currentRole === 'admin' || currentRole === 'bookkeeper';
+
+    const fetchAll = fetch(`/api/revenue?status=all${filterPharmacy ? `&pharmacyId=${filterPharmacy}` : ''}`);
+    const fetchPending = isModeratorRole ? fetch('/api/revenue?status=pending') : Promise.resolve(null);
+
+    const [allRes, pendingRes] = await Promise.all([fetchAll, fetchPending]);
+
+    let data: RevenueEntry[] = await allRes.json();
+    // Для admin/bookkeeper pending записи показываются только в панели модерации, не в основной таблице
+    if (isModeratorRole) data = data.filter((e) => e.status !== 'pending');
+
     if (filterFrom) data = data.filter((e) => e.date >= filterFrom);
     if (filterTo)   data = data.filter((e) => e.date <= filterTo + 'T23:59:59');
     setEntries(data);
+
+    if (pendingRes) {
+      const pending: RevenueEntry[] = await pendingRes.json();
+      setPendingEntries(pending);
+    } else {
+      setPendingEntries([]);
+    }
     setLoading(false);
   }, [filterPharmacy, filterFrom, filterTo]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function approveEntry(id: number) {
+    await fetch(`/api/revenue/${id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookkeeperComment: moderateComment || null }),
+    });
+    setModerating(null);
+    setModerateComment('');
+    load();
+  }
+
+  async function rejectEntry(id: number) {
+    if (!moderateComment.trim()) {
+      alert('Укажите причину отклонения');
+      return;
+    }
+    await fetch(`/api/revenue/${id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookkeeperComment: moderateComment }),
+    });
+    setModerating(null);
+    setModerateComment('');
+    load();
+  }
 
   function startEdit(entry: RevenueEntry) {
     setEditingId(entry.id);
@@ -146,6 +199,7 @@ export default function RevenueListPage() {
             amount: String(i.amount),
             category: i.category ?? '',
             comment: i.comment ?? '',
+            employeeId: i.employeeId ? String(i.employeeId) : '',
           }))
         : [],
     });
@@ -171,7 +225,7 @@ export default function RevenueListPage() {
   function removeExpenseItem(id: number) {
     setEditState((s) => s ? { ...s, expenseItems: s.expenseItems.filter((i) => i.id !== id) } : s);
   }
-  function updateExpenseItem(id: number, field: 'amount' | 'category' | 'comment', value: string) {
+  function updateExpenseItem(id: number, field: 'amount' | 'category' | 'comment' | 'employeeId', value: string) {
     setEditState((s) =>
       s ? { ...s, expenseItems: s.expenseItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
     );
@@ -193,6 +247,12 @@ export default function RevenueListPage() {
     const missingCategory = validItems.find((i) => !i.category);
     if (missingCategory) {
       setSaveError('Выберите категорию расхода для каждой строки');
+      setSaving(false);
+      return;
+    }
+    const missingAdvanceEmployee = validItems.find((i) => i.category === 'employeeAdvance' && !i.employeeId);
+    if (missingAdvanceEmployee) {
+      setSaveError('Выберите сотрудника, которому выдан аванс');
       setSaving(false);
       return;
     }
@@ -221,6 +281,7 @@ export default function RevenueListPage() {
           amount: i.amount,
           category: i.category || null,
           comment: i.comment || null,
+          employeeId: i.category === 'employeeAdvance' && i.employeeId ? Number(i.employeeId) : null,
         })),
       }),
     });
@@ -250,6 +311,123 @@ export default function RevenueListPage() {
       <p className="text-gray-500 text-sm mb-5">
         Все введённые бухгалтером записи. Нажмите «Изменить» для редактирования.
       </p>
+
+      {/* Панель модерации — только для admin/bookkeeper */}
+      {(role === 'admin' || role === 'bookkeeper') && pendingEntries.length > 0 && (
+        <div className="mb-5">
+          <button
+            className="flex items-center gap-2 mb-3 text-sm font-semibold text-amber-700"
+            onClick={() => setShowModeration((v) => !v)}
+          >
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-xs font-bold">
+              {pendingEntries.length}
+            </span>
+            На проверке
+            <span className="text-gray-400 font-normal">{showModeration ? '▲' : '▼'}</span>
+          </button>
+
+          {showModeration && (
+            <div className="card overflow-hidden border-amber-200 border">
+              <table className="w-full">
+                <thead className="bg-amber-50 border-b border-amber-200">
+                  <tr>
+                    <th className="th">Дата</th>
+                    <th className="th">Аптека</th>
+                    <th className="th">Сотрудник</th>
+                    <th className="th text-right">Нал.</th>
+                    <th className="th text-right">Терминал</th>
+                    <th className="th text-right">Каспи</th>
+                    <th className="th text-right">Расходы</th>
+                    <th className="th"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {pendingEntries.map((entry) => {
+                    const expenses = expenseItemsSum(entry.expenseItems);
+                    const isExpanded = moderating === entry.id;
+                    return (
+                      <React.Fragment key={entry.id}>
+                        <tr className="bg-amber-50/40">
+                          <td className="td">{fmtDate(entry.date)}</td>
+                          <td className="td font-medium">{entry.pharmacy.name}</td>
+                          <td className="td text-gray-600">{entry.employeeName}</td>
+                          <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
+                          <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
+                          <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
+                          <td className="td text-right text-red-600">{expenses > 0 ? fmt(expenses) : '—'}</td>
+                          <td className="td">
+                            {isExpanded ? (
+                              <button
+                                className="text-xs text-gray-400 hover:text-gray-600"
+                                onClick={() => { setModerating(null); setModerateComment(''); }}
+                              >
+                                Закрыть
+                              </button>
+                            ) : (
+                              <button
+                                className="btn-warning text-xs"
+                                onClick={() => { setModerating(entry.id); setModerateComment(''); }}
+                              >
+                                Проверить
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`${entry.id}-expand`} className="bg-white">
+                            <td colSpan={8} className="px-4 py-3">
+                              {entry.expenseItems.length > 0 && (
+                                <div className="mb-3 text-sm">
+                                  <p className="font-medium text-gray-700 mb-1">Расходы:</p>
+                                  <ul className="space-y-0.5">
+                                    {entry.expenseItems.map((item) => (
+                                      <li key={item.id} className="text-gray-600 flex gap-2">
+                                        <span className="text-red-600">{fmt(item.amount)}</span>
+                                        <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
+                                        {item.comment && <span className="text-gray-400">— {item.comment}</span>}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {entry.generalComment && (
+                                <p className="text-sm text-gray-500 italic mb-3">{entry.generalComment}</p>
+                              )}
+                              <div className="flex flex-col sm:flex-row gap-2 items-start">
+                                <input
+                                  type="text"
+                                  className="input flex-1"
+                                  placeholder="Комментарий бухгалтера (обязателен при отклонении)"
+                                  value={moderateComment}
+                                  onChange={(e) => setModerateComment(e.target.value)}
+                                />
+                                <div className="flex gap-2 shrink-0">
+                                  <button
+                                    className="btn-success text-sm"
+                                    onClick={() => approveEntry(entry.id)}
+                                  >
+                                    Подтвердить
+                                  </button>
+                                  <button
+                                    className="btn-danger text-sm"
+                                    onClick={() => rejectEntry(entry.id)}
+                                  >
+                                    Отклонить
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Фильтры */}
       <div className="card p-4 mb-5">
@@ -443,6 +621,20 @@ export default function RevenueListPage() {
                         Эта сумма пойдёт в расходы и будет учтена в зарплате сотрудника за месяц.
                       </p>
                     )}
+                    {item.category === 'employeeAdvance' && (
+                      <div className="mt-1 ml-5 space-y-1">
+                        <select className="input" value={item.employeeId} required
+                          onChange={(e) => updateExpenseItem(item.id, 'employeeId', e.target.value)}>
+                          <option value="">— кому выдан аванс —</option>
+                          {employees.map((emp) => (
+                            <option key={emp.id} value={emp.id}>{emp.name}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                          Эта сумма пойдёт в расходы и будет вычтена из накопленной зарплаты сотрудника за месяц.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {editState.expenseItems.length > 1 && (
@@ -490,6 +682,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Каспи</th>
                   <th className="th text-right">Доп. доходы</th>
                   <th className="th text-right">Бонусы</th>
+                  <th className="th text-right">Авансы</th>
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
@@ -499,11 +692,12 @@ export default function RevenueListPage() {
               <tbody className="divide-y divide-gray-100">
                 {entries.map((entry) => {
                   const bonuses  = pharmaBonusSum(entry.expenseItems);
+                  const advances = advanceSum(entry.expenseItems);
                   const incomes  = incomeItemsSum(entry.expenseItems);
                   const expenses = expenseItemsSum(entry.expenseItems);
                   return (
-                    <>
-                      <tr key={entry.id}
+                    <React.Fragment key={entry.id}>
+                      <tr
                         className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}
                         onMouseEnter={(e) => {
                           if (entry.expenseItems.some(i => i.category !== 'pharmaBonus') || entry.generalComment) {
@@ -524,6 +718,9 @@ export default function RevenueListPage() {
                         </td>
                         <td className="td text-right text-red-600">
                           {bonuses > 0 ? fmt(bonuses) : '—'}
+                        </td>
+                        <td className="td text-right text-red-600">
+                          {advances > 0 ? fmt(advances) : '—'}
                         </td>
                         <td className="td text-right font-semibold text-green-700">
                           {fmt(entry.totalRevenue)}
@@ -585,7 +782,7 @@ export default function RevenueListPage() {
                         </td>
                       </tr>
 
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -595,10 +792,13 @@ export default function RevenueListPage() {
           {/* Итого */}
           {(() => {
             const totalRevenue  = entries.reduce((s, e) => s + e.totalRevenue, 0);
+            const totalCash     = entries.reduce((s, e) => s + e.cashRevenue, 0);
             const totalIncomes  = entries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
             const totalBonuses  = entries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
+            const totalAdvances = entries.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
             const totalExpenses = entries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
-            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses;
+            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances;
+            const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
             return (
               <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-6 text-sm">
                 <span className="text-gray-500">Итого по выбранным записям:</span>
@@ -609,11 +809,17 @@ export default function RevenueListPage() {
                 {totalBonuses > 0 && (
                   <span>Бонусы: <strong className="text-red-600">{fmt(totalBonuses)}</strong></span>
                 )}
+                {totalAdvances > 0 && (
+                  <span>Авансы: <strong className="text-red-600">{fmt(totalAdvances)}</strong></span>
+                )}
                 {totalExpenses > 0 && (
                   <span>Расходы: <strong className="text-red-600">{fmt(totalExpenses)}</strong></span>
                 )}
                 <span className="border-l border-gray-300 pl-6">
                   Итого: <strong className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</strong>
+                </span>
+                <span className="border-l border-gray-300 pl-6">
+                  Наличными на руках: <strong className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(cashNet)}</strong>
                 </span>
               </div>
             );
@@ -622,8 +828,9 @@ export default function RevenueListPage() {
       )}
 
       {tooltipEntry && (() => {
-        const items = tooltipEntry.expenseItems.filter(i => i.category !== 'pharmaBonus');
-        const hasContent = items.length > 0 || tooltipEntry.generalComment;
+        const items = tooltipEntry.expenseItems.filter(i => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance');
+        const advanceItems = tooltipEntry.expenseItems.filter(i => i.category === 'employeeAdvance');
+        const hasContent = items.length > 0 || advanceItems.length > 0 || tooltipEntry.generalComment;
         if (!hasContent) return null;
         return (
           <div
@@ -646,8 +853,22 @@ export default function RevenueListPage() {
                 })}
               </div>
             )}
+            {advanceItems.length > 0 && (
+              <div className={`space-y-1.5 ${items.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
+                {advanceItems.map((item) => {
+                  const recipient = employees.find((e) => e.id === item.employeeId);
+                  return (
+                    <div key={item.id} className="flex gap-2 items-baseline">
+                      <span className="font-semibold shrink-0 text-red-600">−{fmt(item.amount)}</span>
+                      <span className="text-gray-700">Аванс</span>
+                      <span className="text-gray-400">→ {recipient?.name ?? 'сотрудник не указан'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {tooltipEntry.generalComment && (
-              <div className={`text-gray-400 italic ${items.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
+              <div className={`text-gray-400 italic ${(items.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
                 {tooltipEntry.generalComment}
               </div>
             )}

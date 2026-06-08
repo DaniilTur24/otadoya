@@ -1,22 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const pharmacy = await prisma.pharmacy.findUnique({ where: { id: Number(params.id) } });
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
+  const pharmacy = await prisma.pharmacy.findUnique({ where: { id: Number((await params).id) } });
   if (!pharmacy) return NextResponse.json({ error: 'Не найдено' }, { status: 404 });
   return NextResponse.json(pharmacy);
 }
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
   const { name, isActive, keywords, coefficient, terminalRent, procedureRent } = await request.json();
 
   const pharmacy = await prisma.pharmacy.update({
@@ -35,10 +42,13 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
   await prisma.pharmacy.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

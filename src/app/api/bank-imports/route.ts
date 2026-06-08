@@ -6,10 +6,15 @@ import {
   importParsedBankTransactions,
   parseBankTransactionsExcel,
 } from '@/lib/bank-transaction-import';
+import { requireAdmin } from '@/lib/api-auth';
+import { validateXlsxFile } from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const files = await prisma.uploadedFile.findMany({
     where: { fileType: 'bank_transactions_excel' },
     include: {
@@ -27,6 +32,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
@@ -36,6 +44,9 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: 'Файл обязателен' }, { status: 400 });
     }
+
+    const fileValidation = validateXlsxFile(file);
+    if (fileValidation) return fileValidation;
 
     if (!month || month < 1 || month > 12 || !year || year < 2000) {
       return NextResponse.json({ error: 'Выберите корректный месяц и год' }, { status: 400 });
@@ -54,7 +65,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const transactions = parseBankTransactionsExcel(buffer);
+    const transactions = await parseBankTransactionsExcel(buffer);
 
     if (transactions.length === 0) {
       return NextResponse.json(

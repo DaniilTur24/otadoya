@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeMonthlyData, buildMonthlySnapshot } from '@/lib/monthly-report-builder';
+import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 // GET — проверить закрыт ли месяц
 export async function GET(request: NextRequest) {
+  const auth = requireAdminOrBookkeeper(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const year = Number(searchParams.get('year'));
   const month = Number(searchParams.get('month'));
@@ -17,6 +21,9 @@ export async function GET(request: NextRequest) {
 
 // POST — закрыть месяц: снапшот строится на сервере из актуальных данных БД
 export async function POST(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { year, month } = await request.json();
 
   if (!year || !month) {
@@ -42,6 +49,9 @@ export async function POST(request: NextRequest) {
 
 // DELETE — открыть месяц обратно
 export async function DELETE(request: NextRequest) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const { year, month } = await request.json();
 
   await prisma.closedMonth.deleteMany({ where: { year, month } });

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
+import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
 
 function serializeEntry(entry: Record<string, unknown>) {
-  const items = (entry.expenseItems as { amount: unknown; comment: unknown }[] | undefined) ?? [];
+  const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
   return {
     ...entry,
     cashRevenue: Number(entry.cashRevenue),
@@ -20,13 +21,24 @@ function serializeEntry(entry: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = requireAnyRole(request);
+  if (auth) return auth;
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
   const pharmacyId = searchParams.get('pharmacyId');
 
+  const allowedIds = await getManagerPharmacyIds(request);
+
   const where: Record<string, unknown> = {};
   if (status && status !== 'all') where.status = status;
-  if (pharmacyId) where.pharmacyId = Number(pharmacyId);
+
+  if (allowedIds !== null) {
+    // Менеджер видит все записи своих аптек
+    where.pharmacyId = { in: allowedIds };
+  } else if (pharmacyId) {
+    where.pharmacyId = Number(pharmacyId);
+  }
 
   const entries = await prisma.dailyRevenueEntry.findMany({
     where,
@@ -37,8 +49,14 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(entries.map((e) => serializeEntry(e as unknown as Record<string, unknown>)));
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const auth = requireAnyRole(request);
+  if (auth) return auth;
+
+  const role = getRequestRole(request)!;
+  const userId = getRequestUserId(request);
   const body = await request.json();
+
   const {
     pharmacyId,
     date,
@@ -46,7 +64,7 @@ export async function POST(request: Request) {
     terminalRevenue,
     kaspiRevenue,
     bonusRevenue,
-    expenseItems,   // [{ amount, category, comment }]
+    expenseItems,
     generalComment,
     employeeName,
     employeeId,
@@ -64,17 +82,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
   }
 
-  // Считаем сумму расходов из переданных строк
-  const items: { amount: string; category?: string; comment?: string }[] =
+  // Менеджер может писать только в свои аптеки
+  if (role === 'manager') {
+    const allowedIds = await getManagerPharmacyIds(request);
+    if (!allowedIds || !allowedIds.includes(Number(pharmacyId))) {
+      return NextResponse.json({ error: 'Нет доступа к этой аптеке' }, { status: 403 });
+    }
+  }
+
+  const items: { amount: string; category?: string; comment?: string; employeeId?: number | null }[] =
     Array.isArray(expenseItems)
       ? expenseItems.filter((i) => parseFloat(i.amount) > 0)
       : [];
+
+  // Авансы привязываются к конкретному сотруднику (может отличаться от employeeId записи).
+  // Проверяем, что выбранный сотрудник действительно работает в этой аптеке.
+  const advanceEmployeeIds = [
+    ...new Set(
+      items
+        .filter((i) => i.category === 'employeeAdvance' && i.employeeId)
+        .map((i) => Number(i.employeeId))
+    ),
+  ];
+  if (advanceEmployeeIds.length > 0) {
+    const links = await prisma.employeePharmacy.findMany({
+      where: { employeeId: { in: advanceEmployeeIds }, pharmacyId: Number(pharmacyId) },
+      select: { employeeId: true },
+    });
+    const linkedIds = new Set(links.map((l) => l.employeeId));
+    if (advanceEmployeeIds.some((id) => !linkedIds.has(id))) {
+      return NextResponse.json(
+        { error: 'Аванс можно записать только сотруднику выбранной аптеки' },
+        { status: 400 }
+      );
+    }
+  }
 
   const totalExpenses = items
     .reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)
     .toFixed(2);
 
-  // Краткий текст для быстрого просмотра: "1 000 — Расходы на ремонт; 500 — Уборка территории"
   const expenseComment =
     items.length > 0
       ? items
@@ -96,6 +143,9 @@ export async function POST(request: Request) {
   });
   const isMonthClosed = !!closedMonth;
 
+  // Менеджер создаёт записи со статусом pending; admin/bookkeeper — сразу approved
+  const entryStatus = role === 'manager' ? 'pending' : 'approved';
+
   const entry = await prisma.$transaction(async (tx) => {
     const created = await tx.dailyRevenueEntry.create({
       data: {
@@ -111,8 +161,10 @@ export async function POST(request: Request) {
         employeeName: employeeName.trim(),
         employeeId: employeeId ? Number(employeeId) : null,
         shiftType: shiftType || null,
-        status: 'approved',
+        status: entryStatus,
         excludedFromReport: isMonthClosed,
+        submittedById: userId,
+        ...(entryStatus === 'approved' ? { approvedAt: new Date() } : {}),
       },
     });
 
@@ -123,6 +175,7 @@ export async function POST(request: Request) {
           amount: i.amount,
           category: i.category || null,
           comment: i.comment || null,
+          employeeId: i.category === 'employeeAdvance' && i.employeeId ? Number(i.employeeId) : null,
         })),
       });
     }

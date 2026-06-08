@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { deleteFile } from '@/lib/storage';
+import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const upload = await prisma.uploadedFile.findFirst({
     where: {
-      id: Number(params.id),
+      id: Number((await params).id),
       fileType: 'bank_transactions_excel',
     },
     include: {
@@ -28,14 +32,17 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const upload = await prisma.uploadedFile.findUnique({ where: { id: Number(params.id) } });
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const upload = await prisma.uploadedFile.findUnique({ where: { id: Number((await params).id) } });
   if (!upload) return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
 
   const approvedCount = await prisma.importedTransaction.count({
-    where: { uploadId: Number(params.id), status: 'approved' },
+    where: { uploadId: Number((await params).id), status: 'approved' },
   });
   if (approvedCount > 0) {
     return NextResponse.json(
@@ -44,7 +51,7 @@ export async function DELETE(
     );
   }
 
-  await prisma.uploadedFile.delete({ where: { id: Number(params.id) } });
+  await prisma.uploadedFile.delete({ where: { id: Number((await params).id) } });
   try {
     await deleteFile(upload.filename);
   } catch (err) {

@@ -51,7 +51,7 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
       retailRevenue: 0, kaspiRevenue: 0, wholesaleRevenue: 0, coefficient: Number(p.coefficient ?? 0),
       avgDailyRevenue: 0, terminalRent: Number(p.terminalRent ?? 0), procedureRent: Number(p.procedureRent ?? 0),
       legalEntityProfit: 0, stockRetail: 0, stockWholesale: 0, consignment: 0, consignmentOverdue: 0,
-      goodsExpenses: 0, pharmaBonus: 0, pharmaSalary: 0, officeSalary: 0,
+      goodsExpenses: 0, pharmaBonus: 0, employeeAdvance: 0, pharmaSalary: 0, officeSalary: 0,
       association: 0, charity: 0, accountingServices: 0, stationery: 0,
       utilities: 0, deferredTax: 0, vat: 0, security: 0,
       otherExpenses: 0, householdExpenses: 0, advertising: 0, repairs: 0,

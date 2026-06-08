@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseAllFileRows } from '@/lib/excel-parser';
 import { downloadFile } from '@/lib/storage';
+import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,9 +13,12 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const fileId = Number(params.id);
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const fileId = Number((await params).id);
   const { searchParams } = new URL(request.url);
   const search = searchParams.get('search')?.trim().toLowerCase() || '';
 
@@ -34,7 +38,7 @@ export async function GET(
   }
 
   // Парсим все строки
-  const allRows = parseAllFileRows(buffer);
+  const allRows = await parseAllFileRows(buffer);
 
   // Получаем уже добавленные расходы из этого файла (для пометки)
   const existingEntries = await prisma.extractedExpenseEntry.findMany({
@@ -83,9 +87,12 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const fileId = Number(params.id);
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const fileId = Number((await params).id);
   const body = await request.json();
   const { rowIndex, category, pharmacyId, operationDate, amount, counterparty, description } = body;
 

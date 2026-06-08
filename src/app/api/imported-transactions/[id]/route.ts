@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { regenerateImportedReportValues } from '@/lib/bank-transaction-import';
+import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
   const transaction = await prisma.importedTransaction.findUnique({
-    where: { id: Number(params.id) },
+    where: { id: Number((await params).id) },
     include: {
       matchedRule: true,
       detectedPharmacy: true,
@@ -27,9 +31,12 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const auth = requireAdmin(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
   const body = await request.json();
   const distributionType = body.distributionType ? String(body.distributionType) : null;
   const fieldKey = body.fieldKey ? String(body.fieldKey) : null;

@@ -1,8 +1,12 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['xlsx', 'pdf-parse'],
-  },
+  serverExternalPackages: ['pdf-parse'],
+  outputFileTracingRoot: __dirname,
   webpack: (config, { dev }) => {
     if (dev) {
       // В dev-режиме используем кеш в памяти вместо файлового —

@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import { excelSerialDateToDate, readFirstWorksheetRows } from '@/lib/xlsx-reader';
 
 // Ключевые слова для определения категории
 const RENT_KEYWORDS = ['аренда', 'аренду', 'арендная плата', 'арендная'];
@@ -49,7 +49,7 @@ export function detectCategory(text: string): 'rent' | 'expense' | null {
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date) return value;
   if (typeof value === 'number') {
-    return XLSX.SSF.parse_date_code(value) as unknown as Date;
+    return excelSerialDateToDate(value);
   }
   if (typeof value === 'string' && value.trim()) {
     // Формат DD.MM.YYYY [HH:MM:SS] — Kaspi и другие банки
@@ -98,17 +98,8 @@ interface ParsedColumns {
   descriptionCol: number;
 }
 
-function parseStructure(buffer: Buffer): ParsedColumns | null {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    raw: false,
-    dateNF: 'YYYY-MM-DD',
-  }) as unknown[][];
-
+async function parseStructure(buffer: Buffer): Promise<ParsedColumns | null> {
+  const rows = await readFirstWorksheetRows(buffer);
   if (rows.length < 2) return null;
 
   // Ищем строку заголовков: максимальное число ячеек, совпадающих с известными именами
@@ -176,8 +167,8 @@ export interface FileRow {
 // ─── Экспортируемые функции ───────────────────────────────────────────────────
 
 /** Возвращает только строки с ключевыми словами (аренда/расход) */
-export function parseExcelFile(buffer: Buffer): ParsedExpense[] {
-  const parsed = parseStructure(buffer);
+export async function parseExcelFile(buffer: Buffer): Promise<ParsedExpense[]> {
+  const parsed = await parseStructure(buffer);
   if (!parsed) return [];
 
   const { rows, headerRowIdx, dateCol, debitCol, creditCol, amountCol, counterpartyCol, descriptionCol } = parsed;
@@ -232,8 +223,8 @@ export function parseExcelFile(buffer: Buffer): ParsedExpense[] {
 }
 
 /** Возвращает ВСЕ строки файла (для ручного просмотра бухгалтером) */
-export function parseAllFileRows(buffer: Buffer): FileRow[] {
-  const parsed = parseStructure(buffer);
+export async function parseAllFileRows(buffer: Buffer): Promise<FileRow[]> {
+  const parsed = await parseStructure(buffer);
   if (!parsed) return [];
 
   const { rows, headerRowIdx, dateCol, debitCol, creditCol, amountCol, counterpartyCol, descriptionCol } = parsed;

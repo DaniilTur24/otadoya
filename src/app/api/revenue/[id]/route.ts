@@ -1,5 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAnyRole, getRequestRole, getRequestUserId } from '@/lib/api-auth';
+
+async function canModifyEntry(
+  request: Request,
+  entry: { pharmacyId: number; status: string; submittedById: number | null }
+): Promise<boolean> {
+  const role = getRequestRole(request);
+  if (role === 'admin' || role === 'bookkeeper') return true;
+  if (role === 'manager') {
+    const userId = getRequestUserId(request);
+    // Менеджер может редактировать только свои записи в статусе pending
+    return entry.submittedById === userId && entry.status === 'pending';
+  }
+  return false;
+}
 
 async function isMonthClosed(date: Date): Promise<boolean> {
   const year  = date.getFullYear();
@@ -9,7 +24,7 @@ async function isMonthClosed(date: Date): Promise<boolean> {
 }
 
 function serialize(entry: Record<string, unknown>) {
-  const items = (entry.expenseItems as { amount: unknown; comment: unknown }[] | undefined) ?? [];
+  const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
   return {
     ...entry,
     cashRevenue: Number(entry.cashRevenue),
@@ -23,26 +38,42 @@ function serialize(entry: Record<string, unknown>) {
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const entry = await prisma.dailyRevenueEntry.findUnique({ where: { id: Number(params.id) } });
+  const auth = requireAnyRole(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
+  const entry = await prisma.dailyRevenueEntry.findUnique({ where: { id } });
   if (!entry) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 });
+
+  if (!await canModifyEntry(request, entry)) {
+    return NextResponse.json({ error: 'Нет доступа к этой записи' }, { status: 403 });
+  }
 
   if (await isMonthClosed(entry.date)) {
     return NextResponse.json({ error: 'Месяц закрыт — удаление невозможно' }, { status: 423 });
   }
 
-  await prisma.dailyRevenueEntry.delete({ where: { id: Number(params.id) } });
+  await prisma.dailyRevenueEntry.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const existing = await prisma.dailyRevenueEntry.findUnique({ where: { id: Number(params.id) } });
+  const auth = requireAnyRole(request);
+  if (auth) return auth;
+
+  const id = Number((await params).id);
+  const existing = await prisma.dailyRevenueEntry.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 });
+
+  if (!await canModifyEntry(request, existing)) {
+    return NextResponse.json({ error: 'Нет доступа к этой записи' }, { status: 403 });
+  }
 
   if (await isMonthClosed(existing.date)) {
     return NextResponse.json({ error: 'Месяц закрыт — изменения невозможны' }, { status: 423 });
@@ -80,6 +111,29 @@ export async function PUT(
   if (Array.isArray(expenseItems)) {
     const filled = expenseItems.filter((i: { amount: string }) => parseFloat(i.amount) > 0);
 
+    // Авансы привязываются к конкретному сотруднику — проверяем, что он работает в этой аптеке
+    const targetPharmacyId = pharmacyId != null ? Number(pharmacyId) : existing.pharmacyId;
+    const advanceEmployeeIds = [
+      ...new Set(
+        filled
+          .filter((i: { category?: string; employeeId?: number | null }) => i.category === 'employeeAdvance' && i.employeeId)
+          .map((i: { employeeId?: number | null }) => Number(i.employeeId))
+      ),
+    ];
+    if (advanceEmployeeIds.length > 0) {
+      const links = await prisma.employeePharmacy.findMany({
+        where: { employeeId: { in: advanceEmployeeIds }, pharmacyId: targetPharmacyId },
+        select: { employeeId: true },
+      });
+      const linkedIds = new Set(links.map((l) => l.employeeId));
+      if (advanceEmployeeIds.some((empId) => !linkedIds.has(empId))) {
+        return NextResponse.json(
+          { error: 'Аванс можно записать только сотруднику выбранной аптеки' },
+          { status: 400 }
+        );
+      }
+    }
+
     data.additionalExpenses = filled
       .reduce((s: number, i: { amount: string }) => s + (parseFloat(i.amount) || 0), 0)
       .toFixed(2);
@@ -96,21 +150,22 @@ export async function PUT(
         : null;
 
     const entry = await prisma.$transaction(async (tx) => {
-      await tx.dailyExpenseItem.deleteMany({ where: { entryId: Number(params.id) } });
+      await tx.dailyExpenseItem.deleteMany({ where: { entryId: id } });
 
       if (filled.length > 0) {
         await tx.dailyExpenseItem.createMany({
-          data: filled.map((i: { amount: string; category?: string; comment?: string }) => ({
-            entryId: Number(params.id),
+          data: filled.map((i: { amount: string; category?: string; comment?: string; employeeId?: number | null }) => ({
+            entryId: id,
             amount: i.amount,
             category: i.category || null,
             comment: i.comment || null,
+            employeeId: i.category === 'employeeAdvance' && i.employeeId ? Number(i.employeeId) : null,
           })),
         });
       }
 
       return tx.dailyRevenueEntry.update({
-        where: { id: Number(params.id) },
+        where: { id },
         data,
         include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
       });
@@ -121,7 +176,7 @@ export async function PUT(
 
   // Если строки расходов не переданы — обновляем только скалярные поля
   const entry = await prisma.dailyRevenueEntry.update({
-    where: { id: Number(params.id) },
+    where: { id },
     data,
     include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
   });
