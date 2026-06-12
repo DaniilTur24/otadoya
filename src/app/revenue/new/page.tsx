@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS } from '@/lib/monthly-report-fields';
+import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS } from '@/lib/shift-types';
 
 interface Pharmacy {
@@ -157,6 +157,24 @@ export default function NewRevenuePage() {
     (parseFloat(form.cashRevenue) || 0) +
     (parseFloat(form.terminalRevenue) || 0) +
     (parseFloat(form.kaspiRevenue) || 0);
+
+  const cashRevenueNum = parseFloat(form.cashRevenue) || 0;
+  const avansNum = parseFloat(form.avans) || 0;
+  const summaryBonuses = expenseItems
+    .filter((i) => i.category === 'pharmaBonus')
+    .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+  const summaryAdvances =
+    expenseItems
+      .filter((i) => i.category === 'employeeAdvance')
+      .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0) + avansNum;
+  const summaryIncomes = expenseItems
+    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) === 'income')
+    .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+  const summaryExpenses = expenseItems
+    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) !== 'income')
+    .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+  const grandTotal = totalRevenue + summaryIncomes - summaryExpenses - summaryBonuses - summaryAdvances;
+  const cashNet = cashRevenueNum - summaryBonuses - summaryAdvances - summaryExpenses;
 
   const selectedDate = new Date(form.date);
   const now = new Date();
@@ -633,6 +651,23 @@ export default function NewRevenuePage() {
             className="input resize-none"
           />
         </div>
+
+        {(totalRevenue > 0 || summaryExpenses > 0 || summaryBonuses > 0 || summaryAdvances > 0) && (
+          <div className="card px-4 py-3 bg-gray-50 flex flex-wrap gap-6 text-sm">
+            <span>
+              Итого:{' '}
+              <strong className={grandTotal >= 0 ? 'text-green-700' : 'text-red-700'}>
+                {grandTotal.toLocaleString('ru-RU')}
+              </strong>
+            </span>
+            <span>
+              Наличными на руках:{' '}
+              <strong className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>
+                {cashNet.toLocaleString('ru-RU')}
+              </strong>
+            </span>
+          </div>
+        )}
 
         <div className="flex gap-3 pt-2">
           <button type="submit" className="btn-primary" disabled={submitting}>

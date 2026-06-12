@@ -66,6 +66,10 @@ export default function SettingsPage() {
           <div className="font-semibold text-gray-900">Правила транзакций</div>
           <div className="text-xs text-gray-500 mt-1">Классификация и распределение строк банка.</div>
         </Link>
+        <Link href="/settings/working-calendar" className="card p-4 hover:bg-gray-50">
+          <div className="font-semibold text-gray-900">Производственный календарь</div>
+          <div className="text-xs text-gray-500 mt-1">Рабочие дни по месяцам для расчёта пятидневной смены.</div>
+        </Link>
       </div>
 
       <div className="max-w-2xl">

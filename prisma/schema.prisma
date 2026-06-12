@@ -338,6 +338,19 @@ model MonthlyFieldConfig {
   @@map("monthly_field_configs")
 }
 
+// Производственный календарь: рабочие дни по месяцам для расчёта пятидневной смены
+model WorkingCalendar {
+  id          Int      @id @default(autoincrement())
+  year        Int
+  month       Int      // 1-12
+  workingDays Int      @map("working_days")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([year, month])
+  @@map("working_calendar")
+}
+
 // Закрытый месяц: хранит финальные цифры как снимок
 model ClosedMonth {
   id           Int      @id @default(autoincrement())

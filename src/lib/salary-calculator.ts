@@ -9,8 +9,15 @@ export interface MonthlySalaryResult {
   baseSalary: number;
   dayShiftsCount: number;
   fullDayShiftsCount: number;
+  fiveDayShiftsCount: number;
   salaryFromDayShifts: number;
   salaryFromFullDayShifts: number;
+  salaryFromFiveDayShifts: number;
+  /** null — если производственный календарь не заполнен для этого месяца */
+  workingCalendarDays: number | null;
+  revenuePremiumDayShifts: number;
+  revenuePremiumFullDayShifts: number;
+  totalRevenuePremium: number;
   totalBonuses: number;
   totalAdvances: number;
   totalSalary: number;
@@ -35,9 +42,21 @@ export interface ShiftEntry {
  * Рассчитывает зарплату сотрудника за указанный месяц.
  *
  * Формула:
- *   salaryFromFullDayShifts = baseSalary / 10 * fullDayShiftsCount
- *   salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
- *   totalSalary             = salaryFromFullDayShifts + salaryFromDayShifts + totalBonuses - totalAdvances
+ *   salaryFromFullDayShifts  = baseSalary / 10 * fullDayShiftsCount
+ *   salaryFromDayShifts      = baseSalary / 15 * dayShiftsCount
+ *   salaryFromFiveDayShifts  = baseSalary / workingCalendarDays * fiveDayShiftsCount
+ *                              (0 если производственный календарь не заполнен)
+ *
+ * Премия по выручке (revenue premium): средняя выручка аптеки за смену минус порог,
+ * умноженная на 1.5% и на количество отработанных смен данного типа. Эквивалентно
+ * (сумма выручки за смены этого типа − порог * количество смен) * 1.5%.
+ *   revenuePremiumDayShifts     = (revenueDayShifts − 200000 * dayShiftsCount) * 0.015
+ *   revenuePremiumFullDayShifts = (revenueFullDayShifts − 300000 * fullDayShiftsCount) * 0.015
+ *   totalRevenuePremium         = revenuePremiumDayShifts + revenuePremiumFullDayShifts
+ *                                  (для пятидневных смен пока не считается)
+ * Премия может быть отрицательной (если средняя выручка ниже порога) — учитывается как есть.
+ *
+ *   totalSalary = сумма трёх видов окладной части + totalBonuses + totalRevenuePremium − totalAdvances
  *
  * Авансы (категория 'employeeAdvance') вычитаются из накопленной зарплаты;
  * если авансов больше заработанного — итоговая зарплата уходит в минус.
@@ -72,7 +91,7 @@ export async function calculateEmployeeMonthlySalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const [entries, pharmaBonusAgg, advanceAgg] = await Promise.all([
+  const [entries, pharmaBonusAgg, advanceAgg, calendarEntry] = await Promise.all([
     prisma.dailyRevenueEntry.findMany({
       where: entryFilter,
       select: {
@@ -94,25 +113,57 @@ export async function calculateEmployeeMonthlySalary(
       _sum: { amount: true },
       where: { category: 'employeeAdvance', employeeId, entry: advanceEntryFilter },
     }),
+    // Производственный календарь — рабочие дни для пятидневной смены
+    prisma.workingCalendar.findFirst({
+      where: { year, month },
+      select: { workingDays: true },
+    }),
   ]);
 
   const baseSalary = Number(employee.baseSalary);
   let dayShiftsCount = 0;
   let fullDayShiftsCount = 0;
+  let fiveDayShiftsCount = 0;
   const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
   const totalAdvances = Number(advanceAgg._sum.amount ?? 0);
+  const workingCalendarDays = calendarEntry?.workingDays ?? null;
   let revenueTotal = 0;
+  let revenueDayShifts = 0;
+  let revenueFullDayShifts = 0;
 
   for (const e of entries) {
-    if (e.shiftType === 'day') dayShiftsCount++;
-    else if (e.shiftType === 'full_day') fullDayShiftsCount++;
-    revenueTotal +=
+    const revenue =
       Number(e.cashRevenue) + Number(e.terminalRevenue) + Number(e.kaspiRevenue ?? 0);
+    if (e.shiftType === 'day') {
+      dayShiftsCount++;
+      revenueDayShifts += revenue;
+    } else if (e.shiftType === 'full_day') {
+      fullDayShiftsCount++;
+      revenueFullDayShifts += revenue;
+    } else if (e.shiftType === 'five_day') {
+      fiveDayShiftsCount++;
+    }
+    revenueTotal += revenue;
   }
 
   const salaryFromFullDayShifts = baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0;
   const salaryFromDayShifts = baseSalary > 0 ? (baseSalary / 15) * dayShiftsCount : 0;
-  const totalSalary = salaryFromFullDayShifts + salaryFromDayShifts + totalBonuses - totalAdvances;
+  const salaryFromFiveDayShifts =
+    baseSalary > 0 && workingCalendarDays
+      ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount
+      : 0;
+
+  const revenuePremiumDayShifts = (revenueDayShifts - 200000 * dayShiftsCount) * 0.015;
+  const revenuePremiumFullDayShifts = (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015;
+  const totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts;
+
+  const totalSalary =
+    salaryFromFullDayShifts +
+    salaryFromDayShifts +
+    salaryFromFiveDayShifts +
+    totalBonuses +
+    totalRevenuePremium -
+    totalAdvances;
 
   return {
     employeeId,
@@ -122,8 +173,14 @@ export async function calculateEmployeeMonthlySalary(
     baseSalary,
     dayShiftsCount,
     fullDayShiftsCount,
+    fiveDayShiftsCount,
     salaryFromDayShifts,
     salaryFromFullDayShifts,
+    salaryFromFiveDayShifts,
+    workingCalendarDays,
+    revenuePremiumDayShifts,
+    revenuePremiumFullDayShifts,
+    totalRevenuePremium,
     totalBonuses,
     totalAdvances,
     totalSalary,

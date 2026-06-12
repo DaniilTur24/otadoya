@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (shiftType && !['day', 'full_day'].includes(shiftType)) {
+  if (shiftType && !['day', 'full_day', 'five_day'].includes(shiftType)) {
     return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
   }
 

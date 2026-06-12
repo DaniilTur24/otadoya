@@ -55,7 +55,7 @@ export function Navigation() {
         <div className="flex items-center h-14 gap-1">
           <span className="font-bold text-blue-700 mr-2 text-sm shrink-0">Аптека Учёт</span>
 
-          <div className="hidden md:flex items-center gap-1 flex-1 flex-wrap">
+          <div className="hidden md:flex items-center gap-1 flex-1 overflow-x-auto flex-nowrap">
             {links.map((link) => {
               const active = link.exact ? pathname === link.href : pathname.startsWith(link.href);
               return (

@@ -3,6 +3,7 @@
 export const SHIFT_TYPES = {
   day: 'day',
   full_day: 'full_day',
+  five_day: 'five_day',
 } as const;
 
 export type ShiftType = keyof typeof SHIFT_TYPES;
@@ -10,9 +11,11 @@ export type ShiftType = keyof typeof SHIFT_TYPES;
 export const SHIFT_TYPE_LABELS: Record<string, string> = {
   day: 'Дневная',
   full_day: 'Суточная',
+  five_day: 'Пятидневная',
 };
 
 export const SHIFT_OPTIONS = [
   { value: 'day', label: 'Дневная' },
   { value: 'full_day', label: 'Суточная' },
+  { value: 'five_day', label: 'Пятидневная' },
 ] as const;
