@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { computeMonthlyData, buildMonthlySnapshot } from '@/lib/monthly-report-builder';
 import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
@@ -15,8 +16,13 @@ export async function GET(request: NextRequest) {
   const month = Number(searchParams.get('month'));
   if (!year || !month) return NextResponse.json({ isClosed: false });
 
-  const record = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
-  return NextResponse.json({ isClosed: !!record, closedAt: record?.closedAt ?? null });
+  try {
+    const record = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
+    return NextResponse.json({ isClosed: !!record, closedAt: record?.closedAt ?? null });
+  } catch (err) {
+    console.error('Ошибка проверки статуса месяца:', err);
+    return NextResponse.json({ error: 'Не удалось проверить статус месяца' }, { status: 500 });
+  }
 }
 
 // POST — закрыть месяц: снапшот строится на сервере из актуальных данных БД
@@ -24,27 +30,42 @@ export async function POST(request: NextRequest) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
-  const { year, month } = await request.json();
+  let year: number, month: number;
+  try {
+    ({ year, month } = await request.json());
+  } catch (err) {
+    console.error('Ошибка разбора запроса закрытия месяца:', err);
+    return NextResponse.json({ error: 'Некорректное тело запроса' }, { status: 400 });
+  }
 
   if (!year || !month) {
     return NextResponse.json({ error: 'year и month обязательны' }, { status: 400 });
   }
 
-  const existing = await prisma.closedMonth.findUnique({
-    where: { year_month: { year, month } },
-  });
-  if (existing) {
-    return NextResponse.json({ error: 'Месяц уже закрыт' }, { status: 409 });
+  try {
+    const existing = await prisma.closedMonth.findUnique({
+      where: { year_month: { year, month } },
+    });
+    if (existing) {
+      return NextResponse.json({ error: 'Месяц уже закрыт' }, { status: 409 });
+    }
+
+    const { pharmacies, systemData, overrideMap } = await computeMonthlyData(year, month);
+    const snapshot = buildMonthlySnapshot(pharmacies, systemData, overrideMap);
+
+    const record = await prisma.closedMonth.create({
+      data: { year, month, snapshotJson: JSON.stringify(snapshot) },
+    });
+
+    return NextResponse.json({ ok: true, closedAt: record.closedAt });
+  } catch (err) {
+    console.error(`Ошибка закрытия месяца ${year}-${month}:`, err);
+    // Уникальный индекс (year, month) — гонка между параллельными запросами закрытия
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return NextResponse.json({ error: 'Месяц уже закрыт' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'Не удалось закрыть месяц' }, { status: 500 });
   }
-
-  const { pharmacies, systemData, overrideMap } = await computeMonthlyData(year, month);
-  const snapshot = buildMonthlySnapshot(pharmacies, systemData, overrideMap);
-
-  const record = await prisma.closedMonth.create({
-    data: { year, month, snapshotJson: JSON.stringify(snapshot) },
-  });
-
-  return NextResponse.json({ ok: true, closedAt: record.closedAt });
 }
 
 // DELETE — открыть месяц обратно
@@ -52,9 +73,23 @@ export async function DELETE(request: NextRequest) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
-  const { year, month } = await request.json();
+  let year: number, month: number;
+  try {
+    ({ year, month } = await request.json());
+  } catch (err) {
+    console.error('Ошибка разбора запроса открытия месяца:', err);
+    return NextResponse.json({ error: 'Некорректное тело запроса' }, { status: 400 });
+  }
 
-  await prisma.closedMonth.deleteMany({ where: { year, month } });
+  if (!year || !month) {
+    return NextResponse.json({ error: 'year и month обязательны' }, { status: 400 });
+  }
 
-  return NextResponse.json({ ok: true });
+  try {
+    await prisma.closedMonth.deleteMany({ where: { year, month } });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error(`Ошибка открытия месяца ${year}-${month}:`, err);
+    return NextResponse.json({ error: 'Не удалось открыть месяц' }, { status: 500 });
+  }
 }
