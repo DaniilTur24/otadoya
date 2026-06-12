@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+Before making code changes (new features, bug fixes, refactors), briefly state what you understood the task to be and your planned approach. Wait for user confirmation before implementing. Skip this for trivial/explicitly-detailed requests.
+
+After large changes or adding new functions that could conflict with existing logic, run the existing test suite (`npm test`) to make sure nothing broke, and add new tests covering the new functionality.
+
 ## Commands
 
 ```bash

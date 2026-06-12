@@ -44,8 +44,14 @@ interface SalaryResult {
   baseSalary: number;
   dayShiftsCount: number;
   fullDayShiftsCount: number;
+  fiveDayShiftsCount: number;
   salaryFromDayShifts: number;
   salaryFromFullDayShifts: number;
+  salaryFromFiveDayShifts: number;
+  workingCalendarDays: number | null;
+  revenuePremiumDayShifts: number;
+  revenuePremiumFullDayShifts: number;
+  totalRevenuePremium: number;
   totalBonuses: number;
   totalAdvances: number;
   totalSalary: number;
@@ -339,7 +345,7 @@ export default function EmployeeDetailPage() {
 
         {salaryLoading ? (
           <div className="text-sm text-gray-400 py-4 text-center">Расчёт...</div>
-        ) : salary && salary.recordsCount > 0 ? (
+        ) : salary && (salary.recordsCount > 0 || salary.advances.length > 0) ? (
           <>
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
               <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -356,8 +362,24 @@ export default function EmployeeDetailPage() {
                   {salary.fullDayShiftsCount} × {fmt(salary.baseSalary / 10)} = {fmt(salary.salaryFromFullDayShifts)} ₸
                 </span>
 
+                <span className="text-gray-500">Пятидневных смен</span>
+                <span className="font-medium text-right">
+                  {salary.fiveDayShiftsCount > 0 && salary.workingCalendarDays ? (
+                    <>{salary.fiveDayShiftsCount} × {fmt(salary.baseSalary / salary.workingCalendarDays)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                  ) : salary.fiveDayShiftsCount > 0 ? (
+                    <span className="text-amber-600">{salary.fiveDayShiftsCount} смен — календарь не заполнен</span>
+                  ) : (
+                    <span className="text-gray-300">0</span>
+                  )}
+                </span>
+
                 <span className="text-gray-500">Бонусы</span>
                 <span className="font-medium text-right">{fmt(salary.totalBonuses)} ₸</span>
+
+                <span className="text-gray-500">Премия по выручке</span>
+                <span className={`font-medium text-right ${salary.totalRevenuePremium < 0 ? 'text-red-600' : ''}`}>
+                  {fmt(salary.totalRevenuePremium)} ₸
+                </span>
 
                 {salary.totalAdvances > 0 && (
                   <>
@@ -406,6 +428,8 @@ export default function EmployeeDetailPage() {
                         <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                           s.shiftType === 'full_day'
                             ? 'bg-purple-50 text-purple-700'
+                            : s.shiftType === 'five_day'
+                            ? 'bg-green-50 text-green-700'
                             : 'bg-blue-50 text-blue-700'
                         }`}>
                           {SHIFT_TYPE_LABELS[s.shiftType] ?? s.shiftType}
