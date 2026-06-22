@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, requireAnyRole, getManagerPharmacyIds } from '@/lib/api-auth';
+import { EMPLOYEE_TYPES } from '@/lib/employee-types';
 
 function serialize(emp: Record<string, unknown>) {
-  return { ...emp, baseSalary: Number(emp.baseSalary) };
+  return {
+    ...emp,
+    baseSalary: Number(emp.baseSalary),
+    shiftRate: emp.shiftRate != null ? Number(emp.shiftRate) : null,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -57,10 +62,13 @@ export async function POST(request: NextRequest) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
-  const { name, baseSalary, isActive } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate } = await request.json();
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Имя сотрудника обязательно' }, { status: 400 });
+  }
+  if (employeeType != null && !(employeeType in EMPLOYEE_TYPES)) {
+    return NextResponse.json({ error: 'Некорректный тип сотрудника' }, { status: 400 });
   }
 
   const employee = await prisma.employee.create({
@@ -68,6 +76,8 @@ export async function POST(request: NextRequest) {
       name: name.trim(),
       baseSalary: String(baseSalary ?? 0),
       isActive: isActive !== false,
+      employeeType: employeeType ?? 'seller',
+      shiftRate: shiftRate != null ? String(shiftRate) : null,
     },
   });
 

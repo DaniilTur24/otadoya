@@ -2,12 +2,24 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { EMPLOYEE_TYPE_LABELS } from '@/lib/employee-types';
+
+// Заведующих (manager_trading / manager_fixed) создают на /users — туда же
+// автоматически попадает их карточка сотрудника. Здесь создаются только
+// продавцы, уборщицы и офисные сотрудники.
+const CREATABLE_TYPES = [
+  { value: 'seller', label: 'Продавец' },
+  { value: 'cleaner', label: 'Уборщица' },
+  { value: 'office', label: 'Офис' },
+] as const;
 
 interface Pharmacy { id: number; name: string }
 interface Employee {
   id: number;
   name: string;
   baseSalary: number;
+  employeeType: string;
+  shiftRate: number | null;
   isActive: boolean;
   pharmacies: Pharmacy[];
 }
@@ -17,9 +29,16 @@ export default function EmployeesPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', baseSalary: '', pharmacyIds: [] as number[] });
+  const [form, setForm] = useState({
+    name: '',
+    employeeType: 'seller' as string,
+    baseSalary: '',
+    shiftRate: '',
+    pharmacyIds: [] as number[],
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const load = useCallback(() => {
     Promise.all([
@@ -28,6 +47,7 @@ export default function EmployeesPage() {
     ]).then(([emps, pharms]) => {
       setEmployees(emps);
       setPharmacies(pharms);
+      setSelectedIds(new Set());
       setLoading(false);
     });
   }, []);
@@ -46,7 +66,12 @@ export default function EmployeesPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    if (!form.baseSalary || Number(form.baseSalary) <= 0) {
+    if (form.employeeType === 'cleaner') {
+      if (!form.shiftRate || Number(form.shiftRate) <= 0) {
+        setError('Укажите ставку за смену');
+        return;
+      }
+    } else if (!form.baseSalary || Number(form.baseSalary) <= 0) {
       setError('Укажите оклад сотрудника');
       return;
     }
@@ -59,7 +84,12 @@ export default function EmployeesPage() {
     const res = await fetch('/api/employees', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name.trim(), baseSalary: form.baseSalary || 0 }),
+      body: JSON.stringify({
+        name: form.name.trim(),
+        employeeType: form.employeeType,
+        baseSalary: form.baseSalary || 0,
+        shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
+      }),
     });
     if (res.ok) {
       const created = await res.json();
@@ -70,7 +100,7 @@ export default function EmployeesPage() {
           body: JSON.stringify({ pharmacyIds: form.pharmacyIds }),
         });
       }
-      setForm({ name: '', baseSalary: '', pharmacyIds: [] });
+      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', pharmacyIds: [] });
       setShowForm(false);
       load();
     } else {
@@ -92,6 +122,25 @@ export default function EmployeesPage() {
   async function handleDelete(id: number, name: string) {
     if (!confirm(`Удалить сотрудника «${name}»?\n\nЗаписи выручки останутся, но привязка к этому сотруднику будет потеряна.`)) return;
     await fetch(`/api/employees/${id}`, { method: 'DELETE' });
+    load();
+  }
+
+  function toggleSelect(id: number) {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Удалить ${selectedIds.size} выбранных сотрудников?\n\nЗаписи выручки останутся, но привязка к этим сотрудникам будет потеряна.`)) return;
+    await Promise.all(
+      Array.from(selectedIds).map((id) => fetch(`/api/employees/${id}`, { method: 'DELETE' }))
+    );
+    setSelectedIds(new Set());
     load();
   }
 
@@ -142,18 +191,46 @@ export default function EmployeesPage() {
               />
             </div>
             <div>
-              <label className="label">Оклад (₸) *</label>
-              <input
-                type="number"
-                value={form.baseSalary}
-                onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
-                min="1"
-                step="1"
-                placeholder="150000"
+              <label className="label">Тип сотрудника *</label>
+              <select
+                value={form.employeeType}
+                onChange={(e) => setForm((f) => ({ ...f, employeeType: e.target.value }))}
                 className="input"
-                required
-              />
+              >
+                {CREATABLE_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
             </div>
+            {form.employeeType === 'cleaner' ? (
+              <div>
+                <label className="label">Ставка за смену (₸) *</label>
+                <input
+                  type="number"
+                  value={form.shiftRate}
+                  onChange={(e) => setForm((f) => ({ ...f, shiftRate: e.target.value }))}
+                  min="1"
+                  step="1"
+                  placeholder="5000"
+                  className="input"
+                  required
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="label">Оклад (₸) *</label>
+                <input
+                  type="number"
+                  value={form.baseSalary}
+                  onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
+                  min="1"
+                  step="1"
+                  placeholder="150000"
+                  className="input"
+                  required
+                />
+              </div>
+            )}
           </div>
           {pharmacies.length > 0 && (
             <div>
@@ -192,6 +269,14 @@ export default function EmployeesPage() {
         <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
       ) : (
         <>
+          {selectedIds.size > 0 && (
+            <div className="card px-4 py-2 mb-3 bg-blue-50 border-blue-200 flex items-center justify-between">
+              <span className="text-sm text-blue-800">Выбрано: {selectedIds.size}</span>
+              <button className="btn-danger text-xs" onClick={deleteSelected}>
+                Удалить выбранные
+              </button>
+            </div>
+          )}
           <div className="card divide-y divide-gray-100 mb-4">
             {active.length === 0 ? (
               <div className="px-4 py-6 text-sm text-gray-400 text-center">
@@ -203,6 +288,8 @@ export default function EmployeesPage() {
                   key={emp.id}
                   emp={emp}
                   allPharmacies={pharmacies}
+                  isSelected={selectedIds.has(emp.id)}
+                  onToggleSelect={toggleSelect}
                   onToggle={toggleActive}
                   onDelete={handleDelete}
                   onUpdatePharmacies={updatePharmacies}
@@ -222,6 +309,8 @@ export default function EmployeesPage() {
                     key={emp.id}
                     emp={emp}
                     allPharmacies={pharmacies}
+                    isSelected={selectedIds.has(emp.id)}
+                    onToggleSelect={toggleSelect}
                     onToggle={toggleActive}
                     onDelete={handleDelete}
                     onUpdatePharmacies={updatePharmacies}
@@ -239,12 +328,16 @@ export default function EmployeesPage() {
 function EmployeeRow({
   emp,
   allPharmacies,
+  isSelected,
+  onToggleSelect,
   onToggle,
   onDelete,
   onUpdatePharmacies,
 }: {
   emp: Employee;
   allPharmacies: Pharmacy[];
+  isSelected: boolean;
+  onToggleSelect: (id: number) => void;
   onToggle: (id: number, current: boolean) => void;
   onDelete: (id: number, name: string) => void;
   onUpdatePharmacies: (id: number, pharmacyIds: number[]) => void;
@@ -269,15 +362,30 @@ function EmployeeRow({
   return (
     <div className="px-4 py-3 hover:bg-gray-50">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+        <input
+          type="checkbox"
+          className="rounded mt-1 sm:mt-0 shrink-0"
+          checked={isSelected}
+          onChange={() => onToggleSelect(emp.id)}
+        />
         <div className="flex-1 min-w-0">
           <div className={`font-medium ${emp.isActive ? 'text-gray-900' : 'text-gray-400'}`}>
             {emp.name}
             {!emp.isActive && <span className="ml-2 text-xs text-gray-400">(неактивен)</span>}
           </div>
-          <div className="text-xs text-gray-400 mt-0.5">
-            Оклад: <span className="text-gray-600 font-medium">
-              {emp.baseSalary.toLocaleString('ru-RU')} ₸
+          <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
+            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+              {EMPLOYEE_TYPE_LABELS[emp.employeeType] ?? emp.employeeType}
             </span>
+            {emp.employeeType === 'cleaner' ? (
+              <span>Ставка за смену: <span className="text-gray-600 font-medium">
+                {(emp.shiftRate ?? 0).toLocaleString('ru-RU')} ₸
+              </span></span>
+            ) : (
+              <span>Оклад: <span className="text-gray-600 font-medium">
+                {emp.baseSalary.toLocaleString('ru-RU')} ₸
+              </span></span>
+            )}
           </div>
           {/* Аптеки */}
           <div className="flex flex-wrap items-center gap-1 mt-1.5">

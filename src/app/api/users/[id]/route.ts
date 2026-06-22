@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { hashPassword } from '@/lib/password';
+import { USER_LINKED_TYPES } from '@/lib/employee-types';
 
 function serialize(u: Record<string, unknown>) {
   const { passwordHash: _, ...rest } = u as { passwordHash: unknown } & Record<string, unknown>;
@@ -16,7 +17,8 @@ export async function PUT(
   if (auth) return auth;
 
   const id = Number((await params).id);
-  const { displayName, password, isActive, pharmacyIds } = await request.json();
+  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled } =
+    await request.json();
 
   const data: Record<string, unknown> = {};
   if (displayName !== undefined) data.displayName = displayName.trim();
@@ -27,9 +29,24 @@ export async function PUT(
     }
     data.passwordHash = hashPassword(password);
   }
+  if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
+    return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
+  }
 
   const user = await prisma.$transaction(async (tx) => {
     const updated = await tx.user.update({ where: { id }, data });
+
+    // Связанная карточка сотрудника (Employee) обновляется вместе с заведующим/менеджером
+    if (updated.employeeId != null) {
+      const employeeData: Record<string, unknown> = {};
+      if (displayName !== undefined) employeeData.name = displayName.trim();
+      if (baseSalary != null) employeeData.baseSalary = String(baseSalary);
+      if (employeeType != null) employeeData.employeeType = employeeType;
+      if (managerPremiumEnabled !== undefined) employeeData.managerPremiumEnabled = Boolean(managerPremiumEnabled);
+      if (Object.keys(employeeData).length > 0) {
+        await tx.employee.update({ where: { id: updated.employeeId }, data: employeeData });
+      }
+    }
 
     if (Array.isArray(pharmacyIds)) {
       await tx.userPharmacy.deleteMany({ where: { userId: id } });
@@ -38,6 +55,15 @@ export async function PUT(
           data: pharmacyIds.map((pid: number) => ({ userId: id, pharmacyId: pid })),
           skipDuplicates: true,
         });
+      }
+      if (updated.employeeId != null) {
+        await tx.employeePharmacy.deleteMany({ where: { employeeId: updated.employeeId } });
+        if (pharmacyIds.length > 0) {
+          await tx.employeePharmacy.createMany({
+            data: pharmacyIds.map((pid: number) => ({ employeeId: updated.employeeId as number, pharmacyId: pid })),
+            skipDuplicates: true,
+          });
+        }
       }
     }
 

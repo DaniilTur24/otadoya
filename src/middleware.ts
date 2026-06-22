@@ -8,20 +8,24 @@ const BOOKKEEPER_ALLOWED = [
   '/revenue/new',
   '/employees',
   '/users',
+  '/attendance',
   '/api/revenue',
   '/api/employees',
   '/api/pharmacies',
   '/api/users',
   '/api/months/close',
+  '/api/attendance',
 ];
 
 const MANAGER_ALLOWED = [
   '/revenue',
   '/revenue/new',
+  '/attendance',
   '/api/revenue',
   '/api/employees',
   '/api/pharmacies',
   '/api/months/close',
+  '/api/attendance',
 ];
 
 const MAX_EXCEL_UPLOAD_BYTES = 10 * 1024 * 1024;
