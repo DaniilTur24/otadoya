@@ -6,14 +6,25 @@ vi.mock('@/lib/prisma', () => ({
       findUnique: vi.fn(),
       findMany: vi.fn(),
     },
+    pharmacy: {
+      findMany: vi.fn(),
+    },
     dailyRevenueEntry: {
       findMany: vi.fn(),
+      aggregate: vi.fn(),
     },
     dailyExpenseItem: {
       aggregate: vi.fn(),
       findMany: vi.fn(),
     },
     workingCalendar: {
+      findFirst: vi.fn(),
+    },
+    attendanceShift: {
+      count: vi.fn(),
+      findMany: vi.fn(),
+    },
+    officePremiumSettings: {
       findFirst: vi.fn(),
     },
   },
@@ -318,6 +329,345 @@ describe('calculateAllEmployeesSalaries', () => {
     const result = await calculateAllEmployeesSalaries(1, 2025);
     expect(result).toHaveLength(1);
     expect(result[0].employeeName).toBe('Работник');
+  });
+
+  it('includes a manager_trading employee even with zero personal shifts this month', async () => {
+    // Заведующая не торговала лично в этом месяце, но её аптека всё равно
+    // заработала бонусы/выручку — её 10%/доплата/премия не должны пропасть из расчёта.
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 25, name: 'Заведующая', baseSalary: 200000, isActive: true },
+    ]);
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 25,
+      name: 'Заведующая',
+      baseSalary: 200000,
+      employeeType: 'manager_trading',
+      pharmacies: [{ employeeId: 25, pharmacyId: 2 }],
+    });
+    mockRevenueEntries({
+      shifts: [],
+      pharmacyRevenueRows: [{ pharmacyId: 2, cashRevenue: 500000, terminalRevenue: 0, kaspiRevenue: 0 }],
+    });
+    mockExpenseAggregates({ managerBonusBase: 10000 });
+    mockManagedPharmacies([{ id: 2, managerAllowance: 20000 }]);
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const result = await calculateAllEmployeesSalaries(6, 2026);
+    expect(result).toHaveLength(1);
+    expect(result[0].recordsCount).toBe(0);
+    expect(result[0].managerAllowance).toBe(20000);
+    expect(result[0].managerBonusShare).toBeCloseTo(1000, 5);
+  });
+});
+
+// ─── manager_trading / manager_fixed / cleaner / office ──────────────────────
+
+function mockExpenseAggregates(opts: { ownBonuses?: number; advances?: number; managerBonusBase?: number } = {}) {
+  const { ownBonuses = 0, advances = 0, managerBonusBase = 0 } = opts;
+  vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockImplementation(
+    (args: { where?: { category?: string; entry?: { employeeId?: number } } }) => {
+      if (args?.where?.category === 'employeeAdvance') return Promise.resolve({ _sum: { amount: advances } });
+      if (args?.where?.entry?.employeeId !== undefined) return Promise.resolve({ _sum: { amount: ownBonuses } });
+      return Promise.resolve({ _sum: { amount: managerBonusBase } });
+    }
+  );
+}
+
+function mockRevenueEntries(opts: {
+  shifts?: { shiftType: string; cashRevenue: number; terminalRevenue: number; kaspiRevenue: number }[];
+  pharmacyRevenueRows?: { pharmacyId: number; cashRevenue: number; terminalRevenue: number; kaspiRevenue: number }[];
+} = {}) {
+  const { shifts = [], pharmacyRevenueRows = [] } = opts;
+  vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockImplementation(
+    (args: { where?: { employeeId?: number } }) => {
+      if (args?.where?.employeeId !== undefined) return Promise.resolve(shifts);
+      return Promise.resolve(pharmacyRevenueRows);
+    }
+  );
+}
+
+function mockManagedPharmacies(
+  pharmacies: {
+    id: number;
+    managerAllowance?: number;
+    managerPremiumThreshold?: number | null;
+    managerPremiumBase?: number | null;
+    managerPremiumStepAmount?: number | null;
+    managerPremiumStepBonus?: number | null;
+  }[]
+) {
+  vi.mocked(prisma.pharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+    pharmacies.map((p) => ({
+      managerAllowance: 0,
+      managerPremiumThreshold: null,
+      managerPremiumBase: null,
+      managerPremiumStepAmount: null,
+      managerPremiumStepBonus: null,
+      ...p,
+    }))
+  );
+}
+
+describe('calculateEmployeeMonthlySalary — manager_trading', () => {
+  const manager = {
+    id: 5,
+    name: 'Заведующая Алия',
+    baseSalary: 150000,
+    employeeType: 'manager_trading',
+    pharmacies: [{ employeeId: 5, pharmacyId: 10 }],
+  };
+
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(manager);
+    mockExpenseAggregates();
+    mockManagedPharmacies([{ id: 10 }]);
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+  });
+
+  it('does not apply the seller revenue premium (200k/300k)', async () => {
+    mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 220000, terminalRevenue: 0, kaspiRevenue: 0 }] });
+    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.totalRevenuePremium).toBe(0);
+    expect(result!.revenuePremiumDayShifts).toBe(0);
+  });
+
+  it('adds 10% of pharmacy bonuses (managerBonusShare) on top of shift salary', async () => {
+    mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 }] });
+    mockExpenseAggregates({ ownBonuses: 1000, managerBonusBase: 50000 });
+    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.managerBonusShare).toBeCloseTo(5000, 5); // 10% of 50000
+    expect(result!.managedBonusTotal).toBe(50000);
+    expect(result!.totalBonuses).toBe(1000);
+    expect(result!.totalSalary).toBeCloseTo(150000 / 15 + 1000 + 5000, 5);
+  });
+
+  it('adds the pharmacy manager allowance', async () => {
+    mockRevenueEntries({ shifts: [] });
+    mockManagedPharmacies([{ id: 10, managerAllowance: 20000 }]);
+    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.managerAllowance).toBe(20000);
+    expect(result!.totalSalary).toBe(20000);
+  });
+
+  it('applies the pharmacy ladder premium based on monthly pharmacy revenue', async () => {
+    mockRevenueEntries({
+      shifts: [],
+      pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 450000, terminalRevenue: 0, kaspiRevenue: 0 }],
+    });
+    mockManagedPharmacies([
+      { id: 10, managerPremiumThreshold: 400000, managerPremiumBase: 10000, managerPremiumStepAmount: 50000, managerPremiumStepBonus: 5000 },
+    ]);
+    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    // 450000 >= 400000 → base 10000 + floor((450000-400000)/50000)*5000 = 10000 + 5000 = 15000
+    expect(result!.managerLadderPremium).toBeCloseTo(15000, 5);
+    expect(result!.managedRevenueTotal).toBe(450000);
+    expect(result!.totalSalary).toBeCloseTo(15000, 5);
+  });
+
+  it('gives zero ladder premium when pharmacy revenue is below threshold', async () => {
+    mockRevenueEntries({
+      shifts: [],
+      pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 }],
+    });
+    mockManagedPharmacies([{ id: 10, managerPremiumThreshold: 400000, managerPremiumBase: 10000 }]);
+    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.managerLadderPremium).toBe(0);
+  });
+});
+
+describe('calculateEmployeeMonthlySalary — manager_fixed', () => {
+  const manager = {
+    id: 6,
+    name: 'Заведующая Гульнара',
+    baseSalary: 100000,
+    employeeType: 'manager_fixed',
+    pharmacies: [{ employeeId: 6, pharmacyId: 11 }],
+  };
+
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(manager);
+    mockExpenseAggregates();
+    mockManagedPharmacies([{ id: 11 }]);
+    mockRevenueEntries();
+  });
+
+  it('computes salary from attendance shifts using the working calendar (five-day formula)', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(10);
+    const result = await calculateEmployeeMonthlySalary(6, 6, 2025);
+    expect(result!.attendanceShiftsCount).toBe(10);
+    expect(result!.salaryFromFiveDayShifts).toBeCloseTo((100000 / 20) * 10, 5);
+    expect(result!.totalSalary).toBeCloseTo((100000 / 20) * 10, 5);
+  });
+
+  it('returns zero base salary when calendar is not configured', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(5);
+    const result = await calculateEmployeeMonthlySalary(6, 6, 2025);
+    expect(result!.salaryFromFiveDayShifts).toBe(0);
+  });
+
+  it('includes managerBonusShare, allowance and ladder premium like manager_trading', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    mockExpenseAggregates({ managerBonusBase: 30000 });
+    mockManagedPharmacies([{ id: 11, managerAllowance: 30000 }]);
+    const result = await calculateEmployeeMonthlySalary(6, 6, 2025);
+    expect(result!.managerBonusShare).toBeCloseTo(3000, 5);
+    expect(result!.managerAllowance).toBe(30000);
+    expect(result!.totalSalary).toBeCloseTo(3000 + 30000, 5);
+  });
+});
+
+describe('calculateEmployeeMonthlySalary — cleaner', () => {
+  const cleaner = {
+    id: 7,
+    name: 'Уборщица Светлана',
+    baseSalary: 0,
+    employeeType: 'cleaner',
+    shiftRate: 5000,
+  };
+
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(cleaner);
+    mockExpenseAggregates();
+  });
+
+  it('multiplies shiftRate by the number of attendance shifts', async () => {
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(8);
+    const result = await calculateEmployeeMonthlySalary(7, 5, 2025);
+    expect(result!.attendanceShiftsCount).toBe(8);
+    expect(result!.shiftRate).toBe(5000);
+    expect(result!.salaryFromShiftRate).toBe(40000);
+    expect(result!.totalSalary).toBe(40000);
+  });
+
+  it('subtracts advances from the cleaner salary', async () => {
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(4);
+    mockExpenseAggregates({ advances: 5000 });
+    const result = await calculateEmployeeMonthlySalary(7, 5, 2025);
+    expect(result!.totalSalary).toBe(4 * 5000 - 5000);
+  });
+});
+
+describe('calculateEmployeeMonthlySalary — office', () => {
+  const officeEmployee = {
+    id: 8,
+    name: 'Офис-менеджер Динара',
+    baseSalary: 200000,
+    employeeType: 'office',
+  };
+
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(officeEmployee);
+    mockExpenseAggregates();
+  });
+
+  it('computes base salary from attendance via the working calendar', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(15);
+    vi.mocked(prisma.officePremiumSettings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _sum: { cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+    });
+    const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
+    expect(result!.salaryFromFiveDayShifts).toBeCloseTo((200000 / 20) * 15, 5);
+  });
+
+  it('applies the global office ladder premium based on total revenue of all pharmacies', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    vi.mocked(prisma.officePremiumSettings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      threshold: 1000000,
+      base: 20000,
+      stepAmount: 100000,
+      stepBonus: 2000,
+    });
+    vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _sum: { cashRevenue: 1100000, terminalRevenue: 100000, kaspiRevenue: 0 },
+    });
+    const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
+    // total = 1,200,000; (1,200,000-1,000,000)/100,000 = 2 steps * 2000 = 4000 + base 20000 = 24000
+    expect(result!.managedRevenueTotal).toBe(1200000);
+    expect(result!.managerLadderPremium).toBeCloseTo(24000, 5);
+    expect(result!.totalSalary).toBeCloseTo(24000, 5);
+  });
+});
+
+describe('calculateEmployeeMonthlySalary — pharmacy_manager', () => {
+  const manager = {
+    id: 9,
+    name: 'Менеджер Олжас',
+    baseSalary: 180000,
+    employeeType: 'pharmacy_manager',
+    pharmacies: [{ employeeId: 9, pharmacyId: 12 }],
+    managerPremiumEnabled: false,
+  };
+
+  beforeEach(() => {
+    mockExpenseAggregates();
+  });
+
+  it('computes salary purely from attendance/working calendar when premium is disabled', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(manager);
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 18 });
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(9);
+    mockManagedPharmacies([{ id: 12, managerPremiumThreshold: 100000, managerPremiumBase: 5000 }]);
+    mockRevenueEntries({
+      pharmacyRevenueRows: [{ pharmacyId: 12, cashRevenue: 999999, terminalRevenue: 0, kaspiRevenue: 0 }],
+    });
+
+    const result = await calculateEmployeeMonthlySalary(9, 6, 2025);
+    expect(result!.salaryFromFiveDayShifts).toBeCloseTo((180000 / 18) * 9, 5);
+    // премия выключена — лестница аптеки не должна считаться, даже если выручка выше порога
+    expect(result!.managerLadderPremium).toBe(0);
+    expect(result!.managerPremiumEnabled).toBe(false);
+    expect(result!.managerBonusShare).toBe(0);
+    expect(result!.managerAllowance).toBe(0);
+    expect(result!.totalSalary).toBeCloseTo((180000 / 18) * 9, 5);
+  });
+
+  it('applies the pharmacy ladder premium when premium is enabled', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...manager,
+      managerPremiumEnabled: true,
+    });
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    mockManagedPharmacies([
+      { id: 12, managerPremiumThreshold: 100000, managerPremiumBase: 5000, managerPremiumStepAmount: 50000, managerPremiumStepBonus: 1000 },
+    ]);
+    mockRevenueEntries({
+      pharmacyRevenueRows: [{ pharmacyId: 12, cashRevenue: 200000, terminalRevenue: 0, kaspiRevenue: 0 }],
+    });
+
+    const result = await calculateEmployeeMonthlySalary(9, 6, 2025);
+    // (200000-100000)/50000 = 2 шага * 1000 = 2000 + база 5000 = 7000
+    expect(result!.managerPremiumEnabled).toBe(true);
+    expect(result!.managerLadderPremium).toBeCloseTo(7000, 5);
+    expect(result!.managedRevenueTotal).toBe(200000);
+    expect(result!.totalSalary).toBeCloseTo(7000, 5);
+  });
+
+  it('is included by calculateAllEmployeesSalaries even with zero attendance this month', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 9, name: 'Менеджер Олжас', baseSalary: 180000, isActive: true },
+    ]);
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...manager,
+      managerPremiumEnabled: true,
+    });
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    mockManagedPharmacies([{ id: 12, managerPremiumThreshold: 100000, managerPremiumBase: 5000 }]);
+    mockRevenueEntries({
+      pharmacyRevenueRows: [{ pharmacyId: 12, cashRevenue: 200000, terminalRevenue: 0, kaspiRevenue: 0 }],
+    });
+
+    const result = await calculateAllEmployeesSalaries(6, 2025);
+    expect(result).toHaveLength(1);
+    expect(result[0].recordsCount).toBe(0);
+    expect(result[0].managerLadderPremium).toBeCloseTo(5000, 5);
   });
 });
 

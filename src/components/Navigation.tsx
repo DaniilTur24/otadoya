@@ -9,6 +9,7 @@ const ALL_LINKS = [
   { href: '/revenue', label: 'Записи выручки', roles: ['admin', 'bookkeeper', 'manager'], exact: true },
   { href: '/employees', label: 'Сотрудники', roles: ['admin', 'bookkeeper'] },
   { href: '/users', label: 'Заведующие', roles: ['admin', 'bookkeeper'] },
+  { href: '/attendance', label: 'Табель', roles: ['admin', 'bookkeeper', 'manager'] },
   { href: '/files', label: 'Банк / Импорт', roles: ['admin'] },
   { href: '/reports/monthly', label: 'Закрытие месяца', roles: ['admin'] },
   { href: '/reports/pdf-import', label: 'Импорт PDF', roles: ['admin'] },

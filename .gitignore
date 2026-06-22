@@ -8,3 +8,4 @@ uploads/
 *.xlsx
 *.xls
 prisma/prisma/
+.gstack/

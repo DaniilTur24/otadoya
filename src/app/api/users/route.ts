@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { hashPassword } from '@/lib/password';
+import { USER_LINKED_TYPES } from '@/lib/employee-types';
 
 function serialize(u: Record<string, unknown>) {
   const { passwordHash: _, ...rest } = u as { passwordHash: unknown } & Record<string, unknown>;
@@ -14,13 +15,19 @@ export async function GET(request: NextRequest) {
 
   const users = await prisma.user.findMany({
     orderBy: { displayName: 'asc' },
-    include: { pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } } },
+    include: {
+      pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } },
+      employee: { select: { baseSalary: true, employeeType: true, managerPremiumEnabled: true } },
+    },
   });
 
   return NextResponse.json(
     users.map((u) => ({
       ...serialize(u as unknown as Record<string, unknown>),
       pharmacies: u.pharmacies.map((p) => p.pharmacy),
+      baseSalary: u.employee ? Number(u.employee.baseSalary) : 0,
+      employeeType: u.employee?.employeeType ?? 'manager_trading',
+      managerPremiumEnabled: u.employee?.managerPremiumEnabled ?? false,
     }))
   );
 }
@@ -29,7 +36,8 @@ export async function POST(request: NextRequest) {
   const auth = requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const { username, password, displayName, pharmacyIds } = await request.json();
+  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled } =
+    await request.json();
 
   if (!username?.trim() || !password || !displayName?.trim()) {
     return NextResponse.json(
@@ -40,6 +48,10 @@ export async function POST(request: NextRequest) {
   if (password.length < 6) {
     return NextResponse.json({ error: 'Пароль минимум 6 символов' }, { status: 400 });
   }
+  const resolvedEmployeeType = employeeType ?? 'manager_trading';
+  if (!USER_LINKED_TYPES.has(resolvedEmployeeType)) {
+    return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
+  }
 
   const existing = await prisma.user.findUnique({ where: { username: username.trim() } });
   if (existing) {
@@ -47,18 +59,33 @@ export async function POST(request: NextRequest) {
   }
 
   const user = await prisma.$transaction(async (tx) => {
+    // Заведующая всегда заводится и как сотрудник, чтобы не создавать её отдельно на /employees
+    const employee = await tx.employee.create({
+      data: {
+        name: displayName.trim(),
+        baseSalary: String(baseSalary ?? 0),
+        employeeType: resolvedEmployeeType,
+        managerPremiumEnabled: resolvedEmployeeType === 'pharmacy_manager' ? Boolean(managerPremiumEnabled) : false,
+      },
+    });
+
     const created = await tx.user.create({
       data: {
         username: username.trim(),
         passwordHash: hashPassword(password),
         displayName: displayName.trim(),
         role: 'manager',
+        employeeId: employee.id,
       },
     });
 
     if (Array.isArray(pharmacyIds) && pharmacyIds.length > 0) {
       await tx.userPharmacy.createMany({
         data: pharmacyIds.map((pid: number) => ({ userId: created.id, pharmacyId: pid })),
+        skipDuplicates: true,
+      });
+      await tx.employeePharmacy.createMany({
+        data: pharmacyIds.map((pid: number) => ({ employeeId: employee.id, pharmacyId: pid })),
         skipDuplicates: true,
       });
     }

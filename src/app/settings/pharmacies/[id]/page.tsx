@@ -9,7 +9,11 @@ interface Pharmacy {
   name: string;
   isActive: boolean;
   keywords: string;
-  coefficient: number;
+  managerAllowance: number;
+  managerPremiumThreshold: number | null;
+  managerPremiumBase: number | null;
+  managerPremiumStepAmount: number | null;
+  managerPremiumStepBonus: number | null;
 }
 
 export default function PharmacyEditPage() {
@@ -27,7 +31,11 @@ export default function PharmacyEditPage() {
     name: '',
     isActive: true,
     keywords: '',
-    coefficient: '',
+    managerAllowance: '',
+    managerPremiumThreshold: '',
+    managerPremiumBase: '',
+    managerPremiumStepAmount: '',
+    managerPremiumStepBonus: '',
   });
 
   useEffect(() => {
@@ -39,7 +47,11 @@ export default function PharmacyEditPage() {
           name:        p.name,
           isActive:    p.isActive ?? true,
           keywords:    p.keywords ?? '',
-          coefficient: p.coefficient ? String(p.coefficient) : '',
+          managerAllowance:         p.managerAllowance ? String(p.managerAllowance) : '',
+          managerPremiumThreshold:  p.managerPremiumThreshold != null ? String(p.managerPremiumThreshold) : '',
+          managerPremiumBase:       p.managerPremiumBase != null ? String(p.managerPremiumBase) : '',
+          managerPremiumStepAmount: p.managerPremiumStepAmount != null ? String(p.managerPremiumStepAmount) : '',
+          managerPremiumStepBonus:  p.managerPremiumStepBonus != null ? String(p.managerPremiumStepBonus) : '',
         });
         setLoading(false);
       });
@@ -63,7 +75,11 @@ export default function PharmacyEditPage() {
         name:        form.name.trim(),
         isActive:    form.isActive,
         keywords:    form.keywords.trim(),
-        coefficient: form.coefficient ? parseFloat(form.coefficient) : 0,
+        managerAllowance:         form.managerAllowance ? parseFloat(form.managerAllowance) : 0,
+        managerPremiumThreshold:  form.managerPremiumThreshold ? parseFloat(form.managerPremiumThreshold) : null,
+        managerPremiumBase:       form.managerPremiumBase ? parseFloat(form.managerPremiumBase) : null,
+        managerPremiumStepAmount: form.managerPremiumStepAmount ? parseFloat(form.managerPremiumStepAmount) : null,
+        managerPremiumStepBonus:  form.managerPremiumStepBonus ? parseFloat(form.managerPremiumStepBonus) : null,
       }),
     });
 
@@ -148,21 +164,74 @@ export default function PharmacyEditPage() {
           </p>
         </div>
 
-        {/* Коэффициент */}
-        <div>
-          <label className="label">
-            Коэффициент
-            <span className="ml-1 text-gray-400 font-normal text-xs">— используется в закрытии месяца</span>
-          </label>
-          <input
-            type="number"
-            className="input max-w-xs"
-            placeholder="1.00"
-            min="0"
-            step="0.01"
-            value={form.coefficient}
-            onChange={(e) => set('coefficient', e.target.value)}
-          />
+        {/* Заведующие: доплата и лестница премии */}
+        <div className="border-t border-gray-100 pt-4">
+          <h2 className="text-sm font-semibold text-gray-700 mb-1">Премия заведующих этой аптеки</h2>
+          <p className="text-xs text-gray-400 mb-3">
+            Применяется и к торгующей, и к не торгующей заведующей одинаково. Лестница: при выручке аптеки
+            за месяц от «порога» выдаётся «премия за порог», далее за каждые «шаг выручки» сверху добавляется «шаг премии».
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Доплата за аптеку (₸/мес)</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                step="1"
+                value={form.managerAllowance}
+                onChange={(e) => set('managerAllowance', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Порог выручки для премии (₸)</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                step="1"
+                placeholder="400000"
+                value={form.managerPremiumThreshold}
+                onChange={(e) => set('managerPremiumThreshold', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Премия за порог (₸)</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                step="1"
+                placeholder="10000"
+                value={form.managerPremiumBase}
+                onChange={(e) => set('managerPremiumBase', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Шаг выручки (₸)</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                step="1"
+                placeholder="50000"
+                value={form.managerPremiumStepAmount}
+                onChange={(e) => set('managerPremiumStepAmount', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Прибавка премии за шаг (₸)</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                step="1"
+                placeholder="5000"
+                value={form.managerPremiumStepBonus}
+                onChange={(e) => set('managerPremiumStepBonus', e.target.value)}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Кнопки */}

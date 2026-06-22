@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { calculateEmployeeMonthlySalary, getEmployeeMonthlyShifts, getEmployeeMonthlyAdvances } from '@/lib/salary-calculator';
+import {
+  calculateEmployeeMonthlySalary,
+  getEmployeeMonthlyShifts,
+  getEmployeeMonthlyAdvances,
+  getEmployeeMonthlyAttendance,
+} from '@/lib/salary-calculator';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
@@ -20,13 +25,14 @@ export async function GET(
 
   const employeeId = Number((await params).id);
 
-  const [summary, shifts, advances] = await Promise.all([
+  const [summary, shifts, advances, attendance] = await Promise.all([
     calculateEmployeeMonthlySalary(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyShifts(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyAdvances(employeeId, month, year, pharmacyId),
+    getEmployeeMonthlyAttendance(employeeId, month, year, pharmacyId),
   ]);
 
   if (!summary) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  return NextResponse.json({ ...summary, shifts, advances });
+  return NextResponse.json({ ...summary, shifts, advances, attendance });
 }

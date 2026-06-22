@@ -2,12 +2,21 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
+const MANAGER_TYPE_OPTIONS = [
+  { value: 'manager_trading', label: 'Заведующая (торгует)' },
+  { value: 'manager_fixed', label: 'Заведующая (не торгует)' },
+  { value: 'pharmacy_manager', label: 'Менеджер' },
+] as const;
+
 interface Pharmacy { id: number; name: string }
 interface Manager {
   id: number;
   username: string;
   displayName: string;
   isActive: boolean;
+  baseSalary: number;
+  employeeType: string;
+  managerPremiumEnabled: boolean;
   pharmacies: Pharmacy[];
 }
 
@@ -20,11 +29,15 @@ export default function UsersPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const [form, setForm] = useState({
     username: '',
     password: '',
     displayName: '',
+    baseSalary: '',
+    employeeType: 'manager_trading' as string,
+    managerPremiumEnabled: false,
     pharmacyIds: [] as number[],
   });
 
@@ -36,13 +49,17 @@ export default function UsersPage() {
     ]);
     setManagers(mgrs);
     setPharmacies(pharms);
+    setSelectedIds(new Set());
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   function resetForm() {
-    setForm({ username: '', password: '', displayName: '', pharmacyIds: [] });
+    setForm({
+      username: '', password: '', displayName: '', baseSalary: '',
+      employeeType: 'manager_trading', managerPremiumEnabled: false, pharmacyIds: [],
+    });
     setEditingId(null);
     setShowForm(false);
     setError('');
@@ -58,6 +75,9 @@ export default function UsersPage() {
       username: m.username,
       password: '',
       displayName: m.displayName,
+      baseSalary: String(m.baseSalary),
+      employeeType: m.employeeType,
+      managerPremiumEnabled: m.managerPremiumEnabled,
       pharmacyIds: m.pharmacies.map((p) => p.id),
     });
     setEditingId(m.id);
@@ -81,6 +101,9 @@ export default function UsersPage() {
     const body: Record<string, unknown> = {
       displayName: form.displayName,
       pharmacyIds: form.pharmacyIds,
+      baseSalary: form.baseSalary || 0,
+      employeeType: form.employeeType,
+      managerPremiumEnabled: form.employeeType === 'pharmacy_manager' ? form.managerPremiumEnabled : false,
     };
 
     let res: Response;
@@ -102,7 +125,7 @@ export default function UsersPage() {
     }
 
     if (res.ok) {
-      setSuccess(editingId !== null ? 'Изменения сохранены' : 'Заведующий создан');
+      setSuccess(editingId !== null ? 'Изменения сохранены' : 'Аккаунт создан');
       setTimeout(() => setSuccess(''), 3000);
       resetForm();
       load();
@@ -122,19 +145,43 @@ export default function UsersPage() {
   }
 
   async function deleteManager(id: number) {
-    if (!confirm('Удалить заведующего? Его записи выручки останутся.')) return;
+    if (!confirm('Удалить аккаунт? Записи выручки и табеля останутся.')) return;
     await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    load();
+  }
+
+  function toggleSelect(id: number) {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((s) =>
+      s.size === managers.length ? new Set() : new Set(managers.map((m) => m.id))
+    );
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Удалить ${selectedIds.size} выбранных аккаунтов? Записи выручки и табеля останутся.`)) return;
+    await Promise.all(
+      Array.from(selectedIds).map((id) => fetch(`/api/users/${id}`, { method: 'DELETE' }))
+    );
     load();
   }
 
   return (
     <div className="max-w-4xl">
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold text-gray-900">Заведующие аптеками</h1>
+        <h1 className="text-xl font-bold text-gray-900">Заведующие и менеджеры</h1>
         <button className="btn-primary text-sm" onClick={startCreate}>+ Добавить</button>
       </div>
       <p className="text-gray-500 text-sm mb-6">
-        Управление аккаунтами заведующих. Каждый заведующий видит только свои аптеки.
+        Управление аккаунтами заведующих и менеджеров аптек. Каждый видит только свои аптеки.
       </p>
 
       {success && (
@@ -147,7 +194,7 @@ export default function UsersPage() {
         <div className="card p-5 mb-6 border-blue-200 border-2">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-800">
-              {editingId !== null ? 'Редактирование заведующего' : 'Новый заведующий'}
+              {editingId !== null ? 'Редактирование аккаунта' : 'Новый заведующий / менеджер'}
             </h2>
             <button onClick={resetForm} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
           </div>
@@ -199,6 +246,53 @@ export default function UsersPage() {
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Роль *</label>
+                <select
+                  className="input"
+                  value={form.employeeType}
+                  onChange={(e) => setForm((f) => ({ ...f, employeeType: e.target.value }))}
+                >
+                  {MANAGER_TYPE_OPTIONS.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  {form.employeeType === 'manager_trading'
+                    ? 'Считается по сменам, как продавец, плюс 10% от бонусов, доплата и премия заведующего'
+                    : form.employeeType === 'manager_fixed'
+                    ? 'Пятидневка по табелю посещаемости плюс 10% от бонусов, доплата и премия заведующего'
+                    : 'Пятидневка по табелю посещаемости. Премия — опционально (см. ниже)'}
+                </p>
+              </div>
+              <div>
+                <label className="label">Оклад (₸) *</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={form.baseSalary}
+                  onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
+                  min="0"
+                  step="1"
+                  placeholder="150000"
+                  required
+                />
+              </div>
+            </div>
+
+            {form.employeeType === 'pharmacy_manager' && (
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={form.managerPremiumEnabled}
+                  onChange={(e) => setForm((f) => ({ ...f, managerPremiumEnabled: e.target.checked }))}
+                />
+                Премия включена (лестница по порогу выручки аптеки, как у заведующих)
+              </label>
+            )}
+
             <div>
               <label className="label">Аптеки (выберите одну или несколько)</label>
               {pharmacies.length === 0 ? (
@@ -234,15 +328,32 @@ export default function UsersPage() {
         <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
       ) : managers.length === 0 ? (
         <div className="card p-8 text-center text-gray-400 text-sm">
-          Нет заведующих. Нажмите «+ Добавить» чтобы создать первого.
+          Нет заведующих и менеджеров. Нажмите «+ Добавить» чтобы создать первого.
         </div>
       ) : (
         <div className="card overflow-hidden">
+          {selectedIds.size > 0 && (
+            <div className="px-4 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
+              <span className="text-sm text-blue-800">Выбрано: {selectedIds.size}</span>
+              <button className="btn-danger text-xs" onClick={deleteSelected}>
+                Удалить выбранные
+              </button>
+            </div>
+          )}
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="th w-8">
+                  <input
+                    type="checkbox"
+                    className="rounded"
+                    checked={managers.length > 0 && selectedIds.size === managers.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="th">Имя</th>
                 <th className="th">Логин</th>
+                <th className="th">Тип / оклад</th>
                 <th className="th">Аптеки</th>
                 <th className="th">Статус</th>
                 <th className="th"></th>
@@ -251,8 +362,27 @@ export default function UsersPage() {
             <tbody className="divide-y divide-gray-100">
               {managers.map((m) => (
                 <tr key={m.id} className="hover:bg-gray-50">
+                  <td className="td">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={selectedIds.has(m.id)}
+                      onChange={() => toggleSelect(m.id)}
+                    />
+                  </td>
                   <td className="td font-medium">{m.displayName}</td>
                   <td className="td text-gray-500 font-mono text-sm">{m.username}</td>
+                  <td className="td text-sm text-gray-600">
+                    {MANAGER_TYPE_OPTIONS.find((t) => t.value === m.employeeType)?.label ?? m.employeeType}
+                    <div className="text-xs text-gray-400">
+                      {m.baseSalary.toLocaleString('ru-RU')} ₸
+                      {m.employeeType === 'pharmacy_manager' && (
+                        <span className={m.managerPremiumEnabled ? 'text-green-600' : 'text-gray-400'}>
+                          {' '}· премия {m.managerPremiumEnabled ? 'включена' : 'выключена'}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="td">
                     {m.pharmacies.length === 0 ? (
                       <span className="text-amber-600 text-xs">Не привязан</span>

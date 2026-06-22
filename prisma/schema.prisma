@@ -15,6 +15,15 @@ model Pharmacy {
   coefficient   Decimal  @default(0)
   terminalRent  Decimal  @default(0)
   procedureRent Decimal  @default(0)
+  // Фиксированная доплата заведующей этой аптеки (своя сумма на каждую аптеку)
+  managerAllowance        Decimal  @default(0) @map("manager_allowance")
+  // Лестница премии заведующих (применяется к manager_trading и manager_fixed одинаково):
+  // при выручке аптеки за месяц >= managerPremiumThreshold выдаётся managerPremiumBase,
+  // далее за каждые managerPremiumStepAmount сверх порога добавляется managerPremiumStepBonus
+  managerPremiumThreshold  Decimal? @map("manager_premium_threshold")
+  managerPremiumBase       Decimal? @map("manager_premium_base")
+  managerPremiumStepAmount Decimal? @map("manager_premium_step_amount")
+  managerPremiumStepBonus  Decimal? @map("manager_premium_step_bonus")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -29,6 +38,7 @@ model Pharmacy {
   importedReportValues ImportedReportValue[]
   managers             UserPharmacy[]
   employeeLinks        EmployeePharmacy[]
+  attendanceShifts     AttendanceShift[]
 
   @@map("pharmacies")
 }
@@ -56,12 +66,15 @@ model User {
   displayName  String   @map("display_name")
   role         String   @default("manager") // 'manager' only for now
   isActive     Boolean  @default(true) @map("is_active")
+  // Карточка сотрудника (Employee), автоматически создаваемая вместе с этим аккаунтом заведующего
+  employeeId   Int?     @unique @map("employee_id")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   pharmacies         UserPharmacy[]
   submittedEntries   DailyRevenueEntry[] @relation("SubmittedBy")
   approvedEntries    DailyRevenueEntry[] @relation("ApprovedBy")
+  employee           Employee?           @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
   @@map("users")
 }
@@ -83,12 +96,24 @@ model Employee {
   name       String
   baseSalary Decimal  @default(0) @map("base_salary")
   isActive   Boolean  @default(true) @map("is_active")
+  // Тип сотрудника, определяет формулу расчёта зарплаты:
+  // seller — продавец (смены+бонусы), manager_trading — заведующая, которая торгует,
+  // manager_fixed — заведующая без торговли (пятидневка), cleaner — уборщица (ставка за смену),
+  // office — офисный сотрудник (пятидневка + премия от общей выручки всех аптек),
+  // pharmacy_manager — менеджер (пятидневка по табелю + опциональная лестничная премия аптеки)
+  employeeType String  @default("seller") @map("employee_type")
+  // Ставка за одну смену — используется только для cleaner
+  shiftRate    Decimal? @map("shift_rate")
+  // Включена ли лестничная премия аптеки — используется только для pharmacy_manager
+  managerPremiumEnabled Boolean @default(false) @map("manager_premium_enabled")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  revenueEntries DailyRevenueEntry[]
-  pharmacies     EmployeePharmacy[]
-  expenseItems   DailyExpenseItem[]
+  revenueEntries   DailyRevenueEntry[]
+  pharmacies       EmployeePharmacy[]
+  expenseItems     DailyExpenseItem[]
+  attendanceShifts AttendanceShift[]
+  user             User?
 
   @@map("employees")
 }
@@ -349,6 +374,37 @@ model WorkingCalendar {
 
   @@unique([year, month])
   @@map("working_calendar")
+}
+
+// Табель посещаемости для персонала, не привязанного к записи выручки:
+// уборщицы, офисные сотрудники и заведующие без торговли (manager_fixed)
+model AttendanceShift {
+  id         Int      @id @default(autoincrement())
+  employeeId Int      @map("employee_id")
+  // Для уборщиц/заведующих — аптека, где отработана смена; для офиса может быть пустым
+  pharmacyId Int?     @map("pharmacy_id")
+  date       DateTime
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  pharmacy Pharmacy? @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, date])
+  @@index([pharmacyId])
+  @@map("attendance_shifts")
+}
+
+// Глобальная лестница премии офисных сотрудников от суммарной выручки всех аптек.
+// Единственная строка в таблице (синглтон).
+model OfficePremiumSettings {
+  id         Int      @id @default(autoincrement())
+  threshold  Decimal  @default(0)
+  base       Decimal  @default(0)
+  stepAmount Decimal  @default(0) @map("step_amount")
+  stepBonus  Decimal  @default(0) @map("step_bonus")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("office_premium_settings")
 }
 
 // Закрытый месяц: хранит финальные цифры как снимок

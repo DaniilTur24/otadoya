@@ -117,6 +117,8 @@ export default function RevenueListPage() {
   const [tooltipEntry, setTooltipEntry] = useState<RevenueEntry | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
     fetch('/api/employees?isActive=true').then((r) => r.json()).then(setEmployees);
@@ -142,6 +144,7 @@ export default function RevenueListPage() {
     if (filterFrom) data = data.filter((e) => e.date >= filterFrom);
     if (filterTo)   data = data.filter((e) => e.date <= filterTo + 'T23:59:59');
     setEntries(data);
+    setSelectedIds(new Set());
 
     if (pendingRes) {
       const pending: RevenueEntry[] = await pendingRes.json();
@@ -235,6 +238,31 @@ export default function RevenueListPage() {
     if (!confirm('Удалить запись? Это действие нельзя отменить.')) return;
     await fetch(`/api/revenue/${id}`, { method: 'DELETE' });
     if (editingId === id) cancelEdit();
+    load();
+  }
+
+  function toggleSelect(id: number) {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((s) =>
+      s.size === entries.length ? new Set() : new Set(entries.map((e) => e.id))
+    );
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Удалить ${selectedIds.size} выбранных записей? Это действие нельзя отменить.`)) return;
+    await Promise.all(
+      Array.from(selectedIds).map((id) => fetch(`/api/revenue/${id}`, { method: 'DELETE' }))
+    );
+    if (editingId !== null && selectedIds.has(editingId)) cancelEdit();
     load();
   }
 
@@ -671,10 +699,26 @@ export default function RevenueListPage() {
         </div>
       ) : (
         <div className="card overflow-hidden">
+          {selectedIds.size > 0 && (
+            <div className="px-4 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
+              <span className="text-sm text-blue-800">Выбрано: {selectedIds.size}</span>
+              <button className="btn-danger text-xs" onClick={deleteSelected}>
+                Удалить выбранные
+              </button>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="th w-8">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={entries.length > 0 && selectedIds.size === entries.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th className="th">Дата</th>
                   <th className="th">Аптека</th>
                   <th className="th text-right">Наличные</th>
@@ -706,6 +750,14 @@ export default function RevenueListPage() {
                           }
                         }}
                         onMouseLeave={() => setTooltipEntry(null)}>
+                        <td className="td">
+                          <input
+                            type="checkbox"
+                            className="rounded"
+                            checked={selectedIds.has(entry.id)}
+                            onChange={() => toggleSelect(entry.id)}
+                          />
+                        </td>
                         <td className="td">{fmtDate(entry.date)}</td>
                         <td className="td font-medium">{entry.pharmacy.name}</td>
                         <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
