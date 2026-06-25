@@ -116,7 +116,8 @@ export default function EmployeeDetailPage() {
   const [salaryLoading, setSalaryLoading] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/employees/${id}`)
+    const controller = new AbortController();
+    fetch(`/api/employees/${id}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((e: Employee) => {
         setEmployee(e);
@@ -128,23 +129,34 @@ export default function EmployeeDetailPage() {
           isActive: e.isActive,
         });
         setAssignedPharmacyIds((e.pharmacies ?? []).map((p) => p.id));
-      });
-    fetch('/api/pharmacies')
+      })
+      .catch((err) => { if (err.name !== 'AbortError') throw err; });
+    fetch('/api/pharmacies', { signal: controller.signal })
       .then((r) => r.json())
-      .then(setPharmacies);
+      .then(setPharmacies)
+      .catch((err) => { if (err.name !== 'AbortError') throw err; });
+    return () => controller.abort();
   }, [id]);
 
-  const loadSalary = useCallback(async () => {
+  const loadSalary = useCallback(async (signal: AbortSignal) => {
     setSalaryLoading(true);
     const q = new URLSearchParams({ month: String(month), year: String(year) });
     if (pharmacyId) q.set('pharmacyId', pharmacyId);
-    const r = await fetch(`/api/employees/${id}/salary?${q}`);
-    const data = await r.json();
-    setSalary(data);
-    setSalaryLoading(false);
+    try {
+      const r = await fetch(`/api/employees/${id}/salary?${q}`, { signal });
+      const data = await r.json();
+      setSalary(data);
+      setSalaryLoading(false);
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') throw err;
+    }
   }, [id, month, year, pharmacyId]);
 
-  useEffect(() => { loadSalary(); }, [loadSalary]);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadSalary(controller.signal);
+    return () => controller.abort();
+  }, [loadSalary]);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
