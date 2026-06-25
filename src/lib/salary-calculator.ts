@@ -315,25 +315,26 @@ async function calculateTradingEmployeeSalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const [entries, pharmaBonusAgg, totalAdvances, managerStats, calendarEntry] = await Promise.all([
-    prisma.dailyRevenueEntry.findMany({
-      where: entryFilter,
-      select: { shiftType: true, cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
-    }),
-    prisma.dailyExpenseItem.aggregate({
-      _sum: { amount: true },
-      where: { category: 'pharmaBonus', entry: entryFilter },
-    }),
-    computeAdvances(employee.id, month, year, pharmacyId),
-    isManager
-      ? computeManagerLadderAndAllowance(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
-      : Promise.resolve({ premium: 0, allowance: 0, revenueTotal: 0 }),
-    prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
-  ]);
+  const [entries, pharmaBonusAgg, totalAdvances, managerStats, calendarEntry, bonusShareStats] =
+    await Promise.all([
+      prisma.dailyRevenueEntry.findMany({
+        where: entryFilter,
+        select: { shiftType: true, cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
+      }),
+      prisma.dailyExpenseItem.aggregate({
+        _sum: { amount: true },
+        where: { category: 'pharmaBonus', entry: entryFilter },
+      }),
+      computeAdvances(employee.id, month, year, pharmacyId),
+      isManager
+        ? computeManagerLadderAndAllowance(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
+        : Promise.resolve({ premium: 0, allowance: 0, revenueTotal: 0 }),
+      prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
+      isManager
+        ? computeManagerBonusShare(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
+        : Promise.resolve({ share: 0, total: 0 }),
+    ]);
 
-  const bonusShareStats = isManager
-    ? await computeManagerBonusShare(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
-    : { share: 0, total: 0 };
   const managerBonusShare = bonusShareStats.share;
   const managedBonusTotal = bonusShareStats.total;
 
