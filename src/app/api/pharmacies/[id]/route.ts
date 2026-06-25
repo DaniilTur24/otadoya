@@ -26,7 +26,7 @@ export async function PUT(
   const id = Number((await params).id);
   const {
     name, isActive, keywords, coefficient, terminalRent, procedureRent,
-    managerAllowance, managerPremiumThreshold, managerPremiumBase,
+    managerPremiumThreshold, managerPremiumBase,
     managerPremiumStepAmount, managerPremiumStepBonus,
   } = await request.json();
 
@@ -39,7 +39,6 @@ export async function PUT(
       coefficient:   coefficient   != null ? String(coefficient)   : undefined,
       terminalRent:  terminalRent  != null ? String(terminalRent)  : undefined,
       procedureRent: procedureRent != null ? String(procedureRent) : undefined,
-      managerAllowance: managerAllowance != null ? String(managerAllowance) : undefined,
       managerPremiumThreshold:
         managerPremiumThreshold !== undefined ? (managerPremiumThreshold != null ? String(managerPremiumThreshold) : null) : undefined,
       managerPremiumBase:

@@ -17,6 +17,8 @@ interface Employee {
   baseSalary: number;
   employeeType: string;
   shiftRate: number | null;
+  allowance: number;
+  allowanceDescription: string;
   isActive: boolean;
   pharmacies: Pharmacy[];
 }
@@ -76,7 +78,8 @@ interface SalaryResult {
   salaryFromShiftRate: number;
   managerBonusShare: number;
   managedBonusTotal: number;
-  managerAllowance: number;
+  allowance: number;
+  allowanceDescription: string;
   managerLadderPremium: number;
   managedRevenueTotal: number;
   managerPremiumEnabled: boolean;
@@ -101,7 +104,10 @@ export default function EmployeeDetailPage() {
   const now = new Date();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
-  const [form, setForm] = useState({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', isActive: true });
+  const [form, setForm] = useState({
+    name: '', employeeType: 'seller', baseSalary: '', shiftRate: '',
+    allowance: '', allowanceDescription: '', isActive: true,
+  });
   const [assignedPharmacyIds, setAssignedPharmacyIds] = useState<number[]>([]);
   const [editingPharmacies, setEditingPharmacies] = useState(false);
   const [pharmacySaving, setPharmacySaving] = useState(false);
@@ -126,6 +132,8 @@ export default function EmployeeDetailPage() {
           employeeType: e.employeeType,
           baseSalary: String(e.baseSalary),
           shiftRate: e.shiftRate != null ? String(e.shiftRate) : '',
+          allowance: e.allowance ? String(e.allowance) : '',
+          allowanceDescription: e.allowanceDescription ?? '',
           isActive: e.isActive,
         });
         setAssignedPharmacyIds((e.pharmacies ?? []).map((p) => p.id));
@@ -169,8 +177,13 @@ export default function EmployeeDetailPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: form.name.trim(),
-        // Тип и оклад заведующих/менеджеров редактируются на /users, чтобы не разойтись с аккаунтом
-        ...(isUserLinked ? {} : { employeeType: form.employeeType, baseSalary: form.baseSalary || 0 }),
+        // Тип, оклад и доплата заведующих/менеджеров редактируются на /users, чтобы не разойтись с аккаунтом
+        ...(isUserLinked ? {} : {
+          employeeType: form.employeeType,
+          baseSalary: form.baseSalary || 0,
+          allowance: form.allowance || 0,
+          allowanceDescription: form.allowanceDescription.trim(),
+        }),
         shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
         isActive: form.isActive,
       }),
@@ -284,6 +297,35 @@ export default function EmployeeDetailPage() {
                 className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-gray-50 text-gray-400' : ''}`}
               />
             </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Доплата (₸/мес)</label>
+            <input
+              type="number"
+              value={form.allowance}
+              onChange={(e) => setForm((f) => ({ ...f, allowance: e.target.value }))}
+              min="0"
+              step="1"
+              disabled={USER_LINKED_TYPES.has(employee.employeeType)}
+              className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-gray-50 text-gray-400' : ''}`}
+            />
+          </div>
+          <div>
+            <label className="label">За что доплата</label>
+            <input
+              type="text"
+              value={form.allowanceDescription}
+              onChange={(e) => setForm((f) => ({ ...f, allowanceDescription: e.target.value }))}
+              placeholder="например: за стаж"
+              disabled={USER_LINKED_TYPES.has(employee.employeeType)}
+              className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-gray-50 text-gray-400' : ''}`}
+            />
+          </div>
+          {USER_LINKED_TYPES.has(employee.employeeType) && (
+            <p className="text-xs text-gray-400 -mt-2 col-span-2">Редактируется на странице «Заведующие и менеджеры» (/users)</p>
           )}
         </div>
 
@@ -515,9 +557,6 @@ export default function EmployeeDetailPage() {
                         </span>
                         <span className="font-medium text-right">{fmt(salary.managerBonusShare)} ₸</span>
 
-                        <span className="text-gray-500">Доплата за аптеку</span>
-                        <span className="font-medium text-right">{fmt(salary.managerAllowance)} ₸</span>
-
                         <span className="text-gray-500">
                           Премия по выручке аптеки ({fmt(salary.managedRevenueTotal)} ₸)
                         </span>
@@ -552,6 +591,15 @@ export default function EmployeeDetailPage() {
                           <span className="text-right text-gray-400">Выключена</span>
                         </>
                       )
+                    )}
+
+                    {salary.allowance > 0 && (
+                      <>
+                        <span className="text-gray-500">
+                          Доплата{salary.allowanceDescription ? ` (${salary.allowanceDescription})` : ''}
+                        </span>
+                        <span className="font-medium text-right">{fmt(salary.allowance)} ₸</span>
+                      </>
                     )}
 
                     {salary.totalAdvances > 0 && (

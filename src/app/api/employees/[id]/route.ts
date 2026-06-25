@@ -8,6 +8,7 @@ function serialize(emp: Record<string, unknown>) {
     ...emp,
     baseSalary: Number(emp.baseSalary),
     shiftRate: emp.shiftRate != null ? Number(emp.shiftRate) : null,
+    allowance: Number(emp.allowance ?? 0),
   };
 }
 
@@ -36,7 +37,7 @@ export async function PUT(
   const auth = requireAdmin(request);
   if (auth) return auth;
 
-  const { name, baseSalary, isActive, employeeType, shiftRate } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription } = await request.json();
 
   if (employeeType != null && !(employeeType in EMPLOYEE_TYPES)) {
     return NextResponse.json({ error: 'Некорректный тип сотрудника' }, { status: 400 });
@@ -48,6 +49,8 @@ export async function PUT(
   if (isActive != null) data.isActive = Boolean(isActive);
   if (employeeType != null) data.employeeType = employeeType;
   if (shiftRate !== undefined) data.shiftRate = shiftRate != null ? String(shiftRate) : null;
+  if (allowance !== undefined) data.allowance = String(allowance ?? 0);
+  if (allowanceDescription !== undefined) data.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
 
   const employee = await prisma.employee.update({
     where: { id: Number((await params).id) },

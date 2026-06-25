@@ -17,6 +17,8 @@ interface Manager {
   baseSalary: number;
   employeeType: string;
   managerPremiumEnabled: boolean;
+  allowance: number;
+  allowanceDescription: string;
   pharmacies: Pharmacy[];
 }
 
@@ -38,6 +40,8 @@ export default function UsersPage() {
     baseSalary: '',
     employeeType: 'manager_trading' as string,
     managerPremiumEnabled: false,
+    allowance: '',
+    allowanceDescription: '',
     pharmacyIds: [] as number[],
   });
 
@@ -58,7 +62,8 @@ export default function UsersPage() {
   function resetForm() {
     setForm({
       username: '', password: '', displayName: '', baseSalary: '',
-      employeeType: 'manager_trading', managerPremiumEnabled: false, pharmacyIds: [],
+      employeeType: 'manager_trading', managerPremiumEnabled: false,
+      allowance: '', allowanceDescription: '', pharmacyIds: [],
     });
     setEditingId(null);
     setShowForm(false);
@@ -78,6 +83,8 @@ export default function UsersPage() {
       baseSalary: String(m.baseSalary),
       employeeType: m.employeeType,
       managerPremiumEnabled: m.managerPremiumEnabled,
+      allowance: m.allowance ? String(m.allowance) : '',
+      allowanceDescription: m.allowanceDescription ?? '',
       pharmacyIds: m.pharmacies.map((p) => p.id),
     });
     setEditingId(m.id);
@@ -104,6 +111,8 @@ export default function UsersPage() {
       baseSalary: form.baseSalary || 0,
       employeeType: form.employeeType,
       managerPremiumEnabled: form.employeeType === 'pharmacy_manager' ? form.managerPremiumEnabled : false,
+      allowance: form.allowance || 0,
+      allowanceDescription: form.allowanceDescription.trim(),
     };
 
     let res: Response;
@@ -281,6 +290,30 @@ export default function UsersPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Доплата (₸/мес)</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={form.allowance}
+                  onChange={(e) => setForm((f) => ({ ...f, allowance: e.target.value }))}
+                  min="0"
+                  step="1"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="label">За что доплата</label>
+                <input
+                  className="input"
+                  value={form.allowanceDescription}
+                  onChange={(e) => setForm((f) => ({ ...f, allowanceDescription: e.target.value }))}
+                  placeholder="например: за аптеку на ул. Сункарова"
+                />
+              </div>
+            </div>
+
             {form.employeeType === 'pharmacy_manager' && (
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input
@@ -379,6 +412,12 @@ export default function UsersPage() {
                       {m.employeeType === 'pharmacy_manager' && (
                         <span className={m.managerPremiumEnabled ? 'text-green-600' : 'text-gray-400'}>
                           {' '}· премия {m.managerPremiumEnabled ? 'включена' : 'выключена'}
+                        </span>
+                      )}
+                      {m.allowance > 0 && (
+                        <span title={m.allowanceDescription || undefined}>
+                          {' '}· доплата {m.allowance.toLocaleString('ru-RU')} ₸
+                          {m.allowanceDescription && ` (${m.allowanceDescription})`}
                         </span>
                       )}
                     </div>

@@ -8,6 +8,7 @@ function serialize(emp: Record<string, unknown>) {
     ...emp,
     baseSalary: Number(emp.baseSalary),
     shiftRate: emp.shiftRate != null ? Number(emp.shiftRate) : null,
+    allowance: Number(emp.allowance ?? 0),
   };
 }
 
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
-  const { name, baseSalary, isActive, employeeType, shiftRate } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription } = await request.json();
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Имя сотрудника обязательно' }, { status: 400 });
@@ -78,6 +79,8 @@ export async function POST(request: NextRequest) {
       isActive: isActive !== false,
       employeeType: employeeType ?? 'seller',
       shiftRate: shiftRate != null ? String(shiftRate) : null,
+      allowance: String(allowance ?? 0),
+      allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
     },
   });
 

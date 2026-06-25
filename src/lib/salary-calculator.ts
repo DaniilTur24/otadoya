@@ -33,8 +33,10 @@ export interface MonthlySalaryResult {
   managerBonusShare: number;
   /** Сумма бонусов управляемых аптек, от которой считается managerBonusShare (до применения 10%) */
   managedBonusTotal: number;
-  /** Сумма фиксированных доплат за управляемые аптеки */
-  managerAllowance: number;
+  /** Фиксированная ежемесячная доплата сотруднику */
+  allowance: number;
+  /** Описание, за что начислена доплата */
+  allowanceDescription: string;
   /** Лестничная премия по выручке аптеки/аптек (заведующие) или всех аптек (office) */
   managerLadderPremium: number;
   /** Выручка, от которой считалась лестничная премия */
@@ -105,15 +107,15 @@ function resolveManagedPharmacyIds(
 }
 
 /**
- * Считает лестничную премию, доплату и выручку по аптекам, которыми управляет заведующая.
+ * Считает лестничную премию и выручку по аптекам, которыми управляет заведующая.
  * Каждая аптека использует свои собственные пороги/шаг (Pharmacy.managerPremium*).
  */
-async function computeManagerLadderAndAllowance(
+async function computeManagerLadderPremium(
   pharmacyIds: number[],
   month: number,
   year: number,
-): Promise<{ premium: number; allowance: number; revenueTotal: number }> {
-  if (pharmacyIds.length === 0) return { premium: 0, allowance: 0, revenueTotal: 0 };
+): Promise<{ premium: number; revenueTotal: number }> {
+  if (pharmacyIds.length === 0) return { premium: 0, revenueTotal: 0 };
 
   const dateFrom = startOfMonth(year, month);
   const dateTo = endOfMonth(year, month);
@@ -123,7 +125,6 @@ async function computeManagerLadderAndAllowance(
       where: { id: { in: pharmacyIds } },
       select: {
         id: true,
-        managerAllowance: true,
         managerPremiumThreshold: true,
         managerPremiumBase: true,
         managerPremiumStepAmount: true,
@@ -148,12 +149,10 @@ async function computeManagerLadderAndAllowance(
   }
 
   let premium = 0;
-  let allowance = 0;
   let revenueTotal = 0;
   for (const ph of pharmacies) {
     const revenue = revenueByPharmacy.get(ph.id) ?? 0;
     revenueTotal += revenue;
-    allowance += Number(ph.managerAllowance ?? 0);
     premium += computeLadderPremium(
       revenue,
       ph.managerPremiumThreshold !== null ? Number(ph.managerPremiumThreshold) : null,
@@ -162,7 +161,7 @@ async function computeManagerLadderAndAllowance(
       ph.managerPremiumStepBonus !== null ? Number(ph.managerPremiumStepBonus) : null,
     );
   }
-  return { premium, allowance, revenueTotal };
+  return { premium, revenueTotal };
 }
 
 /** 10% от суммы всех pharmaBonus, заработанных в управляемых аптеках за месяц (включая свои). */
@@ -277,7 +276,8 @@ const EMPTY_RESULT_BASE = {
   salaryFromShiftRate: 0,
   managerBonusShare: 0,
   managedBonusTotal: 0,
-  managerAllowance: 0,
+  allowance: 0,
+  allowanceDescription: '',
   managerLadderPremium: 0,
   managedRevenueTotal: 0,
   managerPremiumEnabled: false,
@@ -294,11 +294,18 @@ const EMPTY_RESULT_BASE = {
  *
  * У продавца премия — обычная revenuePremium (200k/300k порог, 1.5% от избытка за смену).
  * У заведующей, которая торгует, revenuePremium не применяется — вместо неё действует та же
- * лестничная премия аптеки, что и у заведующей без торговли, плюс 10% от бонусов аптеки
- * и фиксированная доплата за аптеку.
+ * лестничная премия аптеки, что и у заведующей без торговли, плюс 10% от бонусов аптеки.
+ * Фиксированная доплата (Employee.allowance) добавляется для любого типа сотрудника.
  */
 async function calculateTradingEmployeeSalary(
-  employee: { id: number; name: string; baseSalary: unknown; pharmacies: { pharmacyId: number }[] },
+  employee: {
+    id: number;
+    name: string;
+    baseSalary: unknown;
+    pharmacies: { pharmacyId: number }[];
+    allowance: unknown;
+    allowanceDescription: string;
+  },
   employeeType: string,
   month: number,
   year: number,
@@ -327,8 +334,8 @@ async function calculateTradingEmployeeSalary(
       }),
       computeAdvances(employee.id, month, year, pharmacyId),
       isManager
-        ? computeManagerLadderAndAllowance(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
-        : Promise.resolve({ premium: 0, allowance: 0, revenueTotal: 0 }),
+        ? computeManagerLadderPremium(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
+        : Promise.resolve({ premium: 0, revenueTotal: 0 }),
       prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
       isManager
         ? computeManagerBonusShare(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
@@ -376,8 +383,8 @@ async function calculateTradingEmployeeSalary(
   const totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts;
 
   const managerLadderPremium = managerStats.premium;
-  const managerAllowance = managerStats.allowance;
   const managedRevenueTotal = managerStats.revenueTotal;
+  const allowance = Number(employee.allowance ?? 0);
 
   const totalSalary =
     salaryFromFullDayShifts +
@@ -386,7 +393,7 @@ async function calculateTradingEmployeeSalary(
     totalBonuses +
     totalRevenuePremium +
     managerBonusShare +
-    managerAllowance +
+    allowance +
     managerLadderPremium -
     totalAdvances;
 
@@ -412,7 +419,8 @@ async function calculateTradingEmployeeSalary(
     totalAdvances,
     managerBonusShare,
     managedBonusTotal,
-    managerAllowance,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
     managerLadderPremium,
     managedRevenueTotal,
     totalSalary,
@@ -423,7 +431,14 @@ async function calculateTradingEmployeeSalary(
 
 /** Заведующая без торговли: пятидневка по табелю посещаемости + 10% бонусов + доплата + лестница. */
 async function calculateFixedManagerSalary(
-  employee: { id: number; name: string; baseSalary: unknown; pharmacies: { pharmacyId: number }[] },
+  employee: {
+    id: number;
+    name: string;
+    baseSalary: unknown;
+    pharmacies: { pharmacyId: number }[];
+    allowance: unknown;
+    allowanceDescription: string;
+  },
   month: number,
   year: number,
   pharmacyId: number | undefined,
@@ -435,10 +450,11 @@ async function calculateFixedManagerSalary(
       getAttendanceShiftsCount(employee.id, month, year, pharmacyId),
       prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
       computeAdvances(employee.id, month, year, pharmacyId),
-      computeManagerLadderAndAllowance(managedPharmacyIds, month, year),
+      computeManagerLadderPremium(managedPharmacyIds, month, year),
       computeManagerBonusShare(managedPharmacyIds, month, year),
     ]);
   const managerBonusShare = bonusShareStats.share;
+  const allowance = Number(employee.allowance ?? 0);
 
   const baseSalary = Number(employee.baseSalary);
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
@@ -448,7 +464,7 @@ async function calculateFixedManagerSalary(
   const totalSalary =
     salaryFromFiveDayShifts +
     managerBonusShare +
-    managerStats.allowance +
+    allowance +
     managerStats.premium -
     totalAdvances;
 
@@ -467,7 +483,8 @@ async function calculateFixedManagerSalary(
     totalAdvances,
     managerBonusShare,
     managedBonusTotal: bonusShareStats.total,
-    managerAllowance: managerStats.allowance,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
     managerLadderPremium: managerStats.premium,
     managedRevenueTotal: managerStats.revenueTotal,
     totalSalary,
@@ -475,9 +492,16 @@ async function calculateFixedManagerSalary(
   };
 }
 
-/** Уборщица: ставка за смену × количество отмеченных смен в табеле. */
+/** Уборщица: ставка за смену × количество отмеченных смен в табеле + фиксированная доплата. */
 async function calculateCleanerSalary(
-  employee: { id: number; name: string; baseSalary: unknown; shiftRate: unknown },
+  employee: {
+    id: number;
+    name: string;
+    baseSalary: unknown;
+    shiftRate: unknown;
+    allowance: unknown;
+    allowanceDescription: string;
+  },
   month: number,
   year: number,
   pharmacyId: number | undefined,
@@ -489,7 +513,8 @@ async function calculateCleanerSalary(
 
   const shiftRate = employee.shiftRate !== null && employee.shiftRate !== undefined ? Number(employee.shiftRate) : null;
   const salaryFromShiftRate = shiftRate ? shiftRate * attendanceShiftsCount : 0;
-  const totalSalary = salaryFromShiftRate - totalAdvances;
+  const allowance = Number(employee.allowance ?? 0);
+  const totalSalary = salaryFromShiftRate + allowance - totalAdvances;
 
   return {
     employeeId: employee.id,
@@ -502,15 +527,17 @@ async function calculateCleanerSalary(
     attendanceShiftsCount,
     shiftRate,
     salaryFromShiftRate,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
     totalAdvances,
     totalSalary,
     recordsCount: attendanceShiftsCount,
   };
 }
 
-/** Офис: пятидневка по табелю посещаемости + лестничная премия от выручки всех аптек. */
+/** Офис: пятидневка по табелю посещаемости + лестничная премия от выручки всех аптек + доплата. */
 async function calculateOfficeSalary(
-  employee: { id: number; name: string; baseSalary: unknown },
+  employee: { id: number; name: string; baseSalary: unknown; allowance: unknown; allowanceDescription: string },
   month: number,
   year: number,
 ): Promise<MonthlySalaryResult> {
@@ -525,8 +552,9 @@ async function calculateOfficeSalary(
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
   const salaryFromFiveDayShifts =
     baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
+  const allowance = Number(employee.allowance ?? 0);
 
-  const totalSalary = salaryFromFiveDayShifts + officeStats.premium - totalAdvances;
+  const totalSalary = salaryFromFiveDayShifts + officeStats.premium + allowance - totalAdvances;
 
   return {
     employeeId: employee.id,
@@ -541,6 +569,8 @@ async function calculateOfficeSalary(
     workingCalendarDays,
     attendanceShiftsCount,
     totalAdvances,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
     managerLadderPremium: officeStats.premium,
     managedRevenueTotal: officeStats.revenueTotal,
     totalSalary,
@@ -550,8 +580,8 @@ async function calculateOfficeSalary(
 
 /**
  * Менеджер: пятидневка по табелю посещаемости (как manager_fixed/office) + опциональная
- * лестничная премия по аптеке(ам), которыми привязан (managerPremiumEnabled). В отличие от
- * заведующих — без 10% от бонусов и без фиксированной доплаты за аптеку.
+ * лестничная премия по аптеке(ам), которыми привязан (managerPremiumEnabled), + фиксированная
+ * доплата. В отличие от заведующих — без 10% от бонусов.
  */
 async function calculatePharmacyManagerSalary(
   employee: {
@@ -560,6 +590,8 @@ async function calculatePharmacyManagerSalary(
     baseSalary: unknown;
     pharmacies: { pharmacyId: number }[];
     managerPremiumEnabled: boolean;
+    allowance: unknown;
+    allowanceDescription: string;
   },
   month: number,
   year: number,
@@ -572,16 +604,17 @@ async function calculatePharmacyManagerSalary(
     prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
     computeAdvances(employee.id, month, year, pharmacyId),
     employee.managerPremiumEnabled
-      ? computeManagerLadderAndAllowance(managedPharmacyIds, month, year)
-      : Promise.resolve({ premium: 0, allowance: 0, revenueTotal: 0 }),
+      ? computeManagerLadderPremium(managedPharmacyIds, month, year)
+      : Promise.resolve({ premium: 0, revenueTotal: 0 }),
   ]);
 
   const baseSalary = Number(employee.baseSalary);
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
   const salaryFromFiveDayShifts =
     baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
+  const allowance = Number(employee.allowance ?? 0);
 
-  const totalSalary = salaryFromFiveDayShifts + managerStats.premium - totalAdvances;
+  const totalSalary = salaryFromFiveDayShifts + managerStats.premium + allowance - totalAdvances;
 
   return {
     employeeId: employee.id,
@@ -596,6 +629,8 @@ async function calculatePharmacyManagerSalary(
     workingCalendarDays,
     attendanceShiftsCount,
     totalAdvances,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
     managerPremiumEnabled: employee.managerPremiumEnabled,
     managerLadderPremium: managerStats.premium,
     managedRevenueTotal: managerStats.revenueTotal,
@@ -608,12 +643,14 @@ async function calculatePharmacyManagerSalary(
  * Рассчитывает зарплату сотрудника за указанный месяц. Формула зависит от Employee.employeeType:
  *  - seller          — смены (день/сутки) + бонусы + revenuePremium (200k/300k, 1.5%) − авансы
  *  - manager_trading — то же, что seller, но вместо revenuePremium: 10% бонусов аптеки +
- *                      доплата за аптеку + лестничная премия по выручке аптеки
- *  - manager_fixed   — пятидневка по табелю посещаемости + 10% бонусов + доплата + лестничная премия
+ *                      лестничная премия по выручке аптеки
+ *  - manager_fixed   — пятидневка по табелю посещаемости + 10% бонусов + лестничная премия
  *  - cleaner         — ставка за смену × количество смен в табеле − авансы
  *  - office          — пятидневка по табелю посещаемости + лестничная премия от выручки всех аптек
  *  - pharmacy_manager — пятидневка по табелю посещаемости + опциональная лестничная премия аптеки
- *                       (без 10% от бонусов и без доплаты)
+ *                       (без 10% от бонусов)
+ *
+ * Фиксированная доплата (Employee.allowance) добавляется к итогу для любого типа сотрудника.
  *
  * Учитывает только записи/начисления со статусом 'approved'. Если передан pharmacyId — фильтрует по аптеке
  * (для office фильтр по аптеке не применяется, премия всегда считается от всех аптек).
@@ -634,7 +671,14 @@ export async function calculateEmployeeMonthlySalary(
 
   if (employeeType === 'cleaner') {
     return calculateCleanerSalary(
-      employee as unknown as { id: number; name: string; baseSalary: unknown; shiftRate: unknown },
+      employee as unknown as {
+        id: number;
+        name: string;
+        baseSalary: unknown;
+        shiftRate: unknown;
+        allowance: unknown;
+        allowanceDescription: string;
+      },
       month,
       year,
       pharmacyId,
@@ -645,7 +689,14 @@ export async function calculateEmployeeMonthlySalary(
   }
   if (employeeType === 'manager_fixed') {
     return calculateFixedManagerSalary(
-      employee as unknown as { id: number; name: string; baseSalary: unknown; pharmacies: { pharmacyId: number }[] },
+      employee as unknown as {
+        id: number;
+        name: string;
+        baseSalary: unknown;
+        pharmacies: { pharmacyId: number }[];
+        allowance: unknown;
+        allowanceDescription: string;
+      },
       month,
       year,
       pharmacyId,
@@ -659,6 +710,8 @@ export async function calculateEmployeeMonthlySalary(
         baseSalary: unknown;
         pharmacies: { pharmacyId: number }[];
         managerPremiumEnabled: boolean;
+        allowance: unknown;
+        allowanceDescription: string;
       },
       month,
       year,
@@ -667,7 +720,14 @@ export async function calculateEmployeeMonthlySalary(
   }
   if (employeeType === 'manager_trading') {
     return calculateTradingEmployeeSalary(
-      employee as unknown as { id: number; name: string; baseSalary: unknown; pharmacies: { pharmacyId: number }[] },
+      employee as unknown as {
+        id: number;
+        name: string;
+        baseSalary: unknown;
+        pharmacies: { pharmacyId: number }[];
+        allowance: unknown;
+        allowanceDescription: string;
+      },
       employeeType,
       month,
       year,
@@ -676,7 +736,14 @@ export async function calculateEmployeeMonthlySalary(
     );
   }
   return calculateTradingEmployeeSalary(
-    employee as unknown as { id: number; name: string; baseSalary: unknown; pharmacies: { pharmacyId: number }[] },
+    employee as unknown as {
+      id: number;
+      name: string;
+      baseSalary: unknown;
+      pharmacies: { pharmacyId: number }[];
+      allowance: unknown;
+      allowanceDescription: string;
+    },
     'seller',
     month,
     year,
