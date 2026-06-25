@@ -9,7 +9,6 @@ interface Pharmacy {
   name: string;
   isActive: boolean;
   keywords: string;
-  managerAllowance: number;
   managerPremiumThreshold: number | null;
   managerPremiumBase: number | null;
   managerPremiumStepAmount: number | null;
@@ -31,7 +30,6 @@ export default function PharmacyEditPage() {
     name: '',
     isActive: true,
     keywords: '',
-    managerAllowance: '',
     managerPremiumThreshold: '',
     managerPremiumBase: '',
     managerPremiumStepAmount: '',
@@ -47,7 +45,6 @@ export default function PharmacyEditPage() {
           name:        p.name,
           isActive:    p.isActive ?? true,
           keywords:    p.keywords ?? '',
-          managerAllowance:         p.managerAllowance ? String(p.managerAllowance) : '',
           managerPremiumThreshold:  p.managerPremiumThreshold != null ? String(p.managerPremiumThreshold) : '',
           managerPremiumBase:       p.managerPremiumBase != null ? String(p.managerPremiumBase) : '',
           managerPremiumStepAmount: p.managerPremiumStepAmount != null ? String(p.managerPremiumStepAmount) : '',
@@ -75,7 +72,6 @@ export default function PharmacyEditPage() {
         name:        form.name.trim(),
         isActive:    form.isActive,
         keywords:    form.keywords.trim(),
-        managerAllowance:         form.managerAllowance ? parseFloat(form.managerAllowance) : 0,
         managerPremiumThreshold:  form.managerPremiumThreshold ? parseFloat(form.managerPremiumThreshold) : null,
         managerPremiumBase:       form.managerPremiumBase ? parseFloat(form.managerPremiumBase) : null,
         managerPremiumStepAmount: form.managerPremiumStepAmount ? parseFloat(form.managerPremiumStepAmount) : null,
@@ -164,25 +160,16 @@ export default function PharmacyEditPage() {
           </p>
         </div>
 
-        {/* Заведующие: доплата и лестница премии */}
+        {/* Заведующие: лестница премии */}
         <div className="border-t border-gray-100 pt-4">
           <h2 className="text-sm font-semibold text-gray-700 mb-1">Премия заведующих этой аптеки</h2>
           <p className="text-xs text-gray-400 mb-3">
             Применяется и к торгующей, и к не торгующей заведующей одинаково. Лестница: при выручке аптеки
             за месяц от «порога» выдаётся «премия за порог», далее за каждые «шаг выручки» сверху добавляется «шаг премии».
+            Фиксированная доплата сотруднику теперь настраивается в его карточке (раздел «Сотрудники» / «Заведующие и менеджеры»),
+            а не здесь.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Доплата за аптеку (₸/мес)</label>
-              <input
-                type="number"
-                className="input"
-                min="0"
-                step="1"
-                value={form.managerAllowance}
-                onChange={(e) => set('managerAllowance', e.target.value)}
-              />
-            </div>
             <div>
               <label className="label">Порог выручки для премии (₸)</label>
               <input

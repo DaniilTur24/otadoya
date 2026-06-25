@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     orderBy: { displayName: 'asc' },
     include: {
       pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } },
-      employee: { select: { baseSalary: true, employeeType: true, managerPremiumEnabled: true } },
+      employee: { select: { baseSalary: true, employeeType: true, managerPremiumEnabled: true, allowance: true, allowanceDescription: true } },
     },
   });
 
@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
       baseSalary: u.employee ? Number(u.employee.baseSalary) : 0,
       employeeType: u.employee?.employeeType ?? 'manager_trading',
       managerPremiumEnabled: u.employee?.managerPremiumEnabled ?? false,
+      allowance: u.employee ? Number(u.employee.allowance) : 0,
+      allowanceDescription: u.employee?.allowanceDescription ?? '',
     }))
   );
 }
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
   const auth = requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled } =
+  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled, allowance, allowanceDescription } =
     await request.json();
 
   if (!username?.trim() || !password || !displayName?.trim()) {
@@ -66,6 +68,8 @@ export async function POST(request: NextRequest) {
         baseSalary: String(baseSalary ?? 0),
         employeeType: resolvedEmployeeType,
         managerPremiumEnabled: resolvedEmployeeType === 'pharmacy_manager' ? Boolean(managerPremiumEnabled) : false,
+        allowance: String(allowance ?? 0),
+        allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
       },
     });
 

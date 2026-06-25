@@ -20,6 +20,8 @@ interface Employee {
   baseSalary: number;
   employeeType: string;
   shiftRate: number | null;
+  allowance: number;
+  allowanceDescription: string;
   isActive: boolean;
   pharmacies: Pharmacy[];
 }
@@ -34,6 +36,8 @@ export default function EmployeesPage() {
     employeeType: 'seller' as string,
     baseSalary: '',
     shiftRate: '',
+    allowance: '',
+    allowanceDescription: '',
     pharmacyIds: [] as number[],
   });
   const [saving, setSaving] = useState(false);
@@ -89,6 +93,8 @@ export default function EmployeesPage() {
         employeeType: form.employeeType,
         baseSalary: form.baseSalary || 0,
         shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
+        allowance: form.allowance || 0,
+        allowanceDescription: form.allowanceDescription.trim(),
       }),
     });
     if (res.ok) {
@@ -100,7 +106,7 @@ export default function EmployeesPage() {
           body: JSON.stringify({ pharmacyIds: form.pharmacyIds }),
         });
       }
-      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', pharmacyIds: [] });
+      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', allowance: '', allowanceDescription: '', pharmacyIds: [] });
       setShowForm(false);
       load();
     } else {
@@ -231,6 +237,30 @@ export default function EmployeesPage() {
                 />
               </div>
             )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">Доплата (₸/мес)</label>
+              <input
+                type="number"
+                value={form.allowance}
+                onChange={(e) => setForm((f) => ({ ...f, allowance: e.target.value }))}
+                min="0"
+                step="1"
+                placeholder="0"
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">За что доплата</label>
+              <input
+                type="text"
+                value={form.allowanceDescription}
+                onChange={(e) => setForm((f) => ({ ...f, allowanceDescription: e.target.value }))}
+                placeholder="например: за стаж"
+                className="input"
+              />
+            </div>
           </div>
           {pharmacies.length > 0 && (
             <div>
@@ -385,6 +415,14 @@ function EmployeeRow({
               <span>Оклад: <span className="text-gray-600 font-medium">
                 {emp.baseSalary.toLocaleString('ru-RU')} ₸
               </span></span>
+            )}
+            {emp.allowance > 0 && (
+              <span title={emp.allowanceDescription || undefined}>
+                Доплата: <span className="text-gray-600 font-medium">
+                  {emp.allowance.toLocaleString('ru-RU')} ₸
+                </span>
+                {emp.allowanceDescription && <span className="text-gray-400"> ({emp.allowanceDescription})</span>}
+              </span>
             )}
           </div>
           {/* Аптеки */}

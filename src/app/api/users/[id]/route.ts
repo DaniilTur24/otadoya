@@ -17,7 +17,7 @@ export async function PUT(
   if (auth) return auth;
 
   const id = Number((await params).id);
-  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled } =
+  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled, allowance, allowanceDescription } =
     await request.json();
 
   const data: Record<string, unknown> = {};
@@ -43,6 +43,8 @@ export async function PUT(
       if (baseSalary != null) employeeData.baseSalary = String(baseSalary);
       if (employeeType != null) employeeData.employeeType = employeeType;
       if (managerPremiumEnabled !== undefined) employeeData.managerPremiumEnabled = Boolean(managerPremiumEnabled);
+      if (allowance !== undefined) employeeData.allowance = String(allowance ?? 0);
+      if (allowanceDescription !== undefined) employeeData.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
       if (Object.keys(employeeData).length > 0) {
         await tx.employee.update({ where: { id: updated.employeeId }, data: employeeData });
       }

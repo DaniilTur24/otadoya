@@ -15,8 +15,6 @@ model Pharmacy {
   coefficient   Decimal  @default(0)
   terminalRent  Decimal  @default(0)
   procedureRent Decimal  @default(0)
-  // Фиксированная доплата заведующей этой аптеки (своя сумма на каждую аптеку)
-  managerAllowance        Decimal  @default(0) @map("manager_allowance")
   // Лестница премии заведующих (применяется к manager_trading и manager_fixed одинаково):
   // при выручке аптеки за месяц >= managerPremiumThreshold выдаётся managerPremiumBase,
   // далее за каждые managerPremiumStepAmount сверх порога добавляется managerPremiumStepBonus
@@ -106,6 +104,9 @@ model Employee {
   shiftRate    Decimal? @map("shift_rate")
   // Включена ли лестничная премия аптеки — используется только для pharmacy_manager
   managerPremiumEnabled Boolean @default(false) @map("manager_premium_enabled")
+  // Фиксированная ежемесячная доплата сотруднику (любого типа) + описание, за что она начисляется
+  allowance            Decimal @default(0) @map("allowance")
+  allowanceDescription String  @default("") @map("allowance_description")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
