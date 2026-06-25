@@ -481,7 +481,7 @@ export default function RevenueListPage() {
             </select>
           </div>
           <div>
-            <button className="btn-secondary w-full" onClick={() => {
+            <button className="btn-warning w-full" onClick={() => {
               setFilterFrom(''); setFilterTo(''); setFilterPharmacy('');
             }}>
               Сбросить

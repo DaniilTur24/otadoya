@@ -6,6 +6,7 @@ import { MONTHLY_REPORT_ROWS, MonthlyReportRow, RowType } from '@/lib/monthly-re
 
 interface Pharmacy { id: number; name: string }
 type DataMap = Record<number, Record<string, number>>;
+type Direction = 'up' | 'down' | 'left' | 'right';
 
 const MONTH_NAMES = [
   'Январь','Февраль','Март','Апрель','Май','Июнь',
@@ -22,6 +23,7 @@ function fmtN(n: number, decimals = 0): string {
 function Cell({
   pharmacyId, fieldKey, systemValue, overrideValue,
   onSave, onReset, decimals = 0, rowType, locked,
+  isSelected, onSelect, onNavigate, cellRef,
 }: {
   pharmacyId: number; fieldKey: string;
   systemValue: number; overrideValue: number | undefined;
@@ -30,15 +32,20 @@ function Cell({
   decimals?: number;
   rowType?: RowType;
   locked?: boolean;
+  isSelected: boolean;
+  onSelect: () => void;
+  onNavigate: (dir: Direction) => void;
+  cellRef: (el: HTMLTableCellElement | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const tdRef = useRef<HTMLTableCellElement | null>(null);
   const isOverridden = overrideValue !== undefined;
   const displayValue = isOverridden ? overrideValue : systemValue;
 
-  function startEdit() {
-    setInputVal(displayValue ? String(displayValue) : '');
+  function startEdit(initial?: string) {
+    setInputVal(initial !== undefined ? initial : (displayValue ? String(displayValue) : ''));
     setEditing(true);
   }
 
@@ -46,15 +53,49 @@ function Cell({
     if (editing) inputRef.current?.focus();
   }, [editing]);
 
-  async function commit() {
+  useEffect(() => {
+    if (isSelected && !editing) tdRef.current?.focus();
+  }, [isSelected, editing]);
+
+  async function commit(moveAfter: Direction | null) {
     const num = parseFloat(inputVal.replace(/\s/g, '').replace(',', '.')) || 0;
-    await onSave(pharmacyId, fieldKey, num);
+    if (num !== displayValue) {
+      await onSave(pharmacyId, fieldKey, num);
+    }
     setEditing(false);
+    if (moveAfter) onNavigate(moveAfter);
   }
 
-  function handleKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter') commit();
-    if (e.key === 'Escape') setEditing(false);
+  function handleInputKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); commit('down'); }
+    else if (e.key === 'Tab') { e.preventDefault(); commit(e.shiftKey ? 'left' : 'right'); }
+    else if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+  }
+
+  function handleCellKey(e: React.KeyboardEvent) {
+    if (editing || locked) return;
+    switch (e.key) {
+      case 'ArrowUp': e.preventDefault(); onNavigate('up'); break;
+      case 'ArrowDown': e.preventDefault(); onNavigate('down'); break;
+      case 'ArrowLeft': e.preventDefault(); onNavigate('left'); break;
+      case 'ArrowRight': e.preventDefault(); onNavigate('right'); break;
+      case 'Tab': e.preventDefault(); onNavigate(e.shiftKey ? 'left' : 'right'); break;
+      case 'Enter':
+      case 'F2':
+        e.preventDefault();
+        startEdit();
+        break;
+      case 'Backspace':
+      case 'Delete':
+        e.preventDefault();
+        startEdit('');
+        break;
+      default:
+        if (e.key.length === 1 && /[0-9.,-]/.test(e.key)) {
+          e.preventDefault();
+          startEdit(e.key);
+        }
+    }
   }
 
   if (locked) {
@@ -68,15 +109,15 @@ function Cell({
 
   if (editing) {
     return (
-      <td className="px-1 py-0.5 bg-blue-50">
+      <td className="px-1 py-0.5 bg-blue-50" ref={cellRef}>
         <input
           ref={inputRef}
           type="text"
           className="w-full text-right text-xs border border-blue-400 rounded px-1 py-0.5 outline-none bg-white"
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
-          onBlur={commit}
-          onKeyDown={handleKey}
+          onBlur={() => commit(null)}
+          onKeyDown={handleInputKey}
         />
       </td>
     );
@@ -92,11 +133,15 @@ function Cell({
 
   return (
     <td
-      className={`px-2 py-1.5 text-right tabular-nums group cursor-pointer select-none ${
+      ref={(el) => { tdRef.current = el; cellRef(el); }}
+      tabIndex={isSelected ? 0 : -1}
+      className={`px-2 py-1.5 text-right tabular-nums group cursor-pointer select-none outline-none ${
         isOverridden ? 'bg-yellow-50' : displayValue === 0 ? 'text-gray-200' : ''
-      }`}
-      onClick={startEdit}
-      title={isOverridden ? `Изменено вручную. Системное: ${fmtN(systemValue, decimals) || '0'}` : 'Нажмите для редактирования'}
+      } ${isSelected ? 'ring-2 ring-inset ring-blue-500' : ''}`}
+      onClick={onSelect}
+      onDoubleClick={() => startEdit()}
+      onKeyDown={handleCellKey}
+      title={isOverridden ? `Изменено вручную. Системное: ${fmtN(systemValue, decimals) || '0'}` : 'Кликните, чтобы выбрать ячейку. Enter или дважды клик — редактировать.'}
     >
       <div className="flex items-center justify-end gap-1">
         {isOverridden && (
@@ -130,6 +175,11 @@ export default function MonthlyReportPage() {
   const [isClosed, setIsClosed] = useState(false);
   const [closedAt, setClosedAt] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  const [selected, setSelected] = useState<{ rowIdx: number; colIdx: number } | null>(null);
+  const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
+
+  const editableRows = MONTHLY_REPORT_ROWS.filter((r) => !r.section);
+  const rowIndexMap = new Map(editableRows.map((r, i) => [r.key, i]));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,6 +188,7 @@ export default function MonthlyReportPage() {
     setPharmacies(json.pharmacies ?? []);
     setIsClosed(json.isClosed ?? false);
     setClosedAt(json.closedAt ?? null);
+    setSelected(null);
     if (json.isClosed && json.snapshotData) {
       setSystemData(json.snapshotData);
       setOverrideMap({});
@@ -149,6 +200,38 @@ export default function MonthlyReportPage() {
   }, [year, month]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const key = `${selected.rowIdx}-${selected.colIdx}`;
+    cellRefs.current.get(key)?.focus();
+  }, [selected]);
+
+  function registerCellRef(rowIdx: number, colIdx: number) {
+    return (el: HTMLTableCellElement | null) => {
+      const key = `${rowIdx}-${colIdx}`;
+      if (el) cellRefs.current.set(key, el);
+      else cellRefs.current.delete(key);
+    };
+  }
+
+  function navigate(rowIdx: number, colIdx: number, dir: Direction) {
+    let r = rowIdx;
+    let c = colIdx;
+    switch (dir) {
+      case 'up': r = Math.max(0, r - 1); break;
+      case 'down': r = Math.min(editableRows.length - 1, r + 1); break;
+      case 'left':
+        if (c === 0) { if (r > 0) { r -= 1; c = pharmacies.length - 1; } }
+        else c -= 1;
+        break;
+      case 'right':
+        if (c === pharmacies.length - 1) { if (r < editableRows.length - 1) { r += 1; c = 0; } }
+        else c += 1;
+        break;
+    }
+    setSelected({ rowIdx: r, colIdx: c });
+  }
 
   function getSystemValue(pharmacyId: number, key: string): number {
     return systemData[pharmacyId]?.[key] ?? 0;
@@ -272,7 +355,8 @@ export default function MonthlyReportPage() {
         {saving && <span className="text-xs text-blue-500">Сохранение...</span>}
       </div>
       <p className="text-gray-500 text-sm mb-5">
-        Нажмите на любую ячейку чтобы изменить значение. Кнопка <strong>↩</strong> сбрасывает ячейку к системному значению.
+        Кликните на ячейку, чтобы выбрать её — стрелки и Tab перемещают выбор. Enter, F2, двойной клик или начало ввода числа открывают редактирование;
+        Enter сохраняет и переходит вниз, Tab — вправо, Esc — отмена. Кнопка <strong>↩</strong> сбрасывает ячейку к системному значению.
       </p>
 
       {/* Фильтр + действия */}
@@ -368,6 +452,7 @@ export default function MonthlyReportPage() {
                   const total = rowTotal(row.key);
                   const isCalc = row.source === 'calc';
                   const isSummaryRow = row.key === 'totalExpenses' || row.key === 'netIncome';
+                  const rowIdx = rowIndexMap.get(row.key)!;
 
                   // Цвет колонки ИТОГО
                   let totalCellClass = 'text-gray-800';
@@ -393,7 +478,7 @@ export default function MonthlyReportPage() {
                       </td>
 
                       {/* Ячейки по аптекам */}
-                      {pharmacies.map((p) => {
+                      {pharmacies.map((p, colIdx) => {
                         const sysVal = isCalc ? getCurrentValue(p.id, row.key) : getSystemValue(p.id, row.key);
                         const ov = getOverride(p.id, row.key);
                         return (
@@ -408,6 +493,10 @@ export default function MonthlyReportPage() {
                             decimals={row.decimals}
                             rowType={row.rowType}
                             locked={isClosed}
+                            isSelected={!isClosed && selected?.rowIdx === rowIdx && selected?.colIdx === colIdx}
+                            onSelect={() => setSelected({ rowIdx, colIdx })}
+                            onNavigate={(dir) => navigate(rowIdx, colIdx, dir)}
+                            cellRef={registerCellRef(rowIdx, colIdx)}
                           />
                         );
                       })}
