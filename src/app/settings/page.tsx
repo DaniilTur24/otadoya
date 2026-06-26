@@ -74,48 +74,48 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Настройки</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Настройки</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Управление аптеками, алиасами и правилами импорта банковских транзакций.
       </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-        <Link href="/employees" className="card p-4 hover:bg-gray-50">
-          <div className="font-semibold text-gray-900">Сотрудники</div>
-          <div className="text-xs text-gray-500 mt-1">Оклады, смены, расчёт зарплаты за месяц.</div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <Link href="/employees" className="card p-3 hover:bg-slate-50">
+          <div className="font-semibold text-slate-900">Сотрудники</div>
+          <div className="text-xs text-slate-500 mt-1">Оклады, смены, расчёт зарплаты за месяц.</div>
         </Link>
-        <Link href="/settings/pharmacy-aliases" className="card p-4 hover:bg-gray-50">
-          <div className="font-semibold text-gray-900">Алиасы аптек</div>
-          <div className="text-xs text-gray-500 mt-1">ИП, контрагенты, ИИН/БИН и ключевые слова.</div>
+        <Link href="/settings/pharmacy-aliases" className="card p-3 hover:bg-slate-50">
+          <div className="font-semibold text-slate-900">Алиасы аптек</div>
+          <div className="text-xs text-slate-500 mt-1">ИП, контрагенты, ИИН/БИН и ключевые слова.</div>
         </Link>
-        <Link href="/settings/transaction-rules" className="card p-4 hover:bg-gray-50">
-          <div className="font-semibold text-gray-900">Правила транзакций</div>
-          <div className="text-xs text-gray-500 mt-1">Классификация и распределение строк банка.</div>
+        <Link href="/settings/transaction-rules" className="card p-3 hover:bg-slate-50">
+          <div className="font-semibold text-slate-900">Правила транзакций</div>
+          <div className="text-xs text-slate-500 mt-1">Классификация и распределение строк банка.</div>
         </Link>
-        <Link href="/settings/working-calendar" className="card p-4 hover:bg-gray-50">
-          <div className="font-semibold text-gray-900">Производственный календарь</div>
-          <div className="text-xs text-gray-500 mt-1">Рабочие дни по месяцам для расчёта пятидневной смены.</div>
+        <Link href="/settings/working-calendar" className="card p-3 hover:bg-slate-50">
+          <div className="font-semibold text-slate-900">Производственный календарь</div>
+          <div className="text-xs text-slate-500 mt-1">Рабочие дни по месяцам для расчёта пятидневной смены.</div>
         </Link>
-        <Link href="/settings/office-premium" className="card p-4 hover:bg-gray-50">
-          <div className="font-semibold text-gray-900">Премия офиса</div>
-          <div className="text-xs text-gray-500 mt-1">Лестница премии офисных сотрудников от выручки всех аптек.</div>
+        <Link href="/settings/office-premium" className="card p-3 hover:bg-slate-50">
+          <div className="font-semibold text-slate-900">Премия офиса</div>
+          <div className="text-xs text-slate-500 mt-1">Лестница премии офисных сотрудников от выручки всех аптек.</div>
         </Link>
-        <Link href="/attendance" className="card p-4 hover:bg-gray-50">
-          <div className="font-semibold text-gray-900">Табель посещаемости</div>
-          <div className="text-xs text-gray-500 mt-1">Отметки смен уборщиц, офиса и заведующих без торговли.</div>
+        <Link href="/attendance" className="card p-3 hover:bg-slate-50">
+          <div className="font-semibold text-slate-900">Табель посещаемости</div>
+          <div className="text-xs text-slate-500 mt-1">Отметки смен уборщиц, офиса и заведующих без торговли.</div>
         </Link>
       </div>
 
-      <div className="max-w-2xl">
-      <h2 className="font-semibold text-gray-800 mb-3">Аптеки</h2>
+      <div className="max-w-screen-lg">
+      <h2 className="font-semibold text-slate-800 mb-3">Аптеки</h2>
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : (
         <>
           {pharmacies.length > 0 && (
             <div className="flex items-center justify-between mb-2">
-              <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-slate-500 cursor-pointer">
                 <input
                   type="checkbox"
                   className="rounded"
@@ -131,9 +131,9 @@ export default function SettingsPage() {
               )}
             </div>
           )}
-          <div className="card divide-y divide-gray-100 mb-6">
+          <div className="card divide-y divide-slate-200 mb-4">
             {pharmacies.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
+            <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50">
                 <input
                   type="checkbox"
                   className="rounded shrink-0"
@@ -141,22 +141,22 @@ export default function SettingsPage() {
                   onChange={() => toggleSelect(p.id)}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900">{p.name}</div>
-                  <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap gap-3">
-                    <span className={p.isActive ? 'text-green-600' : 'text-gray-400'}>
+                  <div className="font-medium text-slate-900">{p.name}</div>
+                  <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap gap-3">
+                    <span className={p.isActive ? 'text-green-600' : 'text-slate-400'}>
                       {p.isActive ? 'Активна' : 'Неактивна'}
                     </span>
                     {p.keywords && (
-                      <span>Ключевые слова: <span className="text-gray-600">{p.keywords}</span></span>
+                      <span>Ключевые слова: <span className="text-slate-600">{p.keywords}</span></span>
                     )}
                     {Number(p.coefficient) > 0 && (
-                      <span>Коэффициент: <span className="text-gray-600">{p.coefficient}</span></span>
+                      <span>Коэффициент: <span className="text-slate-600">{p.coefficient}</span></span>
                     )}
                     {Number(p.terminalRent) > 0 && (
-                      <span>Аренда терминал: <span className="text-gray-600">{Number(p.terminalRent).toLocaleString('ru-RU')}</span></span>
+                      <span>Аренда терминал: <span className="text-slate-600">{Number(p.terminalRent).toLocaleString('ru-RU')}</span></span>
                     )}
                     {Number(p.procedureRent) > 0 && (
-                      <span>Процедурная аренда: <span className="text-gray-600">{Number(p.procedureRent).toLocaleString('ru-RU')}</span></span>
+                      <span>Процедурная аренда: <span className="text-slate-600">{Number(p.procedureRent).toLocaleString('ru-RU')}</span></span>
                     )}
                   </div>
                 </div>
@@ -176,8 +176,8 @@ export default function SettingsPage() {
           </div>
 
           {/* Добавить аптеку */}
-          <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Добавить аптеку</h2>
+          <div className="card p-3">
+            <h2 className="text-sm font-semibold text-slate-700 mb-3">Добавить аптеку</h2>
             <div className="flex gap-3 items-end">
               <div className="flex-1">
                 <label className="label">Название</label>

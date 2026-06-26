@@ -9,3 +9,5 @@ uploads/
 *.xls
 prisma/prisma/
 .gstack/
+.claude/
+tsconfig.tsbuildinfo

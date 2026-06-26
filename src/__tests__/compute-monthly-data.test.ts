@@ -8,10 +8,16 @@ vi.mock('@/lib/prisma', () => ({
     importedReportValue: { findMany: vi.fn() },
     monthlyReportOverride: { findMany: vi.fn() },
     pharmacyPdfReport: { findMany: vi.fn() },
+    employee: { findMany: vi.fn() },
   },
 }));
 
+vi.mock('@/lib/salary-calculator', () => ({
+  calculateEmployeeMonthlySalary: vi.fn(),
+}));
+
 import { prisma } from '@/lib/prisma';
+import { calculateEmployeeMonthlySalary } from '@/lib/salary-calculator';
 import { computeMonthlyData } from '@/lib/monthly-report-builder';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -22,14 +28,8 @@ function mockPharmacies(pharmacies: Pharmacy[]) {
   vi.mocked(prisma.pharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(pharmacies);
 }
 
-/** dailyRevenueEntry.findMany is called twice: once for revenue/expenseItems, once for shift salaries. */
-function mockRevenueEntries(revenueEntries: unknown[], shiftEntries: unknown[] = []) {
-  vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockImplementation(
-    (args: { include?: { expenseItems?: boolean; employee?: unknown } }) => {
-      if (args?.include?.employee) return Promise.resolve(shiftEntries);
-      return Promise.resolve(revenueEntries);
-    }
-  );
+function mockRevenueEntries(revenueEntries: unknown[]) {
+  vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(revenueEntries);
 }
 
 function mockExtractedExpenses(entries: unknown[] = []) {
@@ -48,13 +48,27 @@ function mockPdfReports(reports: unknown[] = []) {
   vi.mocked(prisma.pharmacyPdfReport.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(reports);
 }
 
+/** Активные сотрудники, попадающие в расчёт зарплаты в отчёте. */
+function mockEmployees(employees: { id: number; employeeType: string; pharmacies: { pharmacyId: number }[] }[] = []) {
+  vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(employees);
+}
+
+/** calculateEmployeeMonthlySalary — по умолчанию возвращает null (как если бы данных не было). */
+function mockSalaryResult(result: Partial<{ totalSalary: number; totalBonuses: number; totalAdvances: number }> | null) {
+  vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
+    result === null ? null : { totalSalary: 0, totalBonuses: 0, totalAdvances: 0, ...result }
+  );
+}
+
 const pharmacy1: Pharmacy = { id: 1, name: 'Аптека №1', coefficient: 0, terminalRent: 0, procedureRent: 0, isActive: true };
 
 beforeEach(() => {
+  vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockReset();
   mockExtractedExpenses();
   mockImportedValues();
   mockOverrides();
   mockPdfReports();
+  mockEmployees();
 });
 
 // ─── computeMonthlyData ───────────────────────────────────────────────────────
@@ -141,19 +155,83 @@ describe('computeMonthlyData', () => {
     expect(systemData[1].otherExpenses).toBe(777);
   });
 
-  it('computes pharmaSalary from day and full_day shifts (baseSalary/15 and baseSalary/10)', async () => {
+  it('adds a seller/manager pharmaSalary contribution from calculateEmployeeMonthlySalary', async () => {
     mockPharmacies([pharmacy1]);
-    mockRevenueEntries(
-      [],
-      [
-        { pharmacyId: 1, shiftType: 'day', employee: { baseSalary: 150000 } },
-        { pharmacyId: 1, shiftType: 'full_day', employee: { baseSalary: 150000 } },
-      ]
-    );
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'seller', pharmacies: [{ pharmacyId: 1 }] }]);
+    mockSalaryResult({ totalSalary: 25000, totalBonuses: 0, totalAdvances: 0 });
 
     const { systemData } = await computeMonthlyData(2026, 6);
 
-    expect(systemData[1].pharmaSalary).toBeCloseTo(150000 / 15 + 150000 / 10, 5);
+    expect(systemData[1].pharmaSalary).toBe(25000);
+  });
+
+  it('excludes pharmaBonus from pharmaSalary (it is already counted in the pharmaBonus field)', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'seller', pharmacies: [{ pharmacyId: 1 }] }]);
+    // totalSalary already includes the 5000 bonus
+    mockSalaryResult({ totalSalary: 30000, totalBonuses: 5000, totalAdvances: 0 });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].pharmaSalary).toBe(25000);
+  });
+
+  it('counts an advance as salary: pharmaSalary reflects the full gross amount even after a large advance', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'seller', pharmacies: [{ pharmacyId: 1 }] }]);
+    // Advances are no longer a separate expense row on this report (they show up on the
+    // employee's profile instead) — an advance is just salary paid early, so pharmaSalary
+    // should equal the full 25000 earned, regardless of how much of it was advanced.
+    mockSalaryResult({ totalSalary: 25000 - 100000, totalBonuses: 0, totalAdvances: 100000 });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].pharmaSalary).toBe(25000);
+  });
+
+  it('ignores employeeAdvance expense items entirely on this report (no otherExpenses fallback)', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([
+      {
+        pharmacyId: 1,
+        cashRevenue: 0,
+        terminalRevenue: 0,
+        kaspiRevenue: 0,
+        expenseItems: [{ category: 'employeeAdvance', amount: 100000 }],
+      },
+    ]);
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].otherExpenses).toBe(0);
+    expect(systemData[1]).not.toHaveProperty('employeeAdvance');
+  });
+
+  it('routes cleaner salary into the cleaning field', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'cleaner', pharmacies: [{ pharmacyId: 1 }] }]);
+    mockSalaryResult({ totalSalary: 40000, totalBonuses: 0, totalAdvances: 0 });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].cleaning).toBe(40000);
+    expect(systemData[1].pharmaSalary).toBe(0);
+  });
+
+  it('splits office employee salary evenly across all active pharmacies', async () => {
+    mockPharmacies([pharmacy1, { ...pharmacy1, id: 2, name: 'Аптека №2' }]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'office', pharmacies: [] }]);
+    mockSalaryResult({ totalSalary: 60000, totalBonuses: 0, totalAdvances: 0 });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].officeSalary).toBe(30000);
+    expect(systemData[2].officeSalary).toBe(30000);
   });
 
   it('computes wholesaleRevenue as retailRevenue / coefficient when coefficient > 0', async () => {

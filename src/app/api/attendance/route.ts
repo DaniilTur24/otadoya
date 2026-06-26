@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
+import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,15 @@ export async function POST(request: NextRequest) {
 
   const employee = await prisma.employee.findUnique({ where: { id: Number(employeeId) } });
   if (!employee) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
+
+  // Сменные типы (seller/manager_trading) учитываются через смену в записи выручки, а не через
+  // табель — их зарплата не читает AttendanceShift, отметка здесь была бы мёртвой и вводящей в заблуждение.
+  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType)) {
+    return NextResponse.json(
+      { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
+      { status: 400 }
+    );
+  }
 
   try {
     const shift = await prisma.attendanceShift.create({

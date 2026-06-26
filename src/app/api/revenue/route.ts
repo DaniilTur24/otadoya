@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
+import { validateShiftEmployeeType, validateUniqueShift, validateNonNegativeAmounts } from '@/lib/revenue-validation';
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
@@ -80,6 +81,17 @@ export async function POST(request: NextRequest) {
 
   if (shiftType && !['day', 'full_day', 'five_day'].includes(shiftType)) {
     return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
+  }
+
+  const amountsError = validateNonNegativeAmounts({ cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue });
+  if (amountsError) return NextResponse.json({ error: amountsError }, { status: 400 });
+
+  if (employeeId) {
+    const shiftError = await validateShiftEmployeeType(Number(employeeId), shiftType || null);
+    if (shiftError) return NextResponse.json({ error: shiftError }, { status: 400 });
+
+    const duplicateError = await validateUniqueShift(Number(employeeId), new Date(date), shiftType || null);
+    if (duplicateError) return NextResponse.json({ error: duplicateError }, { status: 409 });
   }
 
   // Менеджер может писать только в свои аптеки

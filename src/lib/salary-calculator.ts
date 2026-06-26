@@ -189,7 +189,27 @@ async function computeManagerBonusShare(
   return { share: total * MANAGER_BONUS_SHARE_PERCENT, total };
 }
 
-/** Премия офиса: лестница (OfficePremiumSettings, синглтон) от суммарной выручки всех аптек. */
+/**
+ * Находит премию по таблице произвольных диапазонов выручки (OfficePremiumTier).
+ * Диапазон: fromAmount < revenue <= toAmount; toAmount = null — без верхней границы.
+ * Диапазоны не накопительные — премия берётся из той единственной строки, в которую
+ * попадает выручка, а не суммируется по предыдущим строкам.
+ */
+function findOfficeTierBonus(
+  revenue: number,
+  tiers: { fromAmount: unknown; toAmount: unknown; bonusAmount: unknown }[],
+): number {
+  for (const t of tiers) {
+    const from = Number(t.fromAmount);
+    const to = t.toAmount !== null ? Number(t.toAmount) : null;
+    if (revenue > from && (to === null || revenue <= to)) {
+      return Number(t.bonusAmount);
+    }
+  }
+  return 0;
+}
+
+/** Премия офиса: таблица диапазонов выручки (OfficePremiumTier) от суммарной выручки всех аптек. */
 async function computeOfficeLadderPremium(
   month: number,
   year: number,
@@ -197,8 +217,8 @@ async function computeOfficeLadderPremium(
   const dateFrom = startOfMonth(year, month);
   const dateTo = endOfMonth(year, month);
 
-  const [settings, agg] = await Promise.all([
-    prisma.officePremiumSettings.findFirst(),
+  const [tiers, agg] = await Promise.all([
+    prisma.officePremiumTier.findMany({ orderBy: { fromAmount: 'asc' } }),
     prisma.dailyRevenueEntry.aggregate({
       _sum: { cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
       where: { status: 'approved', excludedFromReport: false, date: { gte: dateFrom, lte: dateTo } },
@@ -210,16 +230,7 @@ async function computeOfficeLadderPremium(
     Number(agg._sum.terminalRevenue ?? 0) +
     Number(agg._sum.kaspiRevenue ?? 0);
 
-  if (!settings) return { premium: 0, revenueTotal };
-
-  const premium = computeLadderPremium(
-    revenueTotal,
-    Number(settings.threshold),
-    Number(settings.base),
-    Number(settings.stepAmount),
-    Number(settings.stepBonus),
-  );
-  return { premium, revenueTotal };
+  return { premium: findOfficeTierBonus(revenueTotal, tiers), revenueTotal };
 }
 
 async function getAttendanceShiftsCount(

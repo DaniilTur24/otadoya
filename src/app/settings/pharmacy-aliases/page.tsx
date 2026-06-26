@@ -94,20 +94,20 @@ export default function PharmacyAliasesSettingsPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-sm text-gray-400 mb-5">
-        <Link href="/settings" className="hover:text-gray-600">Настройки</Link>
+      <div className="flex items-center gap-2 text-sm text-slate-400 mb-5">
+        <Link href="/settings" className="hover:text-slate-600">Настройки</Link>
         <span>/</span>
-        <span className="text-gray-700 font-medium">Алиасы аптек</span>
+        <span className="text-slate-700 font-medium">Алиасы аптек</span>
       </div>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Алиасы аптек</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Алиасы аптек</h1>
+      <p className="text-sm text-slate-500 mb-4">
         По этим словам, ИП, контрагентам и ИИН/БИН система определяет аптеку в банковской строке.
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5">
-        <form onSubmit={save} className="card p-5 space-y-3 h-fit">
-          <h2 className="font-semibold text-gray-800">{editingId ? 'Редактировать алиас' : 'Добавить алиас'}</h2>
+        <form onSubmit={save} className="card p-4 space-y-3 h-fit">
+          <h2 className="font-semibold text-slate-800">{editingId ? 'Редактировать алиас' : 'Добавить алиас'}</h2>
           <div>
             <label className="label">Аптека</label>
             <select className="input" value={form.pharmacyId} onChange={(e) => setForm((f) => ({ ...f, pharmacyId: e.target.value }))} required>
@@ -137,10 +137,10 @@ export default function PharmacyAliasesSettingsPage() {
               ))}
             </select>
           </div>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
-              className="w-4 h-4 accent-blue-600"
+              className="w-4 h-4 accent-slate-700"
               checked={form.isActive}
               onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
             />
@@ -153,7 +153,7 @@ export default function PharmacyAliasesSettingsPage() {
         </form>
 
         <div>
-          <div className="card p-4 mb-3">
+          <div className="card p-3 mb-3">
             <label className="label">Фильтр по аптеке</label>
             <select className="input max-w-sm" value={filterPharmacyId} onChange={(e) => setFilterPharmacyId(e.target.value)}>
               <option value="">Все аптеки</option>
@@ -165,7 +165,7 @@ export default function PharmacyAliasesSettingsPage() {
 
           <div className="card overflow-hidden">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th">Аптека</th>
                   <th className="th">Алиас</th>
@@ -174,14 +174,14 @@ export default function PharmacyAliasesSettingsPage() {
                   <th className="th">Действия</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {aliases.map((alias) => (
-                  <tr key={alias.id} className="hover:bg-gray-50">
+                  <tr key={alias.id} className="hover:bg-slate-50">
                     <td className="td font-medium">{alias.pharmacy.name}</td>
                     <td className="td">{alias.alias}</td>
-                    <td className="td text-gray-500">{ALIAS_TYPES.find(([key]) => key === alias.aliasType)?.[1] ?? alias.aliasType}</td>
+                    <td className="td text-slate-500">{ALIAS_TYPES.find(([key]) => key === alias.aliasType)?.[1] ?? alias.aliasType}</td>
                     <td className="td">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${alias.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded border ${alias.isActive ? 'bg-green-50 text-green-800 border-green-300' : 'bg-slate-100 text-slate-500 border-slate-300'}`}>
                         {alias.isActive ? 'Активно' : 'Неактивно'}
                       </span>
                     </td>

@@ -396,16 +396,17 @@ model AttendanceShift {
 }
 
 // Глобальная лестница премии офисных сотрудников от суммарной выручки всех аптек.
-// Единственная строка в таблице (синглтон).
-model OfficePremiumSettings {
-  id         Int      @id @default(autoincrement())
-  threshold  Decimal  @default(0)
-  base       Decimal  @default(0)
-  stepAmount Decimal  @default(0) @map("step_amount")
-  stepBonus  Decimal  @default(0) @map("step_bonus")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+// Список произвольных диапазонов выручки (ширина диапазона и премия не обязаны быть
+// линейными — каждая строка задаёт свою фиксированную премию). toAmount = null у строки
+// означает "свыше fromAmount без верхней границы" (обычно последняя строка).
+model OfficePremiumTier {
+  id          Int      @id @default(autoincrement())
+  fromAmount  Decimal  @map("from_amount")
+  toAmount    Decimal? @map("to_amount")
+  bonusAmount Decimal  @map("bonus_amount")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  @@map("office_premium_settings")
+  @@map("office_premium_tiers")
 }
 
 // Закрытый месяц: хранит финальные цифры как снимок

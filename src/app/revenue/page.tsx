@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
+import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
@@ -18,7 +19,7 @@ const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
 ).map((row) => ({ key: row.key, label: row.label }));
 
 interface Pharmacy { id: number; name: string }
-interface Employee { id: number; name: string }
+interface Employee { id: number; name: string; employeeType: string }
 
 interface ExpenseItem {
   id: number;
@@ -118,6 +119,10 @@ export default function RevenueListPage() {
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
+  // к смене в записи выручки — их зарплата считается только через табель посещаемости.
+  const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
@@ -333,10 +338,10 @@ export default function RevenueListPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold text-gray-900">Записи выручки</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Записи выручки</h1>
         <Link href="/revenue/new" className="btn-primary text-sm">+ Добавить</Link>
       </div>
-      <p className="text-gray-500 text-sm mb-5">
+      <p className="text-slate-500 text-sm mb-4">
         Все введённые бухгалтером записи. Нажмите «Изменить» для редактирования.
       </p>
 
@@ -344,14 +349,14 @@ export default function RevenueListPage() {
       {(role === 'admin' || role === 'bookkeeper') && pendingEntries.length > 0 && (
         <div className="mb-5">
           <button
-            className="flex items-center gap-2 mb-3 text-sm font-semibold text-amber-700"
+            className="flex items-center gap-2 mb-2 text-sm font-semibold text-amber-700"
             onClick={() => setShowModeration((v) => !v)}
           >
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-xs font-bold">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-500 text-white text-xs font-bold">
               {pendingEntries.length}
             </span>
             На проверке
-            <span className="text-gray-400 font-normal">{showModeration ? '▲' : '▼'}</span>
+            <span className="text-slate-400 font-normal">{showModeration ? '▲' : '▼'}</span>
           </button>
 
           {showModeration && (
@@ -359,14 +364,14 @@ export default function RevenueListPage() {
               <table className="w-full">
                 <thead className="bg-amber-50 border-b border-amber-200">
                   <tr>
-                    <th className="th">Дата</th>
-                    <th className="th">Аптека</th>
-                    <th className="th">Сотрудник</th>
-                    <th className="th text-right">Нал.</th>
-                    <th className="th text-right">Терминал</th>
-                    <th className="th text-right">Каспи</th>
-                    <th className="th text-right">Расходы</th>
-                    <th className="th"></th>
+                    <th className="th bg-amber-50">Дата</th>
+                    <th className="th bg-amber-50">Аптека</th>
+                    <th className="th bg-amber-50">Сотрудник</th>
+                    <th className="th bg-amber-50 text-right">Нал.</th>
+                    <th className="th bg-amber-50 text-right">Терминал</th>
+                    <th className="th bg-amber-50 text-right">Каспи</th>
+                    <th className="th bg-amber-50 text-right">Расходы</th>
+                    <th className="th bg-amber-50"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-amber-100">
@@ -378,7 +383,7 @@ export default function RevenueListPage() {
                         <tr className="bg-amber-50/40">
                           <td className="td">{fmtDate(entry.date)}</td>
                           <td className="td font-medium">{entry.pharmacy.name}</td>
-                          <td className="td text-gray-600">{entry.employeeName}</td>
+                          <td className="td text-slate-600">{entry.employeeName}</td>
                           <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
                           <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
                           <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
@@ -386,7 +391,7 @@ export default function RevenueListPage() {
                           <td className="td">
                             {isExpanded ? (
                               <button
-                                className="text-xs text-gray-400 hover:text-gray-600"
+                                className="text-xs text-slate-400 hover:text-slate-600"
                                 onClick={() => { setModerating(null); setModerateComment(''); }}
                               >
                                 Закрыть
@@ -406,20 +411,20 @@ export default function RevenueListPage() {
                             <td colSpan={8} className="px-4 py-3">
                               {entry.expenseItems.length > 0 && (
                                 <div className="mb-3 text-sm">
-                                  <p className="font-medium text-gray-700 mb-1">Расходы:</p>
+                                  <p className="font-medium text-slate-700 mb-1">Расходы:</p>
                                   <ul className="space-y-0.5">
                                     {entry.expenseItems.map((item) => (
-                                      <li key={item.id} className="text-gray-600 flex gap-2">
+                                      <li key={item.id} className="text-slate-600 flex gap-2">
                                         <span className="text-red-600">{fmt(item.amount)}</span>
                                         <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
-                                        {item.comment && <span className="text-gray-400">— {item.comment}</span>}
+                                        {item.comment && <span className="text-slate-400">— {item.comment}</span>}
                                       </li>
                                     ))}
                                   </ul>
                                 </div>
                               )}
                               {entry.generalComment && (
-                                <p className="text-sm text-gray-500 italic mb-3">{entry.generalComment}</p>
+                                <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
                               )}
                               <div className="flex flex-col sm:flex-row gap-2 items-start">
                                 <input
@@ -458,7 +463,7 @@ export default function RevenueListPage() {
       )}
 
       {/* Фильтры */}
-      <div className="card p-4 mb-5">
+      <div className="card p-3 mb-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
           <div>
             <label className="label">Дата с</label>
@@ -481,7 +486,7 @@ export default function RevenueListPage() {
             </select>
           </div>
           <div>
-            <button className="btn-secondary w-full" onClick={() => {
+            <button className="btn-warning w-full" onClick={() => {
               setFilterFrom(''); setFilterTo(''); setFilterPharmacy('');
             }}>
               Сбросить
@@ -492,10 +497,10 @@ export default function RevenueListPage() {
 
       {/* Форма редактирования */}
       {editingId !== null && editState && (
-        <div className="card p-5 mb-5 border-blue-200 border-2">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-800">Редактирование записи</h2>
-            <button onClick={cancelEdit} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        <div className="card p-4 mb-4 border-slate-400 border">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold text-slate-800">Редактирование записи</h2>
+            <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
           </div>
 
           {saveError && (
@@ -526,25 +531,25 @@ export default function RevenueListPage() {
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className="label">Сотрудник</label>
-              {employees.length > 0 ? (
+              {shiftEligibleEmployees.length > 0 ? (
                 <>
                   <select className="input" value={editState.employeeId}
                     onChange={(e) => updateField('employeeId', e.target.value)} required>
                     <option value="">— выберите из списка —</option>
-                    {employees.map((emp) => (
+                    {shiftEligibleEmployees.map((emp) => (
                       <option key={emp.id} value={emp.id}>{emp.name}</option>
                     ))}
                   </select>
-                  <p className="mt-1 text-xs text-gray-400">
+                  <p className="mt-1 text-xs text-slate-400">
                     Нет нужного?{' '}
-                    <a href="/employees" target="_blank" className="text-blue-500 hover:underline">
+                    <a href="/employees" target="_blank" className="text-slate-700 hover:underline">
                       Добавить сотрудника
                     </a>
                   </p>
                 </>
               ) : (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Список пуст.{' '}
+                  Нет сотрудников со сменной оплатой.{' '}
                   <a href="/employees" target="_blank" className="font-medium underline">
                     Добавить сотрудников
                   </a>
@@ -583,7 +588,7 @@ export default function RevenueListPage() {
             <div>
               <label className="label">
                 Каспи
-                <span className="ml-1 text-gray-400 font-normal text-xs">— входит в общую</span>
+                <span className="ml-1 text-slate-400 font-normal text-xs">— входит в общую</span>
               </label>
               <input type="number" min="0" step="0.01" className="input"
                 value={editState.kaspiRevenue}
@@ -592,7 +597,7 @@ export default function RevenueListPage() {
           </div>
 
           {totalRevenue > 0 && (
-            <div className="bg-blue-50 rounded-md px-4 py-2 text-sm text-blue-800 mb-4">
+            <div className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900 mb-3">
               Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
             </div>
           )}
@@ -602,15 +607,15 @@ export default function RevenueListPage() {
             <div className="flex items-center justify-between mb-2">
               <label className="label mb-0">Дополнительные статьи</label>
               <button type="button" onClick={addExpenseItem}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                className="text-sm text-slate-700 hover:text-slate-900 font-medium">
                 + Добавить строку
               </button>
             </div>
             {editState.expenseItems.length === 0 ? (
-              <p className="text-sm text-gray-400 italic">Нет записей</p>
+              <p className="text-sm text-slate-400 italic">Нет записей</p>
             ) : (
               <div className="space-y-1.5">
-                <div className="grid gap-2 text-xs text-gray-400 font-medium px-5"
+                <div className="grid gap-2 text-xs text-slate-400 font-medium px-5"
                   style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
                   <span></span><span>Сумма</span><span>Статья *</span><span>Примечание</span><span></span>
                 </div>
@@ -618,7 +623,7 @@ export default function RevenueListPage() {
                   <div key={item.id}>
                     <div className="grid gap-2 items-start"
                       style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
-                      <span className="text-xs text-gray-400 mt-2.5 text-right pr-1">{idx + 1}.</span>
+                      <span className="text-xs text-slate-400 mt-2.5 text-right pr-1">{idx + 1}.</span>
                       <input type="number" min="0" step="0.01" placeholder="0.00"
                         className="input" value={item.amount}
                         onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)} />
@@ -640,7 +645,7 @@ export default function RevenueListPage() {
                         className="input" value={item.comment}
                         onChange={(e) => updateExpenseItem(item.id, 'comment', e.target.value)} />
                       <button type="button" onClick={() => removeExpenseItem(item.id)}
-                        className="mt-2 text-gray-300 hover:text-red-500 transition-colors text-lg leading-none">
+                        className="mt-2 text-slate-300 hover:text-red-500 transition-colors text-lg leading-none">
                         ×
                       </button>
                     </div>
@@ -666,7 +671,7 @@ export default function RevenueListPage() {
                   </div>
                 ))}
                 {editState.expenseItems.length > 1 && (
-                  <p className="text-sm text-gray-600 pl-5 pt-1">
+                  <p className="text-sm text-slate-600 pl-5 pt-1">
                     Итого: <strong>{totalExpenses.toLocaleString('ru-RU')}</strong>
                   </p>
                 )}
@@ -692,16 +697,16 @@ export default function RevenueListPage() {
 
       {/* Таблица записей */}
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : entries.length === 0 ? (
-        <div className="card p-8 text-center text-gray-400 text-sm">
+        <div className="card p-5 text-center text-slate-500 text-sm">
           Нет записей за выбранный период
         </div>
       ) : (
         <div className="card overflow-hidden">
           {selectedIds.size > 0 && (
-            <div className="px-4 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
-              <span className="text-sm text-blue-800">Выбрано: {selectedIds.size}</span>
+            <div className="px-4 py-2 bg-slate-100 border-b border-slate-300 flex items-center justify-between">
+              <span className="text-sm text-slate-900">Выбрано: {selectedIds.size}</span>
               <button className="btn-danger text-xs" onClick={deleteSelected}>
                 Удалить выбранные
               </button>
@@ -709,7 +714,7 @@ export default function RevenueListPage() {
           )}
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th w-8">
                     <input
@@ -733,7 +738,7 @@ export default function RevenueListPage() {
                   <th className="th"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {entries.map((entry) => {
                   const bonuses  = pharmaBonusSum(entry.expenseItems);
                   const advances = advanceSum(entry.expenseItems);
@@ -742,7 +747,7 @@ export default function RevenueListPage() {
                   return (
                     <React.Fragment key={entry.id}>
                       <tr
-                        className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}
+                        className={editingId === entry.id ? 'bg-slate-100' : 'hover:bg-slate-50'}
                         onMouseEnter={(e) => {
                           if (entry.expenseItems.some(i => i.category !== 'pharmaBonus') || entry.generalComment) {
                             setTooltipEntry(entry);
@@ -780,12 +785,12 @@ export default function RevenueListPage() {
                         <td className="td text-right text-red-600">
                           {expenses > 0 ? fmt(expenses) : '—'}
                         </td>
-                        <td className="td text-gray-500">
+                        <td className="td text-slate-500">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span>{entry.employeeName}</span>
                             {entry.excludedFromReport && (
                               <button
-                                className="text-xs px-1.5 py-0.5 rounded font-medium bg-gray-100 text-gray-500 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
                                 title="Нажмите чтобы включить в отчёт за этот месяц"
                                 onClick={async () => {
                                   const d = new Date(entry.date);
@@ -811,8 +816,8 @@ export default function RevenueListPage() {
                           {entry.shiftType && (
                             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                               entry.shiftType === 'full_day'
-                                ? 'bg-purple-50 text-purple-700'
-                                : 'bg-blue-50 text-blue-700'
+                                ? 'bg-slate-200 text-slate-800'
+                                : 'bg-slate-100 text-slate-800'
                             }`}>
                               {SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType}
                             </span>
@@ -820,7 +825,7 @@ export default function RevenueListPage() {
                         </td>
                         <td className="td">
                           {editingId === entry.id ? (
-                            <span className="text-xs text-blue-600 font-medium">Редактируется</span>
+                            <span className="text-xs text-slate-700 font-medium">Редактируется</span>
                           ) : (
                             <div className="flex gap-1">
                               <button className="btn-secondary text-xs" onClick={() => startEdit(entry)}>
@@ -852,8 +857,8 @@ export default function RevenueListPage() {
             const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances;
             const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
             return (
-              <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-6 text-sm">
-                <span className="text-gray-500">Итого по выбранным записям:</span>
+              <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
+                <span className="text-slate-500">Итого по выбранным записям:</span>
                 <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
                 {totalIncomes > 0 && (
                   <span>Доп. доходы: <strong className="text-green-700">{fmt(totalIncomes)}</strong></span>
@@ -867,10 +872,10 @@ export default function RevenueListPage() {
                 {totalExpenses > 0 && (
                   <span>Расходы: <strong className="text-red-600">{fmt(totalExpenses)}</strong></span>
                 )}
-                <span className="border-l border-gray-300 pl-6">
+                <span className="border-l border-slate-300 pl-6">
                   Итого: <strong className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</strong>
                 </span>
-                <span className="border-l border-gray-300 pl-6">
+                <span className="border-l border-slate-300 pl-6">
                   Наличными на руках: <strong className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(cashNet)}</strong>
                 </span>
               </div>
@@ -887,7 +892,7 @@ export default function RevenueListPage() {
         return (
           <div
             style={{ position: 'fixed', left: tooltipPos.x + 16, top: tooltipPos.y + 8, zIndex: 9999 }}
-            className="bg-white shadow-xl border border-gray-200 rounded-lg p-3 text-xs max-w-sm pointer-events-none"
+            className="bg-white border border-slate-300 rounded p-3 text-xs max-w-sm pointer-events-none"
           >
             {items.length > 0 && (
               <div className="space-y-1.5">
@@ -898,29 +903,29 @@ export default function RevenueListPage() {
                   return (
                     <div key={item.id} className="flex gap-2 items-baseline">
                       <span className={`font-semibold shrink-0 ${colorClass}`}>{fmt(item.amount)}</span>
-                      <span className="text-gray-700">{label}</span>
-                      {item.comment && <span className="text-gray-400">— {item.comment}</span>}
+                      <span className="text-slate-700">{label}</span>
+                      {item.comment && <span className="text-slate-400">— {item.comment}</span>}
                     </div>
                   );
                 })}
               </div>
             )}
             {advanceItems.length > 0 && (
-              <div className={`space-y-1.5 ${items.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
+              <div className={`space-y-1.5 ${items.length > 0 ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
                 {advanceItems.map((item) => {
                   const recipient = employees.find((e) => e.id === item.employeeId);
                   return (
                     <div key={item.id} className="flex gap-2 items-baseline">
                       <span className="font-semibold shrink-0 text-red-600">−{fmt(item.amount)}</span>
-                      <span className="text-gray-700">Аванс</span>
-                      <span className="text-gray-400">→ {recipient?.name ?? 'сотрудник не указан'}</span>
+                      <span className="text-slate-700">Аванс</span>
+                      <span className="text-slate-400">→ {recipient?.name ?? 'сотрудник не указан'}</span>
                     </div>
                   );
                 })}
               </div>
             )}
             {tooltipEntry.generalComment && (
-              <div className={`text-gray-400 italic ${(items.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
+              <div className={`text-slate-400 italic ${(items.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
                 {tooltipEntry.generalComment}
               </div>
             )}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
-import { EMPLOYEE_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPES, USER_LINKED_TYPES } from '@/lib/employee-types';
 
 function serialize(emp: Record<string, unknown>) {
   return {
@@ -37,10 +37,25 @@ export async function PUT(
   const auth = requireAdmin(request);
   if (auth) return auth;
 
+  const employeeId = Number((await params).id);
   const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription } = await request.json();
 
   if (employeeType != null && !(employeeType in EMPLOYEE_TYPES)) {
     return NextResponse.json({ error: 'Некорректный тип сотрудника' }, { status: 400 });
+  }
+
+  // Заведующие/менеджеры (USER_LINKED_TYPES) привязаны к аккаунту User — имя/оклад/тип/доплата
+  // редактируются только на /users, иначе карточка Employee расходится с привязанным аккаунтом.
+  const current = await prisma.employee.findUnique({ where: { id: employeeId }, select: { employeeType: true } });
+  if (current && USER_LINKED_TYPES.has(current.employeeType)) {
+    const blockedFields = { name, baseSalary, employeeType, allowance, allowanceDescription };
+    const touched = Object.entries(blockedFields).filter(([, v]) => v !== undefined);
+    if (touched.length > 0) {
+      return NextResponse.json(
+        { error: 'Этот сотрудник привязан к аккаунту заведующего/менеджера — имя, оклад, тип и доплату нужно менять на странице /users' },
+        { status: 400 }
+      );
+    }
   }
 
   const data: Record<string, unknown> = {};
@@ -53,7 +68,7 @@ export async function PUT(
   if (allowanceDescription !== undefined) data.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
 
   const employee = await prisma.employee.update({
-    where: { id: Number((await params).id) },
+    where: { id: employeeId },
     data,
     include: { pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } } },
   });

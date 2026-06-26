@@ -15,7 +15,6 @@ export interface MonthlyReportRow {
 export const MONTHLY_EXPENSE_KEYS = [
   'goodsExpenses',
   'pharmaBonus',
-  'employeeAdvance',
   'pharmaSalary',
   'officeSalary',
   'association',
@@ -58,7 +57,6 @@ export const MONTHLY_REPORT_ROWS: MonthlyReportRow[] = [
   { key: '_exp', label: 'РАСХОДЫ', section: true, source: 'calc' },
   { key: 'goodsExpenses', label: 'Расходы на товар', source: 'empty', rowType: 'expense' },
   { key: 'pharmaBonus', label: 'Бонусы фарм и зав', source: 'empty', rowType: 'expense' },
-  { key: 'employeeAdvance', label: 'Авансы сотрудникам', source: 'empty', rowType: 'expense' },
   { key: 'pharmaSalary', label: 'Оклады фарм и зав', source: 'empty', rowType: 'expense' },
   { key: 'officeSalary', label: 'Зарплата офиса', source: 'empty', rowType: 'expense' },
   { key: 'association', label: 'Ассоциация', source: 'empty', rowType: 'expense' },

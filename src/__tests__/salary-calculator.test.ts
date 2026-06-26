@@ -24,8 +24,8 @@ vi.mock('@/lib/prisma', () => ({
       count: vi.fn(),
       findMany: vi.fn(),
     },
-    officePremiumSettings: {
-      findFirst: vi.fn(),
+    officePremiumTier: {
+      findMany: vi.fn(),
     },
   },
 }));
@@ -588,7 +588,7 @@ describe('calculateEmployeeMonthlySalary — office', () => {
   it('computes base salary from attendance via the working calendar', async () => {
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
     vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(15);
-    vi.mocked(prisma.officePremiumSettings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
       _sum: { cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
     });
@@ -596,30 +596,56 @@ describe('calculateEmployeeMonthlySalary — office', () => {
     expect(result!.salaryFromFiveDayShifts).toBeCloseTo((200000 / 20) * 15, 5);
   });
 
-  it('applies the global office ladder premium based on total revenue of all pharmacies', async () => {
+  it('applies the flat bonus of the matching office tier based on total revenue of all pharmacies', async () => {
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
-    vi.mocked(prisma.officePremiumSettings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
-      threshold: 1000000,
-      base: 20000,
-      stepAmount: 100000,
-      stepBonus: 2000,
-    });
+    vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { fromAmount: 130000000, toAmount: 150000000, bonusAmount: 10000 },
+      { fromAmount: 150000000, toAmount: 170000000, bonusAmount: 20000 },
+      { fromAmount: 170000000, toAmount: null, bonusAmount: 30000 },
+    ]);
     vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
-      _sum: { cashRevenue: 1100000, terminalRevenue: 100000, kaspiRevenue: 0 },
+      _sum: { cashRevenue: 150000000, terminalRevenue: 10000000, kaspiRevenue: 0 },
     });
     const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
-    // total = 1,200,000; (1,200,000-1,000,000)/100,000 = 2 steps * 2000 = 4000 + base 20000 = 24000
-    expect(result!.managedRevenueTotal).toBe(1200000);
-    expect(result!.managerLadderPremium).toBeCloseTo(24000, 5);
-    expect(result!.totalSalary).toBeCloseTo(24000, 5);
+    // total = 160,000,000 — falls in the 150-170m tier, flat 20000 (not cumulative with lower tiers)
+    expect(result!.managedRevenueTotal).toBe(160000000);
+    expect(result!.managerLadderPremium).toBe(20000);
+    expect(result!.totalSalary).toBe(20000);
+  });
+
+  it('uses the open-ended tier (toAmount null) when revenue exceeds all bounded tiers', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { fromAmount: 130000000, toAmount: 150000000, bonusAmount: 10000 },
+      { fromAmount: 420000000, toAmount: null, bonusAmount: 120000 },
+    ]);
+    vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _sum: { cashRevenue: 500000000, terminalRevenue: 0, kaspiRevenue: 0 },
+    });
+    const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
+    expect(result!.managerLadderPremium).toBe(120000);
+  });
+
+  it('returns 0 premium when revenue does not fall into any tier', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { fromAmount: 130000000, toAmount: 150000000, bonusAmount: 10000 },
+    ]);
+    vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _sum: { cashRevenue: 1000000, terminalRevenue: 0, kaspiRevenue: 0 },
+    });
+    const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
+    expect(result!.managerLadderPremium).toBe(0);
   });
 
   it('adds the fixed allowance on top of attendance salary and ladder premium', async () => {
     vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({ ...officeEmployee, allowance: 8000 });
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
-    vi.mocked(prisma.officePremiumSettings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
       _sum: { cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
     });

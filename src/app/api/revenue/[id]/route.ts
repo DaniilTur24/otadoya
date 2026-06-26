@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAnyRole, getRequestRole, getRequestUserId } from '@/lib/api-auth';
+import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
+import { validateShiftEmployeeType, validateUniqueShift, validateNonNegativeAmounts } from '@/lib/revenue-validation';
 
 async function canModifyEntry(
   request: Request,
@@ -93,6 +94,37 @@ export async function PUT(
 
   if (shiftType && !['day', 'full_day', 'five_day'].includes(shiftType)) {
     return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
+  }
+
+  // Дата могла измениться — нужно проверить закрытость и НОВОГО месяца, а не только старого,
+  // иначе запись из открытого месяца можно перенести датой в уже закрытый и она начнёт незаметно
+  // влиять на расчёт зарплаты за закрытый период (отчёт за него остаётся замороженным снапшотом).
+  const effectiveDate = date ? new Date(date) : existing.date;
+  if (date && await isMonthClosed(effectiveDate)) {
+    return NextResponse.json({ error: 'Целевой месяц закрыт — перенести запись в него нельзя' }, { status: 423 });
+  }
+
+  const amountsError = validateNonNegativeAmounts({ cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue });
+  if (amountsError) return NextResponse.json({ error: amountsError }, { status: 400 });
+
+  // Аптека могла измениться — заведующий может редактировать только свою pending-запись,
+  // но без этой проверки он мог бы переназначить её на чужую аптеку через смену pharmacyId.
+  const effectivePharmacyId = pharmacyId != null ? Number(pharmacyId) : existing.pharmacyId;
+  if (getRequestRole(request) === 'manager') {
+    const allowedIds = await getManagerPharmacyIds(request);
+    if (!allowedIds || !allowedIds.includes(effectivePharmacyId)) {
+      return NextResponse.json({ error: 'Нет доступа к этой аптеке' }, { status: 403 });
+    }
+  }
+
+  const effectiveEmployeeId = employeeId !== undefined ? (employeeId ? Number(employeeId) : null) : existing.employeeId;
+  const effectiveShiftType = shiftType !== undefined ? (shiftType || null) : existing.shiftType;
+  if (effectiveEmployeeId) {
+    const shiftError = await validateShiftEmployeeType(effectiveEmployeeId, effectiveShiftType);
+    if (shiftError) return NextResponse.json({ error: shiftError }, { status: 400 });
+
+    const duplicateError = await validateUniqueShift(effectiveEmployeeId, effectiveDate, effectiveShiftType, id);
+    if (duplicateError) return NextResponse.json({ error: duplicateError }, { status: 409 });
   }
 
   // Скалярные поля записи
