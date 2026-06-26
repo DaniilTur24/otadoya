@@ -89,19 +89,19 @@ export default function OfficePremiumSettingsPage() {
   }
 
   if (loading) {
-    return <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>;
+    return <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>;
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-screen-md">
       <div className="flex items-center gap-3 mb-1">
-        <button onClick={() => router.push('/settings')} className="text-sm text-gray-400 hover:text-gray-600">
+        <button onClick={() => router.push('/settings')} className="text-sm text-slate-400 hover:text-slate-600">
           ← Настройки
         </button>
       </div>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Премия офиса</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Премия офиса</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Таблица диапазонов суммарной выручки <strong>всех аптек</strong> за месяц → премия офисного
         сотрудника. Премия каждого диапазона фиксированная (не накопительная) и начисляется
         каждому офисному сотруднику целиком, без деления на всех. Последнюю строку можно оставить
@@ -119,8 +119,8 @@ export default function OfficePremiumSettingsPage() {
         </div>
       )}
 
-      <form onSubmit={save} className="card p-6 space-y-4">
-        <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-3 text-xs font-medium text-gray-500">
+      <form onSubmit={save} className="card p-4 space-y-3">
+        <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-3 text-xs font-medium text-slate-500">
           <span>От (₸)</span>
           <span>До (₸, необязательно)</span>
           <span>Премия (₸)</span>
@@ -147,14 +147,14 @@ export default function OfficePremiumSettingsPage() {
             <button
               type="button"
               onClick={() => removeTier(t.id)}
-              className="text-gray-300 hover:text-red-500 transition-colors text-lg leading-none"
+              className="text-slate-300 hover:text-red-500 transition-colors text-lg leading-none"
             >
               ×
             </button>
           </div>
         ))}
 
-        <button type="button" onClick={addTier} className="text-sm text-blue-600 hover:underline">
+        <button type="button" onClick={addTier} className="text-sm text-slate-700 hover:underline">
           + Добавить диапазон
         </button>
 

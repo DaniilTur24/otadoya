@@ -163,9 +163,9 @@ export default function EmployeesPage() {
   const inactive = employees.filter((e) => !e.isActive);
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-screen-xl">
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold text-gray-900">Сотрудники</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Сотрудники</h1>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="btn-primary text-sm"
@@ -173,13 +173,13 @@ export default function EmployeesPage() {
           {showForm ? 'Отмена' : '+ Добавить'}
         </button>
       </div>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-slate-500 mb-4">
         Управление сотрудниками: оклад, статус, история смен и расчёт зарплаты.
       </p>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="card p-4 mb-6 space-y-3">
-          <h2 className="font-semibold text-gray-800 text-sm">Новый сотрудник</h2>
+        <form onSubmit={handleCreate} className="card p-3 mb-4 space-y-3">
+          <h2 className="font-semibold text-slate-800 text-sm">Новый сотрудник</h2>
           {error && (
             <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>
           )}
@@ -296,20 +296,20 @@ export default function EmployeesPage() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : (
         <>
           {selectedIds.size > 0 && (
-            <div className="card px-4 py-2 mb-3 bg-blue-50 border-blue-200 flex items-center justify-between">
-              <span className="text-sm text-blue-800">Выбрано: {selectedIds.size}</span>
+            <div className="card px-4 py-2 mb-3 bg-slate-100 border-slate-300 flex items-center justify-between">
+              <span className="text-sm text-slate-900">Выбрано: {selectedIds.size}</span>
               <button className="btn-danger text-xs" onClick={deleteSelected}>
                 Удалить выбранные
               </button>
             </div>
           )}
-          <div className="card divide-y divide-gray-100 mb-4">
+          <div className="card divide-y divide-slate-100 mb-4">
             {active.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-gray-400 text-center">
+              <div className="px-4 py-5 text-sm text-slate-500 text-center">
                 Нет активных сотрудников. Нажмите «+ Добавить».
               </div>
             ) : (
@@ -330,10 +330,10 @@ export default function EmployeesPage() {
 
           {inactive.length > 0 && (
             <>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 mt-6">
+              <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2 mt-4">
                 Неактивные
               </h2>
-              <div className="card divide-y divide-gray-100">
+              <div className="card divide-y divide-slate-100">
                 {inactive.map((emp) => (
                   <EmployeeRow
                     key={emp.id}
@@ -390,7 +390,7 @@ function EmployeeRow({
   }
 
   return (
-    <div className="px-4 py-3 hover:bg-gray-50">
+    <div className="px-3 py-2.5 hover:bg-slate-50">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <input
           type="checkbox"
@@ -399,29 +399,29 @@ function EmployeeRow({
           onChange={() => onToggleSelect(emp.id)}
         />
         <div className="flex-1 min-w-0">
-          <div className={`font-medium ${emp.isActive ? 'text-gray-900' : 'text-gray-400'}`}>
+          <div className={`font-medium ${emp.isActive ? 'text-slate-900' : 'text-slate-400'}`}>
             {emp.name}
-            {!emp.isActive && <span className="ml-2 text-xs text-gray-400">(неактивен)</span>}
+            {!emp.isActive && <span className="ml-2 text-xs text-slate-400">(неактивен)</span>}
           </div>
-          <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
-            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+          <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+            <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
               {EMPLOYEE_TYPE_LABELS[emp.employeeType] ?? emp.employeeType}
             </span>
             {emp.employeeType === 'cleaner' ? (
-              <span>Ставка за смену: <span className="text-gray-600 font-medium">
+              <span>Ставка за смену: <span className="text-slate-600 font-medium">
                 {(emp.shiftRate ?? 0).toLocaleString('ru-RU')} ₸
               </span></span>
             ) : (
-              <span>Оклад: <span className="text-gray-600 font-medium">
+              <span>Оклад: <span className="text-slate-600 font-medium">
                 {emp.baseSalary.toLocaleString('ru-RU')} ₸
               </span></span>
             )}
             {emp.allowance > 0 && (
               <span title={emp.allowanceDescription || undefined}>
-                Доплата: <span className="text-gray-600 font-medium">
+                Доплата: <span className="text-slate-600 font-medium">
                   {emp.allowance.toLocaleString('ru-RU')} ₸
                 </span>
-                {emp.allowanceDescription && <span className="text-gray-400"> ({emp.allowanceDescription})</span>}
+                {emp.allowanceDescription && <span className="text-slate-400"> ({emp.allowanceDescription})</span>}
               </span>
             )}
           </div>
@@ -431,7 +431,7 @@ function EmployeeRow({
               <span className="text-xs text-amber-600">Аптека не привязана</span>
             ) : (
               emp.pharmacies.map((p) => (
-                <span key={p.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                <span key={p.id} className="text-xs bg-slate-100 text-slate-800 border border-slate-300 px-1.5 py-0.5 rounded">
                   {p.name}
                 </span>
               ))
@@ -439,7 +439,7 @@ function EmployeeRow({
             {allPharmacies.length > 0 && (
               <button
                 onClick={openEdit}
-                className="text-xs text-gray-400 hover:text-blue-600 underline ml-1"
+                className="text-xs text-slate-400 hover:text-slate-700 underline ml-1"
               >
                 изменить
               </button>
@@ -449,7 +449,7 @@ function EmployeeRow({
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <Link
             href={`/employees/${emp.id}`}
-            className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50"
+            className="text-xs text-slate-700 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100"
           >
             Зарплата / изменить
           </Link>
@@ -457,15 +457,15 @@ function EmployeeRow({
             onClick={() => onToggle(emp.id, emp.isActive)}
             className={`text-xs font-medium px-2 py-1 rounded transition-colors ${
               emp.isActive
-                ? 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
-                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
+                ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                : 'text-slate-400 hover:text-green-600 hover:bg-green-50'
             }`}
           >
             {emp.isActive ? 'Деактивировать' : 'Активировать'}
           </button>
           <button
             onClick={() => onDelete(emp.id, emp.name)}
-            className="text-xs font-medium px-2 py-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            className="text-xs font-medium px-2 py-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
           >
             Удалить
           </button>
@@ -473,8 +473,8 @@ function EmployeeRow({
       </div>
 
       {editingPharmacies && (
-        <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-md">
-          <p className="text-xs font-medium text-gray-700 mb-2">Аптеки сотрудника:</p>
+        <div className="mt-2 p-3 bg-slate-50 border border-slate-300 rounded">
+          <p className="text-xs font-medium text-slate-700 mb-2">Аптеки сотрудника:</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
             {allPharmacies.map((p) => (
               <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer">

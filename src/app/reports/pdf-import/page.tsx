@@ -56,7 +56,7 @@ function EditableNumber({
         onChange={(e) => onChange(e.target.value)}
         placeholder="0"
       />
-      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+      {hint && <p className="text-xs text-slate-400 mt-1">{hint}</p>}
     </div>
   );
 }
@@ -221,17 +221,17 @@ export default function PdfImportPage() {
   const selectedPharmacy = pharmacies.find((p) => p.id === Number(pharmacyId));
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Импорт PDF-отчётов</h1>
-      <p className="text-sm text-gray-500 mb-6">
+    <div className="max-w-screen-lg">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Импорт PDF-отчётов</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Загрузите ежемесячный сводный PDF-отчёт аптеки. Система автоматически извлечёт
         коэффициент, остатки товара и подставит их в закрытие месяца.
       </p>
 
       {/* ── Шаг 1: загрузка ──────────────────────────────────────────────── */}
       {!preview && (
-        <div className="card p-5 mb-6">
-          <h2 className="font-semibold text-gray-800 mb-4">Загрузить PDF-отчёт</h2>
+        <div className="card p-4 mb-4">
+          <h2 className="font-semibold text-slate-800 mb-3">Загрузить PDF-отчёт</h2>
 
           {saveSuccess && (
             <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
@@ -245,7 +245,7 @@ export default function PdfImportPage() {
             </div>
           )}
 
-          <form onSubmit={handleUpload} className="space-y-4">
+          <form onSubmit={handleUpload} className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="sm:col-span-3">
                 <label className="label">Аптека *</label>
@@ -282,7 +282,7 @@ export default function PdfImportPage() {
                   accept=".pdf"
                   required
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700"
+                  className="input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-slate-100 file:text-slate-800"
                 />
               </div>
             </div>
@@ -295,15 +295,15 @@ export default function PdfImportPage() {
 
       {/* ── Шаг 2: предпросмотр и правка ──────────────────────────────────── */}
       {preview && (
-        <div className={`card p-5 mb-6 ${!preview.confident ? 'border-amber-300 border-2' : 'border-blue-200 border-2'}`}>
-          <div className="flex items-start justify-between mb-4">
+        <div className={`card p-4 mb-4 ${!preview.confident ? 'border-amber-300 border' : 'border-slate-400 border'}`}>
+          <div className="flex items-start justify-between mb-3">
             <div>
-              <h2 className="font-semibold text-gray-800">Проверьте извлечённые данные</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
+              <h2 className="font-semibold text-slate-800">Проверьте извлечённые данные</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
                 {selectedPharmacy?.name} · {MONTH_NAMES[preview.month - 1]} {preview.year}
               </p>
             </div>
-            <button onClick={cancelPreview} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+            <button onClick={cancelPreview} className="text-slate-400 hover:text-slate-600 text-xl">×</button>
           </div>
 
           {existingReport && (
@@ -323,16 +323,16 @@ export default function PdfImportPage() {
           )}
 
           {/* Все найденные значения для справки */}
-          <div className="mb-4 bg-gray-50 rounded-md p-3 text-xs text-gray-500 space-y-1">
+          <div className="mb-4 bg-slate-50 border border-slate-300 rounded p-3 text-xs text-slate-500 space-y-1">
             <div>
               Все найденные «розничным ценам»:{' '}
-              <strong className="text-gray-700">{preview.allRetailValues.map(fmtN).join(' → ')}</strong>
-              <span className="ml-2 text-blue-600">(взято второе)</span>
+              <strong className="text-slate-700">{preview.allRetailValues.map(fmtN).join(' → ')}</strong>
+              <span className="ml-2 text-slate-700">(взято второе)</span>
             </div>
             <div>
               Все найденные «оптовым ценам»:{' '}
-              <strong className="text-gray-700">{preview.allWholesaleValues.map(fmtN).join(' → ')}</strong>
-              <span className="ml-2 text-blue-600">(взято второе)</span>
+              <strong className="text-slate-700">{preview.allWholesaleValues.map(fmtN).join(' → ')}</strong>
+              <span className="ml-2 text-slate-700">(взято второе)</span>
             </div>
           </div>
 
@@ -381,19 +381,19 @@ export default function PdfImportPage() {
       )}
 
       {/* ── Список сохранённых отчётов ─────────────────────────────────── */}
-      <h2 className="font-semibold text-gray-800 mb-3">
+      <h2 className="font-semibold text-slate-800 mb-3">
         Загруженные отчёты
         {savedReports.length > 0 && (
-          <span className="ml-2 text-xs font-normal text-gray-400">({savedReports.length})</span>
+          <span className="ml-2 text-xs font-normal text-slate-400">({savedReports.length})</span>
         )}
       </h2>
 
       {savedReports.length === 0 ? (
-        <div className="card p-6 text-center text-gray-400 text-sm">Отчётов ещё нет</div>
+        <div className="card p-5 text-center text-slate-500 text-sm">Отчётов ещё нет</div>
       ) : (
         <div className="card overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="th">Аптека</th>
                 <th className="th">Период</th>
@@ -403,18 +403,18 @@ export default function PdfImportPage() {
                 <th className="th"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-slate-100">
               {savedReports.map((r) => {
                 const isEditing = editingId === r.id;
                 if (isEditing) {
                   return (
-                    <tr key={r.id} className="bg-blue-50">
+                    <tr key={r.id} className="bg-slate-100">
                       <td className="td font-medium">{r.pharmacy.name}</td>
-                      <td className="td text-gray-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
+                      <td className="td text-slate-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
                       <td className="td">
                         <input
                           type="text"
-                          className="w-full text-right text-xs border border-blue-300 rounded px-1 py-0.5 bg-white"
+                          className="w-full text-right text-xs border border-slate-400 rounded px-1 py-0.5 bg-white"
                           value={editMarkupRow}
                           onChange={(e) => setEditMarkupRow(e.target.value)}
                           placeholder="0"
@@ -423,7 +423,7 @@ export default function PdfImportPage() {
                       <td className="td">
                         <input
                           type="text"
-                          className="w-full text-right text-xs border border-blue-300 rounded px-1 py-0.5 bg-white"
+                          className="w-full text-right text-xs border border-slate-400 rounded px-1 py-0.5 bg-white"
                           value={editRetailRow}
                           onChange={(e) => setEditRetailRow(e.target.value)}
                           placeholder="0"
@@ -432,7 +432,7 @@ export default function PdfImportPage() {
                       <td className="td">
                         <input
                           type="text"
-                          className="w-full text-right text-xs border border-blue-300 rounded px-1 py-0.5 bg-white"
+                          className="w-full text-right text-xs border border-slate-400 rounded px-1 py-0.5 bg-white"
                           value={editWholesaleRow}
                           onChange={(e) => setEditWholesaleRow(e.target.value)}
                           placeholder="0"
@@ -440,14 +440,14 @@ export default function PdfImportPage() {
                       </td>
                       <td className="td text-right whitespace-nowrap">
                         <button
-                          className="text-blue-600 hover:text-blue-800 text-xs font-medium mr-2"
+                          className="text-slate-700 hover:text-slate-900 text-xs font-medium mr-2"
                           onClick={() => handleEditSave(r)}
                           disabled={editSaving}
                         >
                           {editSaving ? 'Сохр...' : 'Сохранить'}
                         </button>
                         <button
-                          className="text-gray-400 hover:text-gray-600 text-xs"
+                          className="text-slate-400 hover:text-slate-600 text-xs"
                           onClick={cancelEdit}
                         >
                           Отмена
@@ -457,15 +457,15 @@ export default function PdfImportPage() {
                   );
                 }
                 return (
-                  <tr key={r.id} className="hover:bg-gray-50">
+                  <tr key={r.id} className="hover:bg-slate-50">
                     <td className="td font-medium">{r.pharmacy.name}</td>
-                    <td className="td text-gray-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
+                    <td className="td text-slate-500">{MONTH_NAMES[r.month - 1]} {r.year}</td>
                     <td className="td text-right">{r.markupPercent != null ? fmtN(r.markupPercent) + '%' : '—'}</td>
                     <td className="td text-right">{fmtN(r.stockRetail)}</td>
                     <td className="td text-right">{fmtN(r.stockWholesale)}</td>
                     <td className="td text-right whitespace-nowrap">
                       <button
-                        className="text-blue-400 hover:text-blue-600 text-xs mr-3"
+                        className="text-slate-400 hover:text-slate-700 text-xs mr-3"
                         onClick={() => startEdit(r)}
                       >
                         Изменить

@@ -241,13 +241,13 @@ export default function AttendancePage() {
 
   return (
     <div className="max-w-full">
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Табель посещаемости</h1>
-      <p className="text-sm text-gray-500 mb-4">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Табель посещаемости</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Клик по ячейке — отметить/снять день. Стрелки перемещают выделение, Shift+стрелка или Shift+клик
         в той же строке — выбрать диапазон дней, появятся кнопки массового действия. Enter/Space — тоггл текущей ячейки, Esc — сбросить диапазон.
       </p>
 
-      <div className="card p-4 mb-4 flex flex-wrap items-end gap-4">
+      <div className="card p-3 mb-4 flex flex-wrap items-end gap-4">
         <div>
           <label className="label">Месяц</label>
           <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
@@ -269,10 +269,10 @@ export default function AttendancePage() {
         </div>
         {hasRange && (
           <div className="ml-auto flex items-center gap-2 text-sm">
-            <span className="text-gray-500">Выделено {rangeDays.length} дн.</span>
+            <span className="text-slate-500">Выделено {rangeDays.length} дн.</span>
             <button type="button" className="btn-primary" disabled={busy} onClick={() => applyRange(true)}>Отметить</button>
             <button type="button" className="btn-secondary" disabled={busy} onClick={() => applyRange(false)}>Снять</button>
-            <button type="button" className="text-gray-400 hover:text-gray-600" onClick={() => setAnchor(selected)}>✕</button>
+            <button type="button" className="text-slate-400 hover:text-slate-600" onClick={() => setAnchor(selected)}>✕</button>
           </div>
         )}
       </div>
@@ -282,9 +282,9 @@ export default function AttendancePage() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : flatEmployees.length === 0 ? (
-        <div className="card p-8 text-center text-gray-400 text-sm">
+        <div className="card p-5 text-center text-slate-500 text-sm">
           Нет сотрудников с типом «Уборщица», «Офис», «Менеджер» или «Заведующая (не торгует)».
         </div>
       ) : (
@@ -292,13 +292,13 @@ export default function AttendancePage() {
           <table className="text-sm border-collapse">
             <thead>
               <tr>
-                <th className="th sticky left-0 bg-white text-left px-3 py-2 min-w-[180px]">Сотрудник</th>
+                <th className="th sticky left-0 bg-slate-200 text-left px-3 py-2 min-w-[180px]">Сотрудник</th>
                 {days.map((d) => {
                   const weekend = isWeekend(year, month, d);
                   return (
-                    <th key={d} className={`th text-center px-1.5 py-2 w-8 ${weekend ? 'bg-gray-50' : ''}`}>
+                    <th key={d} className={`th text-center px-1.5 py-2 w-8 ${weekend ? 'bg-slate-300' : ''}`}>
                       <div>{d}</div>
-                      <div className={`text-[10px] font-normal ${weekend ? 'text-red-400' : 'text-gray-400'}`}>
+                      <div className={`text-[10px] font-normal ${weekend ? 'text-red-500' : 'text-slate-500'}`}>
                         {WEEKDAY_SHORT[new Date(year, month - 1, d).getDay()]}
                       </div>
                     </th>
@@ -311,7 +311,7 @@ export default function AttendancePage() {
               {groups.map((g) => (
                 <Fragment key={g.type}>
                   <tr key={`h-${g.type}`}>
-                    <td colSpan={days.length + 2} className="bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <td colSpan={days.length + 2} className="bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200">
                       {g.label}
                     </td>
                   </tr>
@@ -323,7 +323,7 @@ export default function AttendancePage() {
                       <tr key={emp.id}>
                         <td className="td sticky left-0 bg-white px-3 py-1.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-800">{emp.name}</span>
+                            <span className="text-slate-800">{emp.name}</span>
                             {needsPharmacy && (
                               <select
                                 className="input w-32 text-xs py-0.5"
@@ -350,8 +350,8 @@ export default function AttendancePage() {
                               onClick={(e) => handleCellClick(rowIdx, day, e)}
                               onKeyDown={(e) => handleKeyDown(rowIdx, day, e)}
                               className={[
-                                'text-center px-1.5 py-1.5 cursor-pointer select-none border border-gray-100 outline-none',
-                                marked ? 'bg-green-100 text-green-700' : (weekend ? 'bg-gray-50 text-gray-300' : 'text-gray-300'),
+                                'text-center px-1.5 py-1.5 cursor-pointer select-none border border-slate-200 outline-none',
+                                marked ? 'bg-green-100 text-green-700' : (weekend ? 'bg-slate-50 text-slate-300' : 'text-slate-300'),
                                 isSelected ? 'ring-2 ring-blue-400 ring-inset' : '',
                                 inRange && !isSelected ? 'bg-blue-50' : '',
                               ].join(' ')}
@@ -360,7 +360,7 @@ export default function AttendancePage() {
                             </td>
                           );
                         })}
-                        <td className="td text-center font-medium text-gray-600">{total}</td>
+                        <td className="td text-center font-medium text-slate-600">{total}</td>
                       </tr>
                     );
                   })}

@@ -201,30 +201,30 @@ export default function EmployeeDetailPage() {
   }
 
   if (!employee) {
-    return <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>;
+    return <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>;
   }
 
   const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-screen-lg space-y-4">
       <div className="flex items-center gap-3">
         <button
           onClick={() => router.push('/employees')}
-          className="text-sm text-gray-400 hover:text-gray-600"
+          className="text-sm text-slate-400 hover:text-slate-600"
         >
           ← Сотрудники
         </button>
       </div>
 
       <div>
-        <h1 className="text-xl font-bold text-gray-900">{employee.name}</h1>
-        <p className="text-sm text-gray-500">Профиль сотрудника и расчёт зарплаты</p>
+        <h1 className="text-lg font-semibold text-slate-900">{employee.name}</h1>
+        <p className="text-sm text-slate-500">Профиль сотрудника и расчёт зарплаты</p>
       </div>
 
       {/* Форма редактирования */}
-      <form onSubmit={handleSave} className="card p-5 space-y-4">
-        <h2 className="font-semibold text-gray-800">Данные сотрудника</h2>
+      <form onSubmit={handleSave} className="card p-4 space-y-3">
+        <h2 className="font-semibold text-slate-800">Данные сотрудника</h2>
 
         {saveSuccess && (
           <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">
@@ -256,9 +256,9 @@ export default function EmployeeDetailPage() {
                   type="text"
                   value={EMPLOYEE_TYPE_LABELS[employee.employeeType] ?? employee.employeeType}
                   disabled
-                  className="input bg-gray-50 text-gray-400"
+                  className="input bg-slate-50 text-slate-400"
                 />
-                <p className="text-xs text-gray-400 mt-1">Редактируется на странице «Заведующие и менеджеры» (/users)</p>
+                <p className="text-xs text-slate-400 mt-1">Редактируется на странице «Заведующие и менеджеры» (/users)</p>
               </>
             ) : (
               <select
@@ -294,7 +294,7 @@ export default function EmployeeDetailPage() {
                 min="0"
                 step="1"
                 disabled={USER_LINKED_TYPES.has(employee.employeeType)}
-                className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-gray-50 text-gray-400' : ''}`}
+                className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-slate-50 text-slate-400' : ''}`}
               />
             </div>
           )}
@@ -310,7 +310,7 @@ export default function EmployeeDetailPage() {
               min="0"
               step="1"
               disabled={USER_LINKED_TYPES.has(employee.employeeType)}
-              className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-gray-50 text-gray-400' : ''}`}
+              className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-slate-50 text-slate-400' : ''}`}
             />
           </div>
           <div>
@@ -321,11 +321,11 @@ export default function EmployeeDetailPage() {
               onChange={(e) => setForm((f) => ({ ...f, allowanceDescription: e.target.value }))}
               placeholder="например: за стаж"
               disabled={USER_LINKED_TYPES.has(employee.employeeType)}
-              className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-gray-50 text-gray-400' : ''}`}
+              className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-slate-50 text-slate-400' : ''}`}
             />
           </div>
           {USER_LINKED_TYPES.has(employee.employeeType) && (
-            <p className="text-xs text-gray-400 -mt-2 col-span-2">Редактируется на странице «Заведующие и менеджеры» (/users)</p>
+            <p className="text-xs text-slate-400 -mt-2 col-span-2">Редактируется на странице «Заведующие и менеджеры» (/users)</p>
           )}
         </div>
 
@@ -335,9 +335,9 @@ export default function EmployeeDetailPage() {
             id="isActive"
             checked={form.isActive}
             onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-            className="rounded border-gray-300"
+            className="rounded border-slate-300"
           />
-          <label htmlFor="isActive" className="text-sm text-gray-700">Активен</label>
+          <label htmlFor="isActive" className="text-sm text-slate-700">Активен</label>
         </div>
 
         {pharmacies.length > 0 && (
@@ -348,14 +348,14 @@ export default function EmployeeDetailPage() {
                 <button
                   type="button"
                   onClick={() => setEditingPharmacies(true)}
-                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  className="text-xs text-slate-700 hover:text-slate-900 underline"
                 >
                   изменить
                 </button>
               )}
             </div>
             {editingPharmacies ? (
-              <div className="mt-1 p-3 bg-gray-50 border border-gray-200 rounded-md">
+              <div className="mt-1 p-3 bg-slate-50 border border-slate-300 rounded">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
                   {pharmacies.map((p) => (
                     <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -412,7 +412,7 @@ export default function EmployeeDetailPage() {
                   <span className="text-sm text-amber-600">Аптека не привязана</span>
                 ) : (
                   employee?.pharmacies?.map((p) => (
-                    <span key={p.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                    <span key={p.id} className="text-xs bg-slate-100 text-slate-800 border border-slate-300 px-1.5 py-0.5 rounded">
                       {p.name}
                     </span>
                   ))
@@ -430,8 +430,8 @@ export default function EmployeeDetailPage() {
       </form>
 
       {/* Расчёт зарплаты */}
-      <div className="card p-5 space-y-4">
-        <h2 className="font-semibold text-gray-800">Расчёт зарплаты за месяц</h2>
+      <div className="card p-4 space-y-3">
+        <h2 className="font-semibold text-slate-800">Расчёт зарплаты за месяц</h2>
 
         <div className="grid grid-cols-3 gap-3">
           <div>
@@ -473,7 +473,7 @@ export default function EmployeeDetailPage() {
         </div>
 
         {salaryLoading ? (
-          <div className="text-sm text-gray-400 py-4 text-center">Расчёт...</div>
+          <div className="text-sm text-slate-400 py-4 text-center">Расчёт...</div>
         ) : salary && (
             salary.recordsCount > 0 ||
             salary.advances.length > 0 ||
@@ -488,38 +488,38 @@ export default function EmployeeDetailPage() {
               const isOffice = salary.employeeType === 'office';
               const isSeller = salary.employeeType === 'seller';
               return (
-                <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+                <div className="bg-slate-50 border border-slate-300 rounded p-3 space-y-2 text-sm">
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
                     {isCleaner ? (
                       <>
-                        <span className="text-gray-500">Ставка за смену</span>
+                        <span className="text-slate-500">Ставка за смену</span>
                         <span className="font-medium text-right">{fmt(salary.shiftRate ?? 0)} ₸</span>
 
-                        <span className="text-gray-500">Отработано смен</span>
+                        <span className="text-slate-500">Отработано смен</span>
                         <span className="font-medium text-right">
                           {salary.attendanceShiftsCount} × {fmt(salary.shiftRate ?? 0)} = {fmt(salary.salaryFromShiftRate)} ₸
                         </span>
                       </>
                     ) : (
                       <>
-                        <span className="text-gray-500">Оклад</span>
+                        <span className="text-slate-500">Оклад</span>
                         <span className="font-medium text-right">{fmt(salary.baseSalary)} ₸</span>
 
                         {!isAttendanceBased && (
                           <>
-                            <span className="text-gray-500">Дневных смен</span>
+                            <span className="text-slate-500">Дневных смен</span>
                             <span className="font-medium text-right">
                               {salary.dayShiftsCount} × {fmt(salary.baseSalary / 15)} = {fmt(salary.salaryFromDayShifts)} ₸
                             </span>
 
-                            <span className="text-gray-500">Суточных смен</span>
+                            <span className="text-slate-500">Суточных смен</span>
                             <span className="font-medium text-right">
                               {salary.fullDayShiftsCount} × {fmt(salary.baseSalary / 10)} = {fmt(salary.salaryFromFullDayShifts)} ₸
                             </span>
                           </>
                         )}
 
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                           {isAttendanceBased ? 'Смен по табелю' : 'Пятидневных смен'}
                         </span>
                         <span className="font-medium text-right">
@@ -528,7 +528,7 @@ export default function EmployeeDetailPage() {
                           ) : salary.fiveDayShiftsCount > 0 ? (
                             <span className="text-amber-600">{salary.fiveDayShiftsCount} смен — календарь не заполнен</span>
                           ) : (
-                            <span className="text-gray-300">0</span>
+                            <span className="text-slate-300">0</span>
                           )}
                         </span>
                       </>
@@ -536,14 +536,14 @@ export default function EmployeeDetailPage() {
 
                     {!isAttendanceBased && !isCleaner && (
                       <>
-                        <span className="text-gray-500">Бонусы</span>
+                        <span className="text-slate-500">Бонусы</span>
                         <span className="font-medium text-right">{fmt(salary.totalBonuses)} ₸</span>
                       </>
                     )}
 
                     {isSeller && (
                       <>
-                        <span className="text-gray-500">Премия по выручке</span>
+                        <span className="text-slate-500">Премия по выручке</span>
                         <span className={`font-medium text-right ${salary.totalRevenuePremium < 0 ? 'text-red-600' : ''}`}>
                           {fmt(salary.totalRevenuePremium)} ₸
                         </span>
@@ -552,12 +552,12 @@ export default function EmployeeDetailPage() {
 
                     {isManager && (
                       <>
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                           10% от бонусов аптеки ({fmt(salary.managedBonusTotal)} ₸)
                         </span>
                         <span className="font-medium text-right">{fmt(salary.managerBonusShare)} ₸</span>
 
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                           Премия по выручке аптеки ({fmt(salary.managedRevenueTotal)} ₸)
                         </span>
                         <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
@@ -568,7 +568,7 @@ export default function EmployeeDetailPage() {
 
                     {isOffice && (
                       <>
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                           Премия от выручки всех аптек ({fmt(salary.managedRevenueTotal)} ₸)
                         </span>
                         <span className="font-medium text-right">{fmt(salary.managerLadderPremium)} ₸</span>
@@ -578,7 +578,7 @@ export default function EmployeeDetailPage() {
                     {isPharmacyManager && (
                       salary.managerPremiumEnabled ? (
                         <>
-                          <span className="text-gray-500">
+                          <span className="text-slate-500">
                             Премия по выручке аптеки ({fmt(salary.managedRevenueTotal)} ₸)
                           </span>
                           <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
@@ -587,15 +587,15 @@ export default function EmployeeDetailPage() {
                         </>
                       ) : (
                         <>
-                          <span className="text-gray-500">Премия</span>
-                          <span className="text-right text-gray-400">Выключена</span>
+                          <span className="text-slate-500">Премия</span>
+                          <span className="text-right text-slate-400">Выключена</span>
                         </>
                       )
                     )}
 
                     {salary.allowance > 0 && (
                       <>
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                           Доплата{salary.allowanceDescription ? ` (${salary.allowanceDescription})` : ''}
                         </span>
                         <span className="font-medium text-right">{fmt(salary.allowance)} ₸</span>
@@ -604,23 +604,23 @@ export default function EmployeeDetailPage() {
 
                     {salary.totalAdvances > 0 && (
                       <>
-                        <span className="text-gray-500">Авансы</span>
+                        <span className="text-slate-500">Авансы</span>
                         <span className="font-medium text-right text-red-600">−{fmt(salary.totalAdvances)} ₸</span>
                       </>
                     )}
 
-                    <div className="col-span-2 border-t border-gray-200 my-1" />
+                    <div className="col-span-2 border-t border-slate-200 my-1" />
 
-                    <span className="font-semibold text-gray-800">Итого зарплата</span>
-                    <span className={`font-bold text-right text-base ${salary.totalSalary < 0 ? 'text-red-700' : 'text-blue-700'}`}>{fmt(salary.totalSalary)} ₸</span>
+                    <span className="font-semibold text-slate-800">Итого зарплата</span>
+                    <span className={`font-bold text-right text-base ${salary.totalSalary < 0 ? 'text-red-700' : 'text-slate-800'}`}>{fmt(salary.totalSalary)} ₸</span>
 
                     {!isAttendanceBased && (
                       <>
-                        <span className="text-gray-500 text-xs">Записей выручки</span>
-                        <span className="text-right text-xs text-gray-500">{salary.recordsCount}</span>
+                        <span className="text-slate-500 text-xs">Записей выручки</span>
+                        <span className="text-right text-xs text-slate-500">{salary.recordsCount}</span>
 
-                        <span className="text-gray-500 text-xs">Выручка аптеки</span>
-                        <span className="text-right text-xs text-gray-500">{fmt(salary.revenueTotal)} ₸</span>
+                        <span className="text-slate-500 text-xs">Выручка аптеки</span>
+                        <span className="text-right text-xs text-slate-500">{fmt(salary.revenueTotal)} ₸</span>
                       </>
                     )}
                   </div>
@@ -631,9 +631,9 @@ export default function EmployeeDetailPage() {
             {/* Детализация смен (продавцы и торгующие заведующие) */}
             {!ATTENDANCE_BASED_TYPES.has(salary.employeeType) && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Смены за период</h3>
-              <div className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
-                <div className="grid text-xs text-gray-400 font-medium px-3 py-1.5 bg-gray-50"
+              <h3 className="text-sm font-semibold text-slate-700 mb-2">Смены за период</h3>
+              <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
+                <div className="grid text-xs text-slate-400 font-medium px-3 py-1.5 bg-slate-50"
                   style={{ gridTemplateColumns: '6rem 1fr 6rem 5rem 5rem' }}>
                   <span>Дата</span>
                   <span>Аптека</span>
@@ -644,32 +644,32 @@ export default function EmployeeDetailPage() {
                 {salary.shifts.map((s) => (
                   <div
                     key={s.id}
-                    className="grid text-sm px-3 py-2 hover:bg-gray-50"
+                    className="grid text-sm px-3 py-2 hover:bg-slate-50"
                     style={{ gridTemplateColumns: '6rem 1fr 6rem 5rem 5rem' }}
                   >
-                    <span className="text-gray-600">
+                    <span className="text-slate-600">
                       {new Date(s.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
                     </span>
-                    <span className="text-gray-800 truncate pr-2">{s.pharmacyName}</span>
+                    <span className="text-slate-800 truncate pr-2">{s.pharmacyName}</span>
                     <span>
                       {s.shiftType ? (
                         <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                           s.shiftType === 'full_day'
-                            ? 'bg-purple-50 text-purple-700'
+                            ? 'bg-slate-200 text-slate-800'
                             : s.shiftType === 'five_day'
                             ? 'bg-green-50 text-green-700'
-                            : 'bg-blue-50 text-blue-700'
+                            : 'bg-slate-100 text-slate-800'
                         }`}>
                           {SHIFT_TYPE_LABELS[s.shiftType] ?? s.shiftType}
                         </span>
                       ) : (
-                        <span className="text-xs text-gray-300">—</span>
+                        <span className="text-xs text-slate-300">—</span>
                       )}
                     </span>
-                    <span className="text-right text-gray-600">
+                    <span className="text-right text-slate-600">
                       {fmt(s.cashRevenue + s.terminalRevenue + s.kaspiRevenue)}
                     </span>
-                    <span className={`text-right font-medium ${s.bonusRevenue > 0 ? 'text-green-700' : 'text-gray-300'}`}>
+                    <span className={`text-right font-medium ${s.bonusRevenue > 0 ? 'text-green-700' : 'text-slate-300'}`}>
                       {s.bonusRevenue > 0 ? fmt(s.bonusRevenue) : '—'}
                     </span>
                   </div>
@@ -681,12 +681,12 @@ export default function EmployeeDetailPage() {
             {/* Табель посещаемости (manager_fixed / cleaner / office) */}
             {ATTENDANCE_BASED_TYPES.has(salary.employeeType) && (
               <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Табель посещаемости за период</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-2">Табель посещаемости за период</h3>
                 {salary.attendance.length === 0 ? (
-                  <div className="text-sm text-gray-400 py-2">Нет отметок за этот месяц.</div>
+                  <div className="text-sm text-slate-400 py-2">Нет отметок за этот месяц.</div>
                 ) : (
-                  <div className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
-                    <div className="grid text-xs text-gray-400 font-medium px-3 py-1.5 bg-gray-50"
+                  <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
+                    <div className="grid text-xs text-slate-400 font-medium px-3 py-1.5 bg-slate-50"
                       style={{ gridTemplateColumns: '6rem 1fr' }}>
                       <span>Дата</span>
                       <span>Аптека</span>
@@ -694,13 +694,13 @@ export default function EmployeeDetailPage() {
                     {salary.attendance.map((a) => (
                       <div
                         key={a.id}
-                        className="grid text-sm px-3 py-2 hover:bg-gray-50"
+                        className="grid text-sm px-3 py-2 hover:bg-slate-50"
                         style={{ gridTemplateColumns: '6rem 1fr' }}
                       >
-                        <span className="text-gray-600">
+                        <span className="text-slate-600">
                           {new Date(a.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
                         </span>
-                        <span className="text-gray-800">{a.pharmacyName ?? '—'}</span>
+                        <span className="text-slate-800">{a.pharmacyName ?? '—'}</span>
                       </div>
                     ))}
                   </div>
@@ -711,9 +711,9 @@ export default function EmployeeDetailPage() {
             {/* Авансы */}
             {salary.advances.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Авансы за период</h3>
-                <div className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
-                  <div className="grid text-xs text-gray-400 font-medium px-3 py-1.5 bg-gray-50"
+                <h3 className="text-sm font-semibold text-slate-700 mb-2">Авансы за период</h3>
+                <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
+                  <div className="grid text-xs text-slate-400 font-medium px-3 py-1.5 bg-slate-50"
                     style={{ gridTemplateColumns: '6rem 1fr 6rem' }}>
                     <span>Дата</span>
                     <span>Аптека / комментарий</span>
@@ -722,15 +722,15 @@ export default function EmployeeDetailPage() {
                   {salary.advances.map((a) => (
                     <div
                       key={a.id}
-                      className="grid text-sm px-3 py-2 hover:bg-gray-50"
+                      className="grid text-sm px-3 py-2 hover:bg-slate-50"
                       style={{ gridTemplateColumns: '6rem 1fr 6rem' }}
                     >
-                      <span className="text-gray-600">
+                      <span className="text-slate-600">
                         {new Date(a.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
                       </span>
-                      <span className="text-gray-800 truncate pr-2">
+                      <span className="text-slate-800 truncate pr-2">
                         {a.pharmacyName}
-                        {a.comment && <span className="text-gray-400"> — {a.comment}</span>}
+                        {a.comment && <span className="text-slate-400"> — {a.comment}</span>}
                       </span>
                       <span className="text-right font-medium text-red-600">−{fmt(a.amount)}</span>
                     </div>
@@ -740,7 +740,7 @@ export default function EmployeeDetailPage() {
             )}
           </>
         ) : (
-          <div className="text-sm text-gray-400 py-4 text-center">
+          <div className="text-sm text-slate-400 py-4 text-center">
             Нет записей со связанным сотрудником за {MONTHS[month - 1].toLowerCase()} {year}.
           </div>
         )}

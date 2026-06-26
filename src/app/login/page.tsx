@@ -35,16 +35,16 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-slate-100">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Аптека Учёт</h1>
-          <p className="text-sm text-gray-500 mt-1">Введите данные для входа</p>
+        <div className="text-center mb-6">
+          <h1 className="text-lg font-bold text-slate-900 tracking-wide">Аптека Учёт</h1>
+          <p className="text-xs text-slate-500 mt-1">Введите данные для входа</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="card p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="card p-4 space-y-3">
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+            <div className="p-2 bg-red-50 border border-red-300 rounded text-red-700 text-sm">
               {error}
             </div>
           )}
