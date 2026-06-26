@@ -292,7 +292,7 @@ export default function AttendancePage() {
           <table className="text-sm border-collapse">
             <thead>
               <tr>
-                <th className="th sticky left-0 bg-slate-200 text-left px-3 py-2 min-w-[180px]">Сотрудник</th>
+                <th className="th sticky left-0 z-20 bg-slate-200 text-left px-3 py-2 min-w-[180px]">Сотрудник</th>
                 {days.map((d) => {
                   const weekend = isWeekend(year, month, d);
                   return (
