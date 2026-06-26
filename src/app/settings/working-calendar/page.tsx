@@ -53,18 +53,18 @@ export default function WorkingCalendarPage() {
   }
 
   return (
-    <div className="max-w-lg">
+    <div className="max-w-screen-md">
       <div className="flex items-center gap-3 mb-1">
         <button
           onClick={() => router.push('/settings')}
-          className="text-sm text-gray-400 hover:text-gray-600"
+          className="text-sm text-slate-400 hover:text-slate-600"
         >
           ← Настройки
         </button>
       </div>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Производственный календарь</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Производственный календарь</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Количество рабочих дней по месяцам — используется при расчёте зарплаты для смены <strong>Пятидневная</strong>.<br />
         Формула: оклад ÷ рабочие дни в месяце × отработанные дни.
       </p>
@@ -84,9 +84,9 @@ export default function WorkingCalendarPage() {
       </div>
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : (
-        <div className="card divide-y divide-gray-100">
+        <div className="card divide-y divide-slate-100">
           {MONTHS.map((name, i) => {
             const month = i + 1;
             const days = entries[month] ?? '';
@@ -94,7 +94,7 @@ export default function WorkingCalendarPage() {
             const isSaved = savedMonths.has(month);
             return (
               <div key={month} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="text-sm text-gray-700 w-24 shrink-0">{name}</span>
+                <span className="text-sm text-slate-700 w-24 shrink-0">{name}</span>
                 <input
                   type="number"
                   value={days}
@@ -105,7 +105,7 @@ export default function WorkingCalendarPage() {
                   placeholder="—"
                   className="input w-20 text-center"
                 />
-                <span className="text-xs text-gray-400 shrink-0">раб. дней</span>
+                <span className="text-xs text-slate-400 shrink-0">раб. дней</span>
                 <button
                   onClick={() => saveMonth(month)}
                   disabled={isSaving || !entries[month]}

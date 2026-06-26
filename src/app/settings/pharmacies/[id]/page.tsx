@@ -91,20 +91,20 @@ export default function PharmacyEditPage() {
   }
 
   if (loading) {
-    return <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>;
+    return <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>;
   }
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-screen-md">
       {/* Навигация */}
-      <div className="flex items-center gap-2 text-sm text-gray-400 mb-5">
-        <Link href="/settings" className="hover:text-gray-600">Настройки</Link>
+      <div className="flex items-center gap-2 text-sm text-slate-400 mb-5">
+        <Link href="/settings" className="hover:text-slate-600">Настройки</Link>
         <span>/</span>
-        <span className="text-gray-700 font-medium">{original?.name}</span>
+        <span className="text-slate-700 font-medium">{original?.name}</span>
       </div>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-1">{original?.name}</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">{original?.name}</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Редактирование параметров аптеки.
       </p>
 
@@ -119,7 +119,7 @@ export default function PharmacyEditPage() {
         </div>
       )}
 
-      <form onSubmit={save} className="card p-6 space-y-5">
+      <form onSubmit={save} className="card p-4 space-y-3">
         {/* Название */}
         <div>
           <label className="label">Название аптеки *</label>
@@ -132,10 +132,10 @@ export default function PharmacyEditPage() {
           />
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-gray-700">
+        <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
-            className="w-4 h-4 accent-blue-600"
+            className="w-4 h-4 accent-slate-700"
             checked={form.isActive}
             onChange={(e) => set('isActive', e.target.checked)}
           />
@@ -146,7 +146,7 @@ export default function PharmacyEditPage() {
         <div>
           <label className="label">
             Старые ключевые слова для авто-привязки
-            <span className="ml-1 text-gray-400 font-normal text-xs">(через запятую)</span>
+            <span className="ml-1 text-slate-400 font-normal text-xs">(через запятую)</span>
           </label>
           <input
             type="text"
@@ -155,15 +155,15 @@ export default function PharmacyEditPage() {
             value={form.keywords}
             onChange={(e) => set('keywords', e.target.value)}
           />
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-slate-400 mt-1">
             Для нового банковского импорта используйте страницу «Алиасы аптек».
           </p>
         </div>
 
         {/* Заведующие: лестница премии */}
-        <div className="border-t border-gray-100 pt-4">
-          <h2 className="text-sm font-semibold text-gray-700 mb-1">Премия заведующих этой аптеки</h2>
-          <p className="text-xs text-gray-400 mb-3">
+        <div className="border-t border-slate-100 pt-4">
+          <h2 className="text-sm font-semibold text-slate-700 mb-1">Премия заведующих этой аптеки</h2>
+          <p className="text-xs text-slate-400 mb-3">
             Применяется и к торгующей, и к не торгующей заведующей одинаково. Лестница: при выручке аптеки
             за месяц от «порога» выдаётся «премия за порог», далее за каждые «шаг выручки» сверху добавляется «шаг премии».
             Фиксированная доплата сотруднику теперь настраивается в его карточке (раздел «Сотрудники» / «Заведующие и менеджеры»),

@@ -55,19 +55,19 @@ export default function OfficePremiumSettingsPage() {
   }
 
   if (loading) {
-    return <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>;
+    return <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>;
   }
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-screen-md">
       <div className="flex items-center gap-3 mb-1">
-        <button onClick={() => router.push('/settings')} className="text-sm text-gray-400 hover:text-gray-600">
+        <button onClick={() => router.push('/settings')} className="text-sm text-slate-400 hover:text-slate-600">
           ← Настройки
         </button>
       </div>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Премия офиса</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Премия офиса</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Единая лестница премии для офисных сотрудников от суммарной выручки <strong>всех аптек</strong> за месяц.
         При выручке от «порога» выдаётся «премия за порог», далее за каждые «шаг выручки» сверху
         добавляется «шаг премии».
@@ -79,7 +79,7 @@ export default function OfficePremiumSettingsPage() {
         </div>
       )}
 
-      <form onSubmit={save} className="card p-6 space-y-5">
+      <form onSubmit={save} className="card p-4 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="label">Порог выручки всех аптек (₸)</label>

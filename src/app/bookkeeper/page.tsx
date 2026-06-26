@@ -119,8 +119,8 @@ export default function BookkeeperPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Проверка записей выручки</h1>
-      <p className="text-gray-500 text-sm mb-4">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Проверка записей выручки</h1>
+      <p className="text-slate-500 text-sm mb-4">
         Подтвердите, отклоните или отредактируйте записи от сотрудников аптек.
       </p>
 
@@ -130,10 +130,10 @@ export default function BookkeeperPage() {
           <button
             key={key}
             onClick={() => setStatusFilter(key)}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${
+            className={`px-2.5 py-1 rounded text-sm font-medium border transition-colors ${
               statusFilter === key
-                ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                ? 'bg-slate-700 text-white border-slate-700'
+                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
             }`}
           >
             {label}
@@ -142,16 +142,16 @@ export default function BookkeeperPage() {
       </div>
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : entries.length === 0 ? (
-        <div className="card p-8 text-center text-gray-400 text-sm">
+        <div className="card p-5 text-center text-slate-500 text-sm">
           Нет записей
         </div>
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th">Дата</th>
                   <th className="th">Аптека</th>
@@ -164,10 +164,10 @@ export default function BookkeeperPage() {
                   <th className="th">Действия</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {entries.map((entry) => (
                   <>
-                    <tr key={entry.id} className={editingId === entry.id ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                    <tr key={entry.id} className={editingId === entry.id ? 'bg-slate-100' : 'hover:bg-slate-50'}>
                       <td className="td">{fmtDate(entry.date)}</td>
                       <td className="td font-medium">{entry.pharmacy.name}</td>
 
@@ -218,7 +218,7 @@ export default function BookkeeperPage() {
                       <td className="td">
                         <div>{entry.employeeName}</div>
                         {entry.expenseComment && (
-                          <div className="text-xs text-gray-400 mt-0.5">{entry.expenseComment}</div>
+                          <div className="text-xs text-slate-400 mt-0.5">{entry.expenseComment}</div>
                         )}
                       </td>
                       <td className="td">
@@ -265,10 +265,10 @@ export default function BookkeeperPage() {
 
                     {/* Расширенная строка: комментарий бухгалтера */}
                     {entry.status === 'pending' && editingId !== entry.id && (
-                      <tr key={`${entry.id}-comment`} className="bg-gray-50">
+                      <tr key={`${entry.id}-comment`} className="bg-slate-50">
                         <td colSpan={9} className="px-4 py-2">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 shrink-0">Комментарий бухгалтера:</span>
+                            <span className="text-xs text-slate-500 shrink-0">Комментарий бухгалтера:</span>
                             <input
                               type="text"
                               className="input flex-1 text-xs py-1"
@@ -280,7 +280,7 @@ export default function BookkeeperPage() {
                             />
                           </div>
                           {entry.generalComment && (
-                            <div className="text-xs text-gray-400 mt-1">
+                            <div className="text-xs text-slate-400 mt-1">
                               Комментарий сотрудника: {entry.generalComment}
                             </div>
                           )}
@@ -290,8 +290,8 @@ export default function BookkeeperPage() {
 
                     {/* Строка с комментарием для подтверждённых/отклонённых */}
                     {entry.status !== 'pending' && (entry.bookkeeperComment || entry.generalComment) && (
-                      <tr key={`${entry.id}-notes`} className="bg-gray-50">
-                        <td colSpan={9} className="px-4 py-1.5 text-xs text-gray-500 space-y-0.5">
+                      <tr key={`${entry.id}-notes`} className="bg-slate-50">
+                        <td colSpan={9} className="px-4 py-1.5 text-xs text-slate-500 space-y-0.5">
                           {entry.bookkeeperComment && (
                             <div>Комментарий бухгалтера: {entry.bookkeeperComment}</div>
                           )}

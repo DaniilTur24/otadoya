@@ -18,7 +18,7 @@ export default function RootLayout({
       <body>
         <AuthGuard />
         <Navigation />
-        <main className="max-w-screen-2xl mx-auto px-4 py-6">{children}</main>
+        <main className="max-w-screen-2xl mx-auto px-3 py-3">{children}</main>
       </body>
     </html>
   );

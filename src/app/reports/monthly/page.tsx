@@ -58,7 +58,7 @@ function Cell({
   }
 
   if (locked) {
-    const lockedColor = displayValue === 0 ? 'text-gray-200' : rowType === 'income' ? 'text-green-700' : rowType === 'expense' ? 'text-red-600' : '';
+    const lockedColor = displayValue === 0 ? 'text-slate-200' : rowType === 'income' ? 'text-green-700' : rowType === 'expense' ? 'text-red-600' : '';
     return (
       <td className="px-2 py-1.5 text-right tabular-nums">
         <span className={lockedColor}>{displayValue === 0 ? '—' : fmtN(displayValue, decimals)}</span>
@@ -68,11 +68,11 @@ function Cell({
 
   if (editing) {
     return (
-      <td className="px-1 py-0.5 bg-blue-50">
+      <td className="px-1 py-0.5 bg-slate-100">
         <input
           ref={inputRef}
           type="text"
-          className="w-full text-right text-xs border border-blue-400 rounded px-1 py-0.5 outline-none bg-white"
+          className="w-full text-right text-xs border border-slate-400 rounded px-1 py-0.5 outline-none bg-white"
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
           onBlur={commit}
@@ -93,7 +93,7 @@ function Cell({
   return (
     <td
       className={`px-2 py-1.5 text-right tabular-nums group cursor-pointer select-none ${
-        isOverridden ? 'bg-yellow-50' : displayValue === 0 ? 'text-gray-200' : ''
+        isOverridden ? 'bg-yellow-50' : displayValue === 0 ? 'text-slate-200' : ''
       }`}
       onClick={startEdit}
       title={isOverridden ? `Изменено вручную. Системное: ${fmtN(systemValue, decimals) || '0'}` : 'Нажмите для редактирования'}
@@ -101,7 +101,7 @@ function Cell({
       <div className="flex items-center justify-end gap-1">
         {isOverridden && (
           <button
-            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity text-xs leading-none"
+            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity text-xs leading-none"
             title="Сбросить к системному значению"
             onMouseDown={(e) => { e.stopPropagation(); onReset(pharmacyId, fieldKey); }}
           >
@@ -268,15 +268,15 @@ export default function MonthlyReportPage() {
   return (
     <div>
       <div className="flex items-center gap-4 mb-1 flex-wrap">
-        <h1 className="text-xl font-bold text-gray-900">Закрытие месяца</h1>
-        {saving && <span className="text-xs text-blue-500">Сохранение...</span>}
+        <h1 className="text-lg font-semibold text-slate-900">Закрытие месяца</h1>
+        {saving && <span className="text-xs text-slate-700">Сохранение...</span>}
       </div>
-      <p className="text-gray-500 text-sm mb-5">
+      <p className="text-slate-500 text-sm mb-5">
         Нажмите на любую ячейку чтобы изменить значение. Кнопка <strong>↩</strong> сбрасывает ячейку к системному значению.
       </p>
 
       {/* Фильтр + действия */}
-      <div className="card p-4 mb-5 flex flex-wrap gap-4 items-end">
+      <div className="card p-3 mb-4 flex flex-wrap gap-3 items-end">
         <div>
           <label className="label">Месяц</label>
           <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
@@ -290,7 +290,7 @@ export default function MonthlyReportPage() {
           <input type="number" className="input w-24" value={year} min={2020} max={2099}
             onChange={(e) => setYear(Number(e.target.value))} />
         </div>
-        <div className="pb-0.5 text-sm text-gray-600 font-medium">
+        <div className="pb-0.5 text-sm text-slate-600 font-medium">
           {MONTH_NAMES[month - 1]} {year}
         </div>
         <div className="ml-auto flex items-center gap-3 flex-wrap">
@@ -306,7 +306,7 @@ export default function MonthlyReportPage() {
           )}
           {isClosed ? (
             <button
-              className="text-xs px-3 py-1.5 rounded border bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+              className="text-xs px-3 py-1.5 rounded border bg-white text-slate-600 border-slate-300 hover:border-slate-400"
               onClick={reopenMonth}
               disabled={closing}
             >
@@ -325,7 +325,7 @@ export default function MonthlyReportPage() {
       </div>
 
       {isClosed && closedAt && (
-        <div className="mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
+        <div className="mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded flex items-center gap-3">
           <span className="text-green-700 text-sm font-medium">
             Месяц закрыт {new Date(closedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
           </span>
@@ -334,31 +334,31 @@ export default function MonthlyReportPage() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse">
               <thead>
-                <tr className="bg-gray-800 text-white">
-                  <th className="px-3 py-2 text-left font-medium sticky left-0 bg-gray-800 z-10 min-w-[220px]">
+                <tr className="bg-slate-200 text-slate-800">
+                  <th className="px-3 py-1.5 text-left font-semibold sticky left-0 bg-slate-200 z-10 min-w-[220px] border-b border-r border-slate-300">
                     Показатель
                   </th>
                   {pharmacies.map((p) => (
-                    <th key={p.id} className="px-2 py-2 text-right font-medium whitespace-nowrap min-w-[90px]">
+                    <th key={p.id} className="px-2 py-1.5 text-right font-semibold whitespace-nowrap min-w-[90px] border-b border-r border-slate-300">
                       {p.name.replace('Аптека ', '').replace(' — ', ' ')}
                     </th>
                   ))}
-                  <th className="px-2 py-2 text-right font-bold bg-gray-700 min-w-[100px]">ИТОГО</th>
+                  <th className="px-2 py-1.5 text-right font-bold bg-slate-300 border-b border-slate-400 min-w-[100px]">ИТОГО</th>
                 </tr>
               </thead>
               <tbody>
                 {MONTHLY_REPORT_ROWS.map((row) => {
                   if (row.section) {
                     return (
-                      <tr key={row.key} className="bg-gray-100">
+                      <tr key={row.key} className="bg-slate-100">
                         <td colSpan={pharmacies.length + 2}
-                          className="px-3 py-1.5 font-bold text-gray-600 uppercase tracking-wide text-xs sticky left-0 bg-gray-100">
+                          className="px-3 py-1.5 font-bold text-slate-600 uppercase tracking-wide text-xs sticky left-0 bg-slate-100">
                           {row.label}
                         </td>
                       </tr>
@@ -370,9 +370,9 @@ export default function MonthlyReportPage() {
                   const isSummaryRow = row.key === 'totalExpenses' || row.key === 'netIncome';
 
                   // Цвет колонки ИТОГО
-                  let totalCellClass = 'text-gray-800';
+                  let totalCellClass = 'text-slate-800';
                   if (total === 0) {
-                    totalCellClass = 'text-gray-300';
+                    totalCellClass = 'text-slate-300';
                   } else if (row.rowType === 'income') {
                     totalCellClass = 'text-green-700 font-semibold';
                   } else if (row.rowType === 'expense') {
@@ -384,11 +384,11 @@ export default function MonthlyReportPage() {
                   }
 
                   return (
-                    <tr key={row.key} className={`border-b border-gray-100 ${isSummaryRow ? 'bg-gray-50' : ''}`}>
+                    <tr key={row.key} className={`border-b border-slate-200 ${isSummaryRow ? 'bg-slate-50' : ''}`}>
                       {/* Название + настройка типа */}
-                      <td className={`px-3 py-1.5 sticky left-0 bg-white border-r border-gray-200 ${
-                        isSummaryRow ? 'bg-gray-50' : ''
-                      } ${row.bold ? 'font-semibold text-gray-800' : 'text-gray-700'} ${row.indent ? 'pl-6' : ''}`}>
+                      <td className={`px-3 py-1.5 sticky left-0 bg-white border-r border-slate-300 ${
+                        isSummaryRow ? 'bg-slate-50' : ''
+                      } ${row.bold ? 'font-semibold text-slate-800' : 'text-slate-700'} ${row.indent ? 'pl-6' : ''}`}>
                         {row.label}
                       </td>
 
@@ -413,7 +413,7 @@ export default function MonthlyReportPage() {
                       })}
 
                       {/* ИТОГО */}
-                      <td className={`px-2 py-1.5 text-right tabular-nums border-l border-gray-200 ${totalCellClass}`}>
+                      <td className={`px-2 py-1.5 text-right tabular-nums border-l border-slate-300 ${totalCellClass}`}>
                         {total === 0 ? '—' : fmtN(total, row.decimals)}
                       </td>
                     </tr>

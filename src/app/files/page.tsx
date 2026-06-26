@@ -114,18 +114,18 @@ export default function FilesPage() {
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-1">
-        <h1 className="text-xl font-bold text-gray-900">Загрузка банковской выписки</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Загрузка банковской выписки</h1>
         <Link href="/reports/monthly" className="btn-secondary text-xs">
           Закрытие месяца
         </Link>
       </div>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-slate-500 mb-4">
         Загрузите Excel со списком банковских транзакций. Система применит правила, алиасы аптек и отправит строки на проверку.
       </p>
 
-      <div className="card p-5 mb-6">
-        <h2 className="font-semibold text-gray-800 mb-4">Новый импорт</h2>
-        <form onSubmit={upload} className="space-y-4">
+      <div className="card p-4 mb-4">
+        <h2 className="font-semibold text-slate-800 mb-3">Новый импорт</h2>
+        <form onSubmit={upload} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_140px] gap-3">
             <div>
               <label className="label">Excel-файл *</label>
@@ -134,7 +134,7 @@ export default function FilesPage() {
                 type="file"
                 accept=".xlsx"
                 required
-                className="input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700"
+                className="input file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-slate-100 file:text-slate-800"
                 onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
               />
             </div>
@@ -161,7 +161,7 @@ export default function FilesPage() {
             </div>
           </div>
 
-          <div className="bg-sky-50 border border-sky-200 rounded-md p-3 text-xs text-sky-800">
+          <div className="bg-slate-50 border border-slate-300 rounded p-3 text-xs text-slate-700">
             После подтверждения строки попадут в существующее закрытие месяца, например в «Расходы по арендной плате» или «Расходы на хознужды».
           </div>
 
@@ -174,16 +174,16 @@ export default function FilesPage() {
         {error && <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">{error}</div>}
       </div>
 
-      <h2 className="font-semibold text-gray-800 mb-3">Загруженные банковские выписки</h2>
+      <h2 className="font-semibold text-slate-800 mb-3">Загруженные банковские выписки</h2>
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : imports.length === 0 ? (
-        <div className="card p-8 text-sm text-gray-400 text-center">Импортов пока нет</div>
+        <div className="card p-5 text-sm text-slate-500 text-center">Импортов пока нет</div>
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th">Файл</th>
                   <th className="th">Период</th>
@@ -193,14 +193,14 @@ export default function FilesPage() {
                   <th className="th">Действия</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {imports.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
+                  <tr key={item.id} className="hover:bg-slate-50">
                     <td className="td font-medium">{item.originalName}</td>
-                    <td className="td text-gray-500">
+                    <td className="td text-slate-500">
                       {item.month ? MONTHS[item.month - 1] : '—'} {item.year ?? ''}
                     </td>
-                    <td className="td text-gray-500">{fmtDate(item.uploadedAt)}</td>
+                    <td className="td text-slate-500">{fmtDate(item.uploadedAt)}</td>
                     <td className="td text-center">{item._count.importedTransactions}</td>
                     <td className="td text-center">{item._count.importedReportValues}</td>
                     <td className="td">

@@ -269,14 +269,14 @@ export default function NewRevenuePage() {
   }
 
   return (
-    <div className="max-w-4xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Добавить дневную выручку</h1>
-      <p className="text-gray-500 text-sm mb-6">
+    <div className="max-w-screen-xl">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Добавить дневную выручку</h1>
+      <p className="text-slate-500 text-sm mb-4">
         Бухгалтер вводит данные с бумажного листочка сотрудника. Запись сразу сохраняется в отчёт.
       </p>
 
       {role === 'manager' && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-800 text-sm">
+        <div className="mb-4 p-3 bg-slate-100 border border-slate-300 rounded-md text-slate-900 text-sm">
           Ваша запись будет отправлена на проверку бухгалтеру и появится в отчёте после подтверждения.
         </div>
       )}
@@ -302,7 +302,7 @@ export default function NewRevenuePage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="card p-6 space-y-4">
+      <form onSubmit={handleSubmit} className="card p-4 space-y-3">
         {/* Аптека и дата */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="col-span-2">
@@ -358,9 +358,9 @@ export default function NewRevenuePage() {
                     <option key={emp.id} value={emp.id}>{emp.name}</option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-gray-400">
+                <p className="mt-1 text-xs text-slate-400">
                   Нет нужного?{' '}
-                  <a href="/employees" target="_blank" className="text-blue-500 hover:underline">
+                  <a href="/employees" target="_blank" className="text-slate-700 hover:underline">
                     Добавить сотрудника
                   </a>
                 </p>
@@ -398,8 +398,8 @@ export default function NewRevenuePage() {
         </div>
 
         {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене */}
-        <div className="rounded-md border border-gray-200 p-4">
-          <label className="label mb-2">Аванс сотруднику <span className="text-gray-400 font-normal">— необязательно</span></label>
+        <div className="rounded border border-slate-300 p-3">
+          <label className="label mb-2">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="col-span-2">
               <select
@@ -474,7 +474,7 @@ export default function NewRevenuePage() {
           <div>
             <label className="label">
               Выручка Каспи
-              <span className="ml-1 text-gray-400 font-normal">— входит в общую</span>
+              <span className="ml-1 text-slate-400 font-normal">— входит в общую</span>
             </label>
             <input
               type="number"
@@ -490,7 +490,7 @@ export default function NewRevenuePage() {
         </div>
 
         {totalRevenue > 0 && (
-          <div className="bg-blue-50 rounded-md px-4 py-2 text-sm text-blue-800">
+            <div className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900">
             Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
           </div>
         )}
@@ -502,19 +502,19 @@ export default function NewRevenuePage() {
             <button
               type="button"
               onClick={addExpenseItem}
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+              className="text-sm text-slate-700 hover:text-slate-900 font-medium flex items-center gap-1"
             >
               + Добавить строку
             </button>
           </div>
 
           {expenseItems.length === 0 ? (
-            <p className="text-sm text-gray-400 italic py-1">
+            <p className="text-sm text-slate-400 italic py-1">
               Нет записей — нажмите «+ Добавить строку»
             </p>
           ) : (
             <div className="space-y-2">
-              <div className="hidden sm:grid gap-2 text-xs text-gray-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
+              <div className="hidden sm:grid gap-2 text-xs text-slate-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
                 <span></span>
                 <span>Сумма</span>
                 <span>Статья *</span>
@@ -524,9 +524,9 @@ export default function NewRevenuePage() {
               {expenseItems.map((item, idx) => (
                 <div key={item.id}>
                   {/* Mobile layout */}
-                  <div className="sm:hidden bg-gray-50 rounded-md p-3 space-y-2">
+                  <div className="sm:hidden bg-slate-50 rounded-md p-3 space-y-2">
                     <div className="flex gap-2 items-center">
-                      <span className="text-xs text-gray-400 w-5 shrink-0">{idx + 1}.</span>
+                      <span className="text-xs text-slate-400 w-5 shrink-0">{idx + 1}.</span>
                       <input
                         type="number"
                         value={item.amount}
@@ -540,7 +540,7 @@ export default function NewRevenuePage() {
                       <button
                         type="button"
                         onClick={() => removeExpenseItem(item.id)}
-                        className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                        className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
                         title="Удалить"
                       >
                         ×
@@ -574,7 +574,7 @@ export default function NewRevenuePage() {
                   </div>
                   {/* Desktop layout */}
                   <div className="hidden sm:grid gap-2 items-start" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
-                    <span className="text-xs text-gray-400 mt-2.5 text-right pr-1">
+                    <span className="text-xs text-slate-400 mt-2.5 text-right pr-1">
                       {idx + 1}.
                     </span>
                     <input
@@ -615,7 +615,7 @@ export default function NewRevenuePage() {
                     <button
                       type="button"
                       onClick={() => removeExpenseItem(item.id)}
-                      className="mt-2 text-gray-300 hover:text-red-500 transition-colors text-lg leading-none"
+                      className="mt-2 text-slate-300 hover:text-red-500 transition-colors text-lg leading-none"
                       title="Удалить"
                     >
                       ×
@@ -630,7 +630,7 @@ export default function NewRevenuePage() {
               ))}
 
               {expenseItems.length > 1 && (
-                <div className="text-sm text-gray-600 pt-1 pl-8">
+                <div className="text-sm text-slate-600 pt-1 pl-8">
                   Итого:{' '}
                   <strong>{totalExpenses.toLocaleString('ru-RU')}</strong>
                 </div>
@@ -653,7 +653,7 @@ export default function NewRevenuePage() {
         </div>
 
         {(totalRevenue > 0 || summaryExpenses > 0 || summaryBonuses > 0 || summaryAdvances > 0) && (
-          <div className="card px-4 py-3 bg-gray-50 flex flex-wrap gap-6 text-sm">
+          <div className="card px-3 py-2 bg-slate-50 flex flex-wrap gap-4 text-sm">
             <span>
               Итого:{' '}
               <strong className={grandTotal >= 0 ? 'text-green-700' : 'text-red-700'}>

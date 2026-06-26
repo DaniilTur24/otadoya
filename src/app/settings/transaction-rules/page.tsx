@@ -154,20 +154,20 @@ export default function TransactionRulesSettingsPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-sm text-gray-400 mb-5">
-        <Link href="/settings" className="hover:text-gray-600">Настройки</Link>
+      <div className="flex items-center gap-2 text-sm text-slate-400 mb-5">
+        <Link href="/settings" className="hover:text-slate-600">Настройки</Link>
         <span>/</span>
-        <span className="text-gray-700 font-medium">Правила транзакций</span>
+        <span className="text-slate-700 font-medium">Правила транзакций</span>
       </div>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Правила транзакций</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Правила транзакций</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Правила определяют поле отчёта, аптеку и способ распределения банковской строки.
       </p>
 
       <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5">
-        <form onSubmit={save} className="card p-5 space-y-3 h-fit">
-          <h2 className="font-semibold text-gray-800">{editingId ? 'Редактировать правило' : 'Создать правило'}</h2>
+        <form onSubmit={save} className="card p-4 space-y-3 h-fit">
+          <h2 className="font-semibold text-slate-800">{editingId ? 'Редактировать правило' : 'Создать правило'}</h2>
 
           <div>
             <label className="label">Название правила</label>
@@ -234,10 +234,10 @@ export default function TransactionRulesSettingsPage() {
               <label className="label">Приоритет</label>
               <input className="input" type="number" value={form.priority} onChange={(e) => set('priority', e.target.value)} />
             </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700 mt-7">
+            <label className="flex items-center gap-2 text-sm text-slate-700 mt-7">
               <input
                 type="checkbox"
-                className="w-4 h-4 accent-blue-600"
+                className="w-4 h-4 accent-slate-700"
                 checked={form.isActive}
                 onChange={(e) => set('isActive', e.target.checked)}
               />
@@ -254,7 +254,7 @@ export default function TransactionRulesSettingsPage() {
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th">Правило</th>
                   <th className="th">Поиск</th>
@@ -265,27 +265,27 @@ export default function TransactionRulesSettingsPage() {
                   <th className="th">Действия</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {rules.map((rule) => (
-                  <tr key={rule.id} className="hover:bg-gray-50">
+                  <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="td font-medium">{rule.name}</td>
                     <td className="td">
-                      <div className="text-xs text-gray-500">
+                      <div className="text-xs text-slate-500">
                         {SOURCE_FIELDS.find(([key]) => key === rule.sourceField)?.[1] ?? rule.sourceField} ·{' '}
                         {MATCH_TYPES.find(([key]) => key === rule.matchType)?.[1] ?? rule.matchType}
                       </div>
-                      <div className="text-sm text-gray-800">{rule.pattern}</div>
+                      <div className="text-sm text-slate-800">{rule.pattern}</div>
                     </td>
-                    <td className="td text-gray-600">
+                    <td className="td text-slate-600">
                       {rule.targetFieldLabel ?? monthlyFieldLabel(rule.targetFieldKey)}
                     </td>
-                    <td className="td text-gray-600">
+                    <td className="td text-slate-600">
                       {DISTRIBUTIONS.find(([key]) => key === rule.distributionType)?.[1] ?? rule.distributionType}
-                      {rule.pharmacy && <div className="text-xs text-gray-400">{rule.pharmacy.name}</div>}
+                      {rule.pharmacy && <div className="text-xs text-slate-400">{rule.pharmacy.name}</div>}
                     </td>
                     <td className="td">{rule.priority}</td>
                     <td className="td">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${rule.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded border ${rule.isActive ? 'bg-green-50 text-green-800 border-green-300' : 'bg-slate-100 text-slate-500 border-slate-300'}`}>
                         {rule.isActive ? 'Активно' : 'Неактивно'}
                       </span>
                     </td>

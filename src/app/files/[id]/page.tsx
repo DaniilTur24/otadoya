@@ -207,20 +207,20 @@ export default function FileReviewPage() {
         <Link href="/files" className="btn-secondary text-xs">
           Назад к импортам
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">Проверка банковских транзакций</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Проверка банковских транзакций</h1>
       </div>
-      <p className="text-sm text-gray-500 mb-5">
+      <p className="text-sm text-slate-500 mb-5">
         Подтвердите распознанные строки. После подтверждения суммы попадут в существующее закрытие месяца.
       </p>
 
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <div className="card p-4">
-          <div className="text-xs text-gray-400">Нераспознанные</div>
-          <div className="text-2xl font-bold text-amber-700">{needsReviewCount}</div>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="card p-3">
+          <div className="text-xs text-slate-400">Нераспознанные</div>
+          <div className="text-base font-bold text-amber-700">{needsReviewCount}</div>
         </div>
-        <div className="card p-4">
-          <div className="text-xs text-gray-400">Ожидают</div>
-          <div className="text-2xl font-bold text-blue-700">{pendingCount}</div>
+        <div className="card p-3">
+          <div className="text-xs text-slate-400">Ожидают</div>
+          <div className="text-base font-bold text-slate-800">{pendingCount}</div>
         </div>
       </div>
 
@@ -229,10 +229,10 @@ export default function FileReviewPage() {
           {STATUS_FILTERS.map(([key, label]) => (
             <button
               key={key}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+              className={`px-2.5 py-1 rounded text-xs font-medium border ${
                 statusFilter === key
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                  ? 'bg-slate-700 text-white border-slate-700'
+                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
               }`}
               onClick={() => setStatusFilter(key)}
             >
@@ -257,18 +257,18 @@ export default function FileReviewPage() {
       </div>
 
       {!loading && (search.trim() || statusFilter !== 'all') && (
-        <div className="mb-3 text-sm text-gray-500">
-          Найдено: <strong className="text-gray-800">{transactions.length}</strong>
+        <div className="mb-3 text-sm text-slate-500">
+          Найдено: <strong className="text-slate-800">{transactions.length}</strong>
           {search.trim() && <span className="ml-1">по запросу «{search.trim()}»</span>}
         </div>
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : transactions.length === 0 ? (
-        <div className="card p-8 text-center text-sm text-gray-400">Транзакций не найдено</div>
+        <div className="card p-5 text-center text-sm text-slate-500">Транзакций не найдено</div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {transactions.map((transaction) => {
             const draft = draftFor(transaction);
             const requiresPharmacy =
@@ -278,29 +278,29 @@ export default function FileReviewPage() {
             return (
               <div
                 key={transaction.id}
-                className={`card p-4 ${transaction.status === 'needs_review' ? 'border-amber-300 bg-amber-50/40' : ''}`}
+                className={`card p-3 ${transaction.status === 'needs_review' ? 'border-amber-300 bg-amber-50/40' : ''}`}
               >
-                <div className="grid grid-cols-1 lg:grid-cols-[120px_140px_1fr_260px] gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-[120px_140px_1fr_260px] gap-3">
                   <div>
-                    <div className="text-xs text-gray-400 mb-1">Дата</div>
+                    <div className="text-xs text-slate-400 mb-1">Дата</div>
                     <div className="text-sm font-medium">{fmtDate(transaction.transactionDate)}</div>
-                    <div className="mt-3 text-xs text-gray-400 mb-1">Сумма</div>
+                    <div className="mt-3 text-xs text-slate-400 mb-1">Сумма</div>
                     <div className="text-sm font-semibold tabular-nums">{fmtAmount(transaction.amount)}</div>
                   </div>
 
                   <div>
-                    <div className="text-xs text-gray-400 mb-1">Статус</div>
+                    <div className="text-xs text-slate-400 mb-1">Статус</div>
                     <StatusBadge status={transaction.status} />
-                    <div className="text-xs text-gray-400 mt-3 mb-1">Правило</div>
-                    <div className="text-xs text-gray-600">{transaction.matchedRule?.name ?? '—'}</div>
+                    <div className="text-xs text-slate-400 mt-3 mb-1">Правило</div>
+                    <div className="text-xs text-slate-600">{transaction.matchedRule?.name ?? '—'}</div>
                   </div>
 
                   <div className="min-w-0">
-                    <div className="text-xs text-gray-400 mb-1">Контрагент / ИИН-БИН</div>
-                    <div className="text-sm text-gray-800 break-words">{transaction.counterparty || '—'}</div>
-                    <div className="text-xs text-gray-500 mt-1">{transaction.binIin || '—'}</div>
-                    <div className="text-xs text-gray-400 mt-3 mb-1">Назначение платежа</div>
-                    <div className="text-sm text-gray-700 break-words">{transaction.paymentPurpose || '—'}</div>
+                    <div className="text-xs text-slate-400 mb-1">Контрагент / ИИН-БИН</div>
+                    <div className="text-sm text-slate-800 break-words">{transaction.counterparty || '—'}</div>
+                    <div className="text-xs text-slate-500 mt-1">{transaction.binIin || '—'}</div>
+                    <div className="text-xs text-slate-400 mt-3 mb-1">Назначение платежа</div>
+                    <div className="text-sm text-slate-700 break-words">{transaction.paymentPurpose || '—'}</div>
                   </div>
 
                   <div className="space-y-3">
@@ -356,14 +356,14 @@ export default function FileReviewPage() {
                     {draft.distributionType === 'split_custom' && (
                       <div>
                         <label className="label text-xs">Распределение по аптекам</label>
-                        <div className="border border-gray-200 rounded-md overflow-hidden mb-2">
+                        <div className="border border-slate-300 rounded overflow-hidden mb-2">
                           {pharmacies.map((pharmacy) => {
                             const entry = draft.customDistribution.find((d) => d.pharmacyId === pharmacy.id);
                             const isChecked = !!entry;
                             return (
                               <div
                                 key={pharmacy.id}
-                                className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-100 last:border-0 bg-white"
+                                className="flex items-center gap-2 px-2 py-1.5 border-b border-slate-100 last:border-0 bg-white"
                               >
                                 <input
                                   type="checkbox"
@@ -412,7 +412,7 @@ export default function FileReviewPage() {
                           >
                             Поровну
                           </button>
-                          <span className="text-xs text-gray-500 tabular-nums">
+                          <span className="text-xs text-slate-500 tabular-nums">
                             {fmtAmount(draft.customDistribution.reduce((s, d) => s + Number(d.amount || 0), 0))}
                             {' / '}
                             {fmtAmount(transaction.amount)}
@@ -423,7 +423,7 @@ export default function FileReviewPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex gap-2 items-center">
+                <div className="mt-3 flex gap-2 items-center">
                   <button className="btn-success text-xs" disabled={isSaving} onClick={() => saveTransaction(transaction, 'approved')}>
                     {isSaving ? 'Сохранение...' : 'Подтвердить'}
                   </button>
@@ -433,20 +433,20 @@ export default function FileReviewPage() {
 
                   {transaction.reportValues.length > 0 && (
                     <div className="relative group ml-1">
-                      <span className="text-xs text-gray-400 hover:text-gray-600 cursor-default underline decoration-dotted select-none">
+                      <span className="text-xs text-slate-400 hover:text-slate-600 cursor-default underline decoration-dotted select-none">
                         как попадёт в отчёт?
                       </span>
-                      <div className="absolute hidden group-hover:block bottom-full left-0 mb-2 z-30 bg-white border border-gray-200 shadow-xl rounded-lg p-3 min-w-[280px]">
-                        <div className="text-xs font-medium text-gray-600 mb-2">При подтверждении попадёт в закрытие месяца:</div>
+                      <div className="absolute hidden group-hover:block bottom-full left-0 mb-2 z-30 bg-white border border-slate-300 rounded p-3 min-w-[280px]">
+                        <div className="text-xs font-medium text-slate-600 mb-2">При подтверждении попадёт в закрытие месяца:</div>
                         <div className="space-y-1.5">
                           {transaction.reportValues.map((value) => (
                             <div key={value.id} className="flex items-center justify-between gap-4">
-                              <div className="text-xs text-gray-700">
+                              <div className="text-xs text-slate-700">
                                 <span className="font-medium">{value.pharmacy?.name ?? 'Общий итог'}</span>
-                                <span className="text-gray-400 mx-1">→</span>
+                                <span className="text-slate-400 mx-1">→</span>
                                 <span>{monthlyFieldLabel(value.fieldKey)}</span>
                               </div>
-                              <span className="text-xs font-semibold tabular-nums text-gray-900 shrink-0">
+                              <span className="text-xs font-semibold tabular-nums text-slate-900 shrink-0">
                                 {fmtAmount(value.amount)}
                               </span>
                             </div>

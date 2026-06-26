@@ -87,14 +87,14 @@ export default function AttendancePage() {
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-1">Табель посещаемости</h1>
-      <p className="text-sm text-gray-500 mb-6">
+    <div className="max-w-screen-lg">
+      <h1 className="text-lg font-semibold text-slate-900 mb-1">Табель посещаемости</h1>
+      <p className="text-sm text-slate-500 mb-4">
         Отметьте, кто отработал смену в этот день: уборщицы, офисные сотрудники и заведующие без торговли.
         Эти отметки используются для расчёта их зарплаты.
       </p>
 
-      <div className="card p-4 mb-4 flex items-center gap-3">
+      <div className="card p-3 mb-4 flex items-center gap-3">
         <label className="label mb-0 shrink-0">Дата</label>
         <input
           type="date"
@@ -109,17 +109,17 @@ export default function AttendancePage() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : groups.length === 0 ? (
-        <div className="card p-8 text-center text-gray-400 text-sm">
+        <div className="card p-5 text-center text-slate-500 text-sm">
           Нет сотрудников с типом «Уборщица», «Офис» или «Заведующая (не торгует)».
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-4">
           {groups.map((g) => (
             <div key={g.type}>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">{g.label}</h2>
-              <div className="card divide-y divide-gray-100">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">{g.label}</h2>
+              <div className="card divide-y divide-slate-100">
                 {g.items.map((emp) => {
                   const marked = recordByEmployee.has(emp.id);
                   const needsPharmacy = emp.employeeType !== 'office' && emp.pharmacies.length > 1;
@@ -133,7 +133,7 @@ export default function AttendancePage() {
                           onChange={() => toggle(emp)}
                           className="rounded w-4 h-4"
                         />
-                        <span className="text-sm text-gray-800">{emp.name}</span>
+                        <span className="text-sm text-slate-800">{emp.name}</span>
                       </label>
                       {needsPharmacy && !marked && (
                         <select
@@ -149,7 +149,7 @@ export default function AttendancePage() {
                         </select>
                       )}
                       {marked && (
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-slate-400">
                           {recordByEmployee.get(emp.id)?.pharmacyId
                             ? emp.pharmacies.find((p) => p.id === recordByEmployee.get(emp.id)?.pharmacyId)?.name
                             : ''}

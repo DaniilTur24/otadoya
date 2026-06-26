@@ -184,12 +184,12 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-screen-xl">
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold text-gray-900">Заведующие и менеджеры</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Заведующие и менеджеры</h1>
         <button className="btn-primary text-sm" onClick={startCreate}>+ Добавить</button>
       </div>
-      <p className="text-gray-500 text-sm mb-6">
+      <p className="text-slate-500 text-sm mb-4">
         Управление аккаунтами заведующих и менеджеров аптек. Каждый видит только свои аптеки.
       </p>
 
@@ -200,19 +200,19 @@ export default function UsersPage() {
       )}
 
       {showForm && (
-        <div className="card p-5 mb-6 border-blue-200 border-2">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-800">
+        <div className="card p-4 mb-4 border-slate-400 border">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold text-slate-800">
               {editingId !== null ? 'Редактирование аккаунта' : 'Новый заведующий / менеджер'}
             </h2>
-            <button onClick={resetForm} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            <button onClick={resetForm} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
           </div>
 
           {error && (
             <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{error}</div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Логин *</label>
@@ -225,7 +225,7 @@ export default function UsersPage() {
                   placeholder="username"
                 />
                 {editingId !== null && (
-                  <p className="text-xs text-gray-400 mt-1">Логин изменить нельзя</p>
+                  <p className="text-xs text-slate-400 mt-1">Логин изменить нельзя</p>
                 )}
               </div>
               <div>
@@ -267,7 +267,7 @@ export default function UsersPage() {
                     <option key={t.value} value={t.value}>{t.label}</option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-slate-400 mt-1">
                   {form.employeeType === 'manager_trading'
                     ? 'Считается по сменам, как продавец, плюс 10% от бонусов, доплата и премия заведующего'
                     : form.employeeType === 'manager_fixed'
@@ -315,7 +315,7 @@ export default function UsersPage() {
             </div>
 
             {form.employeeType === 'pharmacy_manager' && (
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
                   className="rounded"
@@ -329,7 +329,7 @@ export default function UsersPage() {
             <div>
               <label className="label">Аптеки (выберите одну или несколько)</label>
               {pharmacies.length === 0 ? (
-                <p className="text-sm text-gray-400">Нет аптек в системе</p>
+                <p className="text-sm text-slate-400">Нет аптек в системе</p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
                   {pharmacies.map((p) => (
@@ -358,23 +358,23 @@ export default function UsersPage() {
       )}
 
       {loading ? (
-        <div className="text-gray-400 text-sm py-8 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : managers.length === 0 ? (
-        <div className="card p-8 text-center text-gray-400 text-sm">
+        <div className="card p-5 text-center text-slate-500 text-sm">
           Нет заведующих и менеджеров. Нажмите «+ Добавить» чтобы создать первого.
         </div>
       ) : (
         <div className="card overflow-hidden">
           {selectedIds.size > 0 && (
-            <div className="px-4 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
-              <span className="text-sm text-blue-800">Выбрано: {selectedIds.size}</span>
+            <div className="px-4 py-2 bg-slate-100 border-b border-slate-300 flex items-center justify-between">
+              <span className="text-sm text-slate-900">Выбрано: {selectedIds.size}</span>
               <button className="btn-danger text-xs" onClick={deleteSelected}>
                 Удалить выбранные
               </button>
             </div>
           )}
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="th w-8">
                   <input
@@ -392,9 +392,9 @@ export default function UsersPage() {
                 <th className="th"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-slate-100">
               {managers.map((m) => (
-                <tr key={m.id} className="hover:bg-gray-50">
+                <tr key={m.id} className="hover:bg-slate-50">
                   <td className="td">
                     <input
                       type="checkbox"
@@ -404,13 +404,13 @@ export default function UsersPage() {
                     />
                   </td>
                   <td className="td font-medium">{m.displayName}</td>
-                  <td className="td text-gray-500 font-mono text-sm">{m.username}</td>
-                  <td className="td text-sm text-gray-600">
+                  <td className="td text-slate-500 font-mono text-sm">{m.username}</td>
+                  <td className="td text-sm text-slate-600">
                     {MANAGER_TYPE_OPTIONS.find((t) => t.value === m.employeeType)?.label ?? m.employeeType}
-                    <div className="text-xs text-gray-400">
+                    <div className="text-xs text-slate-400">
                       {m.baseSalary.toLocaleString('ru-RU')} ₸
                       {m.employeeType === 'pharmacy_manager' && (
-                        <span className={m.managerPremiumEnabled ? 'text-green-600' : 'text-gray-400'}>
+                        <span className={m.managerPremiumEnabled ? 'text-green-600' : 'text-slate-400'}>
                           {' '}· премия {m.managerPremiumEnabled ? 'включена' : 'выключена'}
                         </span>
                       )}
@@ -428,7 +428,7 @@ export default function UsersPage() {
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {m.pharmacies.map((p) => (
-                          <span key={p.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                          <span key={p.id} className="text-xs bg-slate-100 text-slate-800 border border-slate-300 px-1.5 py-0.5 rounded">
                             {p.name}
                           </span>
                         ))}
@@ -436,8 +436,8 @@ export default function UsersPage() {
                     )}
                   </td>
                   <td className="td">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      m.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded border ${
+                      m.isActive ? 'bg-green-50 text-green-700 border-green-300' : 'bg-slate-100 text-slate-500 border-slate-300'
                     }`}>
                       {m.isActive ? 'Активен' : 'Отключён'}
                     </span>
