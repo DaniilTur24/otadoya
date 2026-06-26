@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { hashPassword } from '@/lib/password';
 import { USER_LINKED_TYPES } from '@/lib/employee-types';
+import { findPharmacyUnlinkBlocker } from '@/lib/employee-pharmacy-validation';
 
 function serialize(u: Record<string, unknown>) {
   const { passwordHash: _, ...rest } = u as { passwordHash: unknown } & Record<string, unknown>;
@@ -31,6 +32,20 @@ export async function PUT(
   }
   if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
     return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
+  }
+
+  if (Array.isArray(pharmacyIds)) {
+    const existingUser = await prisma.user.findUnique({ where: { id }, select: { employeeId: true } });
+    if (existingUser?.employeeId != null) {
+      const currentLinks = await prisma.employeePharmacy.findMany({
+        where: { employeeId: existingUser.employeeId },
+        select: { pharmacyId: true },
+      });
+      const newIds = new Set(pharmacyIds.map(Number));
+      const removedPharmacyIds = currentLinks.map((l) => l.pharmacyId).filter((pid) => !newIds.has(pid));
+      const blocker = await findPharmacyUnlinkBlocker(existingUser.employeeId, removedPharmacyIds);
+      if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
+    }
   }
 
   const user = await prisma.$transaction(async (tx) => {

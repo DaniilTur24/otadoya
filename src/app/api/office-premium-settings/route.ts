@@ -4,43 +4,81 @@ import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-function serialize(s: Record<string, unknown>) {
+function serialize(t: Record<string, unknown>) {
   return {
-    threshold: Number(s.threshold),
-    base: Number(s.base),
-    stepAmount: Number(s.stepAmount),
-    stepBonus: Number(s.stepBonus),
+    id: Number(t.id),
+    fromAmount: Number(t.fromAmount),
+    toAmount: t.toAmount != null ? Number(t.toAmount) : null,
+    bonusAmount: Number(t.bonusAmount),
   };
 }
 
-const EMPTY = { threshold: 0, base: 0, stepAmount: 0, stepBonus: 0 };
+/**
+ * Без этой проверки админ мог бы случайно ввести пересекающиеся диапазоны — findOfficeTierBonus()
+ * в salary-calculator.ts берёт первую подходящую строку по порядку fromAmount, так что при
+ * пересечении выигрывает диапазон с меньшим fromAmount без явного предупреждения об этом.
+ */
+function validateTierRanges(
+  tiers: { fromAmount: number; toAmount: number | null; bonusAmount: number }[],
+): string | null {
+  const sorted = [...tiers].sort((a, b) => a.fromAmount - b.fromAmount);
+  for (let i = 0; i < sorted.length; i++) {
+    const t = sorted[i];
+    if (t.toAmount != null && t.toAmount <= t.fromAmount) {
+      return `Диапазон от ${t.fromAmount} — верхняя граница "до" должна быть больше нижней`;
+    }
+    if (t.toAmount == null && i !== sorted.length - 1) {
+      return `Без верхней границы может быть только последний по порядку диапазон (от ${t.fromAmount})`;
+    }
+    const next = sorted[i + 1];
+    if (next && t.toAmount != null && t.toAmount > next.fromAmount) {
+      return `Диапазоны от ${t.fromAmount} и от ${next.fromAmount} пересекаются`;
+    }
+  }
+  return null;
+}
 
-// GET /api/office-premium-settings — глобальная лестница премии офиса от выручки всех аптек
+// GET /api/office-premium-settings — таблица диапазонов выручки → премия офиса (все аптеки)
 export async function GET(request: NextRequest) {
   const auth = requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const settings = await prisma.officePremiumSettings.findFirst();
-  return NextResponse.json(settings ? serialize(settings as unknown as Record<string, unknown>) : EMPTY);
+  const tiers = await prisma.officePremiumTier.findMany({ orderBy: { fromAmount: 'asc' } });
+  return NextResponse.json(tiers.map((t) => serialize(t as unknown as Record<string, unknown>)));
 }
 
+// PUT /api/office-premium-settings — body: { tiers: { fromAmount, toAmount, bonusAmount }[] }
+// Полностью заменяет таблицу диапазонов переданным списком.
 export async function PUT(request: NextRequest) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
-  const { threshold, base, stepAmount, stepBonus } = await request.json();
+  const { tiers } = await request.json();
+  if (!Array.isArray(tiers)) {
+    return NextResponse.json({ error: 'tiers должен быть массивом' }, { status: 400 });
+  }
 
-  const existing = await prisma.officePremiumSettings.findFirst();
-  const data = {
-    threshold: String(threshold ?? 0),
-    base: String(base ?? 0),
-    stepAmount: String(stepAmount ?? 0),
-    stepBonus: String(stepBonus ?? 0),
-  };
+  for (const t of tiers) {
+    if (t.fromAmount == null || t.bonusAmount == null) {
+      return NextResponse.json({ error: 'У каждой строки должны быть fromAmount и bonusAmount' }, { status: 400 });
+    }
+  }
 
-  const settings = existing
-    ? await prisma.officePremiumSettings.update({ where: { id: existing.id }, data })
-    : await prisma.officePremiumSettings.create({ data });
+  const rangeError = validateTierRanges(tiers);
+  if (rangeError) return NextResponse.json({ error: rangeError }, { status: 400 });
 
-  return NextResponse.json(serialize(settings as unknown as Record<string, unknown>));
+  const saved = await prisma.$transaction(async (tx) => {
+    await tx.officePremiumTier.deleteMany({});
+    if (tiers.length === 0) return [];
+    await tx.officePremiumTier.createMany({
+      data: tiers.map((t: { fromAmount: number; toAmount: number | null; bonusAmount: number }) => ({
+        fromAmount: String(t.fromAmount),
+        toAmount: t.toAmount != null ? String(t.toAmount) : null,
+        bonusAmount: String(t.bonusAmount),
+      })),
+    });
+    return tx.officePremiumTier.findMany({ orderBy: { fromAmount: 'asc' } });
+  });
+
+  return NextResponse.json(saved.map((t) => serialize(t as unknown as Record<string, unknown>)));
 }

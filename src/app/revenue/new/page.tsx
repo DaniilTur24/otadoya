@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS } from '@/lib/shift-types';
+import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 interface Pharmacy {
   id: number;
@@ -13,6 +14,7 @@ interface Pharmacy {
 interface Employee {
   id: number;
   name: string;
+  employeeType: string;
 }
 
 interface ExpenseItem {
@@ -147,6 +149,10 @@ export default function NewRevenuePage() {
       items.map((i) => (i.id === id ? { ...i, [field]: value } : i))
     );
   }
+
+  // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
+  // к смене в записи выручки — их зарплата считается только через табель посещаемости.
+  const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
 
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),
@@ -344,7 +350,7 @@ export default function NewRevenuePage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Сотрудник *</label>
-            {employees.length > 0 ? (
+            {shiftEligibleEmployees.length > 0 ? (
               <>
                 <select
                   name="employeeId"
@@ -354,7 +360,7 @@ export default function NewRevenuePage() {
                   className="input"
                 >
                   <option value="">— выберите из списка —</option>
-                  {employees.map((emp) => (
+                  {shiftEligibleEmployees.map((emp) => (
                     <option key={emp.id} value={emp.id}>{emp.name}</option>
                   ))}
                 </select>
@@ -367,9 +373,9 @@ export default function NewRevenuePage() {
               </>
             ) : (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                Список сотрудников пуст.{' '}
+                Нет сотрудников со сменной оплатой в этой аптеке.{' '}
                 <a href="/employees" target="_blank" className="font-medium underline">
-                  Добавьте сотрудников
+                  Добавьте сотрудника
                 </a>
                 {' '}— затем вернитесь сюда.
               </div>

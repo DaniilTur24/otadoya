@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
+import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
@@ -18,7 +19,7 @@ const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
 ).map((row) => ({ key: row.key, label: row.label }));
 
 interface Pharmacy { id: number; name: string }
-interface Employee { id: number; name: string }
+interface Employee { id: number; name: string; employeeType: string }
 
 interface ExpenseItem {
   id: number;
@@ -118,6 +119,10 @@ export default function RevenueListPage() {
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
+  // к смене в записи выручки — их зарплата считается только через табель посещаемости.
+  const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
@@ -526,12 +531,12 @@ export default function RevenueListPage() {
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className="label">Сотрудник</label>
-              {employees.length > 0 ? (
+              {shiftEligibleEmployees.length > 0 ? (
                 <>
                   <select className="input" value={editState.employeeId}
                     onChange={(e) => updateField('employeeId', e.target.value)} required>
                     <option value="">— выберите из списка —</option>
-                    {employees.map((emp) => (
+                    {shiftEligibleEmployees.map((emp) => (
                       <option key={emp.id} value={emp.id}>{emp.name}</option>
                     ))}
                   </select>
@@ -544,7 +549,7 @@ export default function RevenueListPage() {
                 </>
               ) : (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Список пуст.{' '}
+                  Нет сотрудников со сменной оплатой.{' '}
                   <a href="/employees" target="_blank" className="font-medium underline">
                     Добавить сотрудников
                   </a>
