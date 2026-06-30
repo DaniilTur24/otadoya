@@ -17,8 +17,8 @@ salaryFromDayShifts     = baseSalary / 15 × dayShiftsCount
 salaryFromFullDayShifts = baseSalary / 10 × fullDayShiftsCount
 salaryFromFiveDayShifts = baseSalary / workingCalendarDays × fiveDayShiftsCount   (0, если календарь месяца не заполнен)
 
-revenuePremiumDayShifts     = (revenueDayShifts     − 200000 × dayShiftsCount)     × 0.015
-revenuePremiumFullDayShifts = (revenueFullDayShifts − 300000 × fullDayShiftsCount) × 0.015
+revenuePremiumDayShifts     = max(0, (revenueDayShifts     − 200000 × dayShiftsCount)     × 0.015)
+revenuePremiumFullDayShifts = max(0, (revenueFullDayShifts − 300000 × fullDayShiftsCount) × 0.015)
 totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts
 
 totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayShifts
@@ -26,7 +26,7 @@ totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayS
             − totalAdvances
 ```
 
-`revenueDayShifts`/`revenueFullDayShifts` — сумма `cashRevenue + terminalRevenue + kaspiRevenue` по записям с соответствующим `shiftType` за месяц. Премия считается от **средней** выручки за смену данного типа, не от каждой смены по отдельности — порог сравнивается с суммой выручки минус (порог × количество смен), то есть фактически это «средняя выручка за смену минус порог, умножить на ставку», просуммированная по всем сменам этого типа разом. **Премия может быть отрицательной** — она не floor'ится в 0, то есть недобор по выручке буквально вычитается из зарплаты через `totalRevenuePremium`.
+`revenueDayShifts`/`revenueFullDayShifts` — сумма `cashRevenue + terminalRevenue + kaspiRevenue` по записям с соответствующим `shiftType` за месяц. Премия считается от **средней** выручки за смену данного типа, не от каждой смены по отдельности — порог сравнивается с суммой выручки минус (порог × количество смен), то есть фактически это «средняя выручка за смену минус порог, умножить на ставку», просуммированная по всем сменам этого типа разом. Каждый из двух компонентов (`revenuePremiumDayShifts`, `revenuePremiumFullDayShifts`) **floor'ится в 0 независимо** — премия это бонус сверху, а не штраф, поэтому недобор по выручке одного типа смены никогда не вычитается из оклада и не компенсируется избытком по другому типу смены.
 
 `totalBonuses` — сумма строк `DailyExpenseItem` с `category = 'pharmaBonus'` по записям сотрудника за месяц.
 
