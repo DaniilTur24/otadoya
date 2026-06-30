@@ -23,6 +23,10 @@ npx vitest run -t "subtracts advances"                   # Run tests matching a 
 
 Tests live in `src/__tests__/`. They mock `@/lib/prisma` directly (see `vi.mock('@/lib/prisma', ...)` at the top of each file) — no real DB is used. There is no `clearMocks`/`resetMocks` config in `vitest.config.ts`, so `mock.calls` accumulates across tests in the same file/describe block; when asserting on call args, grab the last call (`mock.calls[mock.calls.length - 1]`), not `calls[0]`.
 
+## Business Logic Documentation
+
+For the full user-facing flow (entering daily revenue, the 6 employee types, salary formulas, attendance tracking, monthly report and month closing) — both how-to guides for the bookkeeper/admin and the underlying technical logic — see [docs/business-logic/](docs/business-logic/README.md).
+
 ## Architecture
 
 **Next.js 15 App Router** with Prisma ORM. Two environments:
