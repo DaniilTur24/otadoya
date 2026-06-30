@@ -4,6 +4,10 @@
 
 Технический обзор стека и моделей данных для разработчика — в корневом [CLAUDE.md](../../CLAUDE.md).
 
+## Для сотрудников аптек (без терминов)
+
+- [guide-zarplata-prostymi-slovami.md](guide-zarplata-prostymi-slovami.md) — как считается ваша зарплата, простыми словами, по должностям
+
 ## Туториал
 
 - [tutorial-first-month.md](tutorial-first-month.md) — от пустой аптеки до закрытого месяца, на одном сквозном примере
