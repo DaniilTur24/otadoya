@@ -6,6 +6,7 @@
 
 ## Для сотрудников аптек (без терминов)
 
+- [guide-kak-rabotaet-sistema.md](guide-kak-rabotaet-sistema.md) — как устроена вся система целиком, простыми словами
 - [guide-zarplata-prostymi-slovami.md](guide-zarplata-prostymi-slovami.md) — как считается ваша зарплата, простыми словами, по должностям
 
 ## Туториал
