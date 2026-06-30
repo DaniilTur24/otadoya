@@ -303,7 +303,8 @@ const EMPTY_RESULT_BASE = {
  *   salaryFromFullDayShifts = baseSalary / 10 * fullDayShiftsCount
  *   salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
  *
- * У продавца премия — обычная revenuePremium (200k/300k порог, 1.5% от избытка за смену).
+ * У продавца премия — обычная revenuePremium (200k/300k порог, 1.5% от избытка за смену,
+ * floor в 0 — недобор по выручке не вычитается из оклада).
  * У заведующей, которая торгует, revenuePremium не применяется — вместо неё действует та же
  * лестничная премия аптеки, что и у заведующей без торговли, плюс 10% от бонусов аптеки.
  * Фиксированная доплата (Employee.allowance) добавляется для любого типа сотрудника.
@@ -388,8 +389,11 @@ async function calculateTradingEmployeeSalary(
   let revenuePremiumDayShifts = 0;
   let revenuePremiumFullDayShifts = 0;
   if (!isManager) {
-    revenuePremiumDayShifts = (revenueDayShifts - 200000 * dayShiftsCount) * 0.015;
-    revenuePremiumFullDayShifts = (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015;
+    // Премия — бонус сверху, а не штраф: недобор по выручке ниже порога не должен
+    // вычитаться из оклада, поэтому каждый тип смены floor'ится в 0 независимо
+    // (дневные и суточные смены не компенсируют друг друга).
+    revenuePremiumDayShifts = Math.max(0, (revenueDayShifts - 200000 * dayShiftsCount) * 0.015);
+    revenuePremiumFullDayShifts = Math.max(0, (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015);
   }
   const totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts;
 

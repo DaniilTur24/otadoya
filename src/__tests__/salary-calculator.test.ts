@@ -115,7 +115,8 @@ describe('calculateEmployeeMonthlySalary', () => {
     mockBonuses(5000);
 
     const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
-    const revenuePremium = (10000 - 200000) * 0.015 + (10000 - 300000) * 0.015;
+    // Revenue is far below threshold on both shift types — premium floors at 0, not negative
+    const revenuePremium = Math.max(0, (10000 - 200000) * 0.015) + Math.max(0, (10000 - 300000) * 0.015);
     const expected = 150000 / 15 + 150000 / 10 + 5000 + revenuePremium;
     expect(result!.totalSalary).toBeCloseTo(expected, 5);
     expect(result!.totalBonuses).toBe(5000);
@@ -149,7 +150,8 @@ describe('calculateEmployeeMonthlySalary', () => {
     mockAggregates(0, 200000);
 
     const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
-    const revenuePremium = (10000 - 200000) * 0.015;
+    // Premium floors at 0 (revenue below threshold) — the advance alone drives totalSalary negative here
+    const revenuePremium = Math.max(0, (10000 - 200000) * 0.015);
     const expected = 150000 / 15 + revenuePremium - 200000;
     expect(result!.totalAdvances).toBe(200000);
     expect(result!.totalSalary).toBeCloseTo(expected, 5);
@@ -198,7 +200,8 @@ describe('calculateEmployeeMonthlySalary', () => {
       { shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
     ]);
     const result = await calculateEmployeeMonthlySalary(1, 2, 2025);
-    const revenuePremium = (0 - 200000) * 0.015 + (0 - 300000) * 0.015;
+    // Zero revenue on both shift types — premium floors at 0, not negative
+    const revenuePremium = Math.max(0, (0 - 200000) * 0.015) + Math.max(0, (0 - 300000) * 0.015);
     const expected = 150000 / 15 + 150000 / 10 + (150000 / 20) * 2 + revenuePremium;
     expect(result!.dayShiftsCount).toBe(1);
     expect(result!.fullDayShiftsCount).toBe(1);
@@ -275,12 +278,25 @@ describe('calculateEmployeeMonthlySalary', () => {
     expect(result!.totalRevenuePremium).toBeCloseTo(600, 5);
   });
 
-  it('returns a negative revenue premium when average revenue is below the threshold, not floored at 0', async () => {
+  it('floors the revenue premium at 0 when average revenue is below the threshold, never penalizing salary', async () => {
     mockShifts([{ shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 }]);
     const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
-    // (100000 - 200000) * 1.5% = -1500
-    expect(result!.revenuePremiumDayShifts).toBeCloseTo(-1500, 5);
-    expect(result!.totalRevenuePremium).toBeCloseTo(-1500, 5);
+    // (100000 - 200000) * 1.5% = -1500, floored at 0 — premium is a bonus, not a penalty
+    expect(result!.revenuePremiumDayShifts).toBe(0);
+    expect(result!.totalRevenuePremium).toBe(0);
+  });
+
+  it('floors each shift type independently — a below-threshold day shift does not offset a strong full_day shift', async () => {
+    mockShifts([
+      { shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 },
+      { shiftType: 'full_day', cashRevenue: 400000, terminalRevenue: 0, kaspiRevenue: 0 },
+    ]);
+    const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
+    // day: (100000 - 200000) * 1.5% = -1500 -> floored to 0
+    // full_day: (400000 - 300000) * 1.5% = 1500
+    expect(result!.revenuePremiumDayShifts).toBe(0);
+    expect(result!.revenuePremiumFullDayShifts).toBeCloseTo(1500, 5);
+    expect(result!.totalRevenuePremium).toBeCloseTo(1500, 5);
   });
 
   it('does not include a revenue premium for five_day shifts', async () => {
