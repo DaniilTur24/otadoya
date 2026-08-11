@@ -318,6 +318,7 @@ async function calculateTradingEmployeeSalary(
     pharmacies: { pharmacyId: number }[];
     allowance: unknown;
     allowanceDescription: string;
+    ladderPremiumEnabled?: boolean;
   },
   employeeType: string,
   month: number,
@@ -328,6 +329,9 @@ async function calculateTradingEmployeeSalary(
   const dateFrom = startOfMonth(year, month);
   const dateTo = endOfMonth(year, month);
 
+  const useLadder = isManager && Boolean(employee.ladderPremiumEnabled);
+  const managedPharmacyIds = isManager ? resolveManagedPharmacyIds(employee, pharmacyId) : [];
+
   const entryFilter = {
     employeeId: employee.id,
     status: 'approved',
@@ -335,7 +339,7 @@ async function calculateTradingEmployeeSalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const [entries, pharmaBonusAgg, totalAdvances, calendarEntry, bonusShareStats] =
+  const [entries, pharmaBonusAgg, totalAdvances, calendarEntry, bonusShareStats, ladderStats] =
     await Promise.all([
       prisma.dailyRevenueEntry.findMany({
         where: entryFilter,
@@ -348,8 +352,11 @@ async function calculateTradingEmployeeSalary(
       computeAdvances(employee.id, month, year, pharmacyId),
       prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
       isManager
-        ? computeManagerBonusShare(resolveManagedPharmacyIds(employee, pharmacyId), month, year)
+        ? computeManagerBonusShare(managedPharmacyIds, month, year)
         : Promise.resolve({ share: 0, total: 0 }),
+      useLadder
+        ? computeManagerLadderPremium(managedPharmacyIds, month, year)
+        : Promise.resolve({ premium: 0, revenueTotal: 0 }),
     ]);
 
   const managerBonusShare = bonusShareStats.share;
@@ -384,17 +391,14 @@ async function calculateTradingEmployeeSalary(
     baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount : 0;
   const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
 
-  // Премия по личной выручке — одинаково для продавца и торгующей заведующей. Премия — бонус
-  // сверху, а не штраф: недобор по выручке ниже порога не должен вычитаться из оклада, поэтому
-  // каждый тип смены floor'ится в 0 независимо (дневные и суточные смены не компенсируют друг друга).
-  const revenuePremiumDayShifts = Math.max(0, (revenueDayShifts - 200000 * dayShiftsCount) * 0.015);
-  const revenuePremiumFullDayShifts = Math.max(0, (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015);
+  // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
+  // Иначе — личная премия как у продавца (floor в 0 на каждый тип смены независимо).
+  const revenuePremiumDayShifts = useLadder ? 0 : Math.max(0, (revenueDayShifts - 200000 * dayShiftsCount) * 0.015);
+  const revenuePremiumFullDayShifts = useLadder ? 0 : Math.max(0, (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015);
   const totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts;
 
-  // Лестничная премия аптеки (managerLadderPremium) торгующей заведующей не полагается —
-  // она есть только у заведующей без торговли (calculateFixedManagerSalary).
-  const managerLadderPremium = 0;
-  const managedRevenueTotal = 0;
+  const managerLadderPremium = ladderStats.premium;
+  const managedRevenueTotal = ladderStats.revenueTotal;
   const allowance = Number(employee.allowance ?? 0);
 
   const totalSalary =
@@ -653,8 +657,9 @@ async function calculatePharmacyManagerSalary(
 /**
  * Рассчитывает зарплату сотрудника за указанный месяц. Формула зависит от Employee.employeeType:
  *  - seller          — смены (день/сутки) + бонусы + revenuePremium (200k/300k, 1.5%) − авансы
- *  - manager_trading — то же, что seller (включая revenuePremium), плюс 10% бонусов аптеки.
- *                      Лестничной премии по выручке аптеки у неё нет (только у manager_fixed)
+ *  - manager_trading — то же, что seller (включая revenuePremium) + 10% бонусов аптеки.
+ *                      Если ladderPremiumEnabled=true — вместо личной revenuePremium получает
+ *                      лестничную премию аптеки, как у manager_fixed.
  *  - manager_fixed   — пятидневка по табелю посещаемости + 10% бонусов + лестничная премия
  *  - cleaner         — ставка за смену × количество смен в табеле − авансы
  *  - office          — пятидневка по табелю посещаемости + лестничная премия от выручки всех аптек
@@ -738,6 +743,7 @@ export async function calculateEmployeeMonthlySalary(
         pharmacies: { pharmacyId: number }[];
         allowance: unknown;
         allowanceDescription: string;
+        ladderPremiumEnabled: boolean;
       },
       employeeType,
       month,

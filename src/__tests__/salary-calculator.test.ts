@@ -501,6 +501,49 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     expect(result!.managedRevenueTotal).toBe(0);
     expect(result!.totalSalary).toBe(0);
   });
+
+  describe('ladderPremiumEnabled = true', () => {
+    const managerWithLadder = {
+      id: 5,
+      name: 'Заведующая Алия',
+      baseSalary: 150000,
+      employeeType: 'manager_trading',
+      pharmacies: [{ employeeId: 5, pharmacyId: 10 }],
+      ladderPremiumEnabled: true,
+    };
+
+    it('applies pharmacy ladder premium instead of personal revenue premium', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(managerWithLadder);
+      mockRevenueEntries({
+        shifts: [{ shiftType: 'day', cashRevenue: 450000, terminalRevenue: 0, kaspiRevenue: 0 }],
+        pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 450000, terminalRevenue: 0, kaspiRevenue: 0 }],
+      });
+      mockManagedPharmacies([
+        { id: 10, managerPremiumThreshold: 400000, managerPremiumBase: 10000, managerPremiumStepAmount: 50000, managerPremiumStepBonus: 5000 },
+      ]);
+      const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+      // Личная премия должна быть 0 (хотя выручка 450к > порога 200к)
+      expect(result!.totalRevenuePremium).toBe(0);
+      expect(result!.revenuePremiumDayShifts).toBe(0);
+      // Лестничная: base=10000, (450000-400000)/50000=1 шаг → 10000+5000=15000
+      expect(result!.managerLadderPremium).toBe(15000);
+      expect(result!.managedRevenueTotal).toBe(450000);
+    });
+
+    it('returns zero personal premium even when shift revenue exceeds threshold', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(managerWithLadder);
+      mockRevenueEntries({
+        shifts: [{ shiftType: 'full_day', cashRevenue: 500000, terminalRevenue: 0, kaspiRevenue: 0 }],
+        pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 500000, terminalRevenue: 0, kaspiRevenue: 0 }],
+      });
+      mockManagedPharmacies([{ id: 10, managerPremiumThreshold: 600000, managerPremiumBase: 8000, managerPremiumStepAmount: null, managerPremiumStepBonus: null }]);
+      const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+      expect(result!.totalRevenuePremium).toBe(0);
+      expect(result!.revenuePremiumFullDayShifts).toBe(0);
+      // Выручка 500k < порог 600k → лестничная тоже 0
+      expect(result!.managerLadderPremium).toBe(0);
+    });
+  });
 });
 
 describe('calculateEmployeeMonthlySalary — manager_fixed', () => {
