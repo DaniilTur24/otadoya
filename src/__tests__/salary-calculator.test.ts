@@ -452,11 +452,19 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   });
 
-  it('does not apply the seller revenue premium (200k/300k)', async () => {
+  it('applies the same revenue premium as a seller (200k/300k threshold, 1.5%)', async () => {
     mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 220000, terminalRevenue: 0, kaspiRevenue: 0 }] });
     const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
-    expect(result!.totalRevenuePremium).toBe(0);
+    // (220000 - 200000) * 1.5% = 300
+    expect(result!.revenuePremiumDayShifts).toBeCloseTo(300, 5);
+    expect(result!.totalRevenuePremium).toBeCloseTo(300, 5);
+  });
+
+  it('floors the revenue premium at 0 when revenue is below threshold, like a seller', async () => {
+    mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 }] });
+    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
     expect(result!.revenuePremiumDayShifts).toBe(0);
+    expect(result!.totalRevenuePremium).toBe(0);
   });
 
   it('adds 10% of pharmacy bonuses (managerBonusShare) on top of shift salary', async () => {
@@ -478,7 +486,7 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     expect(result!.totalSalary).toBe(20000);
   });
 
-  it('applies the pharmacy ladder premium based on monthly pharmacy revenue', async () => {
+  it('never applies the pharmacy ladder premium, even when pharmacy revenue clears the threshold', async () => {
     mockRevenueEntries({
       shifts: [],
       pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 450000, terminalRevenue: 0, kaspiRevenue: 0 }],
@@ -487,20 +495,54 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
       { id: 10, managerPremiumThreshold: 400000, managerPremiumBase: 10000, managerPremiumStepAmount: 50000, managerPremiumStepBonus: 5000 },
     ]);
     const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
-    // 450000 >= 400000 → base 10000 + floor((450000-400000)/50000)*5000 = 10000 + 5000 = 15000
-    expect(result!.managerLadderPremium).toBeCloseTo(15000, 5);
-    expect(result!.managedRevenueTotal).toBe(450000);
-    expect(result!.totalSalary).toBeCloseTo(15000, 5);
+    // Ladder premium is exclusive to manager_fixed now — manager_trading gets none, regardless
+    // of the pharmacy's configured threshold/base/step.
+    expect(result!.managerLadderPremium).toBe(0);
+    expect(result!.managedRevenueTotal).toBe(0);
+    expect(result!.totalSalary).toBe(0);
   });
 
-  it('gives zero ladder premium when pharmacy revenue is below threshold', async () => {
-    mockRevenueEntries({
-      shifts: [],
-      pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 }],
+  describe('ladderPremiumEnabled = true', () => {
+    const managerWithLadder = {
+      id: 5,
+      name: 'Заведующая Алия',
+      baseSalary: 150000,
+      employeeType: 'manager_trading',
+      pharmacies: [{ employeeId: 5, pharmacyId: 10 }],
+      ladderPremiumEnabled: true,
+    };
+
+    it('applies pharmacy ladder premium instead of personal revenue premium', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(managerWithLadder);
+      mockRevenueEntries({
+        shifts: [{ shiftType: 'day', cashRevenue: 450000, terminalRevenue: 0, kaspiRevenue: 0 }],
+        pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 450000, terminalRevenue: 0, kaspiRevenue: 0 }],
+      });
+      mockManagedPharmacies([
+        { id: 10, managerPremiumThreshold: 400000, managerPremiumBase: 10000, managerPremiumStepAmount: 50000, managerPremiumStepBonus: 5000 },
+      ]);
+      const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+      // Личная премия должна быть 0 (хотя выручка 450к > порога 200к)
+      expect(result!.totalRevenuePremium).toBe(0);
+      expect(result!.revenuePremiumDayShifts).toBe(0);
+      // Лестничная: base=10000, (450000-400000)/50000=1 шаг → 10000+5000=15000
+      expect(result!.managerLadderPremium).toBe(15000);
+      expect(result!.managedRevenueTotal).toBe(450000);
     });
-    mockManagedPharmacies([{ id: 10, managerPremiumThreshold: 400000, managerPremiumBase: 10000 }]);
-    const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
-    expect(result!.managerLadderPremium).toBe(0);
+
+    it('returns zero personal premium even when shift revenue exceeds threshold', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(managerWithLadder);
+      mockRevenueEntries({
+        shifts: [{ shiftType: 'full_day', cashRevenue: 500000, terminalRevenue: 0, kaspiRevenue: 0 }],
+        pharmacyRevenueRows: [{ pharmacyId: 10, cashRevenue: 500000, terminalRevenue: 0, kaspiRevenue: 0 }],
+      });
+      mockManagedPharmacies([{ id: 10, managerPremiumThreshold: 600000, managerPremiumBase: 8000, managerPremiumStepAmount: null, managerPremiumStepBonus: null }]);
+      const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+      expect(result!.totalRevenuePremium).toBe(0);
+      expect(result!.revenuePremiumFullDayShifts).toBe(0);
+      // Выручка 500k < порог 600k → лестничная тоже 0
+      expect(result!.managerLadderPremium).toBe(0);
+    });
   });
 });
 

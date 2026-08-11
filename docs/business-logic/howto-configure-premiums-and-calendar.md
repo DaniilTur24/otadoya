@@ -14,7 +14,7 @@
 
 ## Лестничная премия заведующих по аптеке (`/settings/pharmacies/[id]`)
 
-Применяется одинаково к `manager_trading` и `manager_fixed`, и опционально — к `pharmacy_manager` (если включён `managerPremiumEnabled` у конкретного менеджера, см. [howto-manage-employees.md](howto-manage-employees.md#заведующая-или-менеджер-users)).
+Применяется к `manager_fixed` (заведующая без личных продаж), и опционально — к `pharmacy_manager` (если включён `managerPremiumEnabled` у конкретного менеджера, см. [howto-manage-employees.md](howto-manage-employees.md#заведующая-или-менеджер-users)). У `manager_trading` (заведующая, которая торгует) этой премии нет — вместо неё личная премия за выручку смены, как у продавца.
 
 1. Откройте карточку нужной аптеки в настройках.
 2. В блоке «Премия заведующих этой аптеки» заполните четыре поля:

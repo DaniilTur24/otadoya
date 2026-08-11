@@ -104,6 +104,8 @@ model Employee {
   shiftRate    Decimal? @map("shift_rate")
   // Включена ли лестничная премия аптеки — используется только для pharmacy_manager
   managerPremiumEnabled Boolean @default(false) @map("manager_premium_enabled")
+  // Для manager_trading: если true — получает лестничную премию аптеки вместо личной премии за выручку смены
+  ladderPremiumEnabled  Boolean @default(false) @map("ladder_premium_enabled")
   // Фиксированная ежемесячная доплата сотруднику (любого типа) + описание, за что она начисляется
   allowance            Decimal @default(0) @map("allowance")
   allowanceDescription String  @default("") @map("allowance_description")
