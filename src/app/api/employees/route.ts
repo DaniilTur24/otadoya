@@ -13,7 +13,7 @@ function serialize(emp: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   // Только admin/bookkeeper могут создавать сотрудников
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription } = await request.json();

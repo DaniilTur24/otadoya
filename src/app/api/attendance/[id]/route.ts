@@ -7,7 +7,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const id = Number((await params).id);

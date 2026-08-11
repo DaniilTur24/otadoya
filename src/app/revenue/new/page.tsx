@@ -52,7 +52,6 @@ export default function NewRevenuePage() {
   const [role, setRole] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [monthClosedWarning, setMonthClosedWarning] = useState(false);
   const [selectedMonthClosed, setSelectedMonthClosed] = useState(false);
   const [error, setError] = useState('');
 
@@ -117,8 +116,9 @@ export default function NewRevenuePage() {
     const year = d.getFullYear();
     const month = d.getMonth() + 1;
     fetch(`/api/months/close?year=${year}&month=${month}`)
-      .then((r) => r.json())
-      .then((data) => setSelectedMonthClosed(data.isClosed));
+      .then((r) => (r.ok ? r.json() : { isClosed: false }))
+      .then((data) => setSelectedMonthClosed(data.isClosed === true))
+      .catch(() => setSelectedMonthClosed(false));
   }, [form.date]);
 
   function handleChange(
@@ -249,9 +249,7 @@ export default function NewRevenuePage() {
     });
 
     if (res.ok) {
-      const data = await res.json();
       setSuccess(true);
-      setMonthClosedWarning(data.monthClosed === true);
       setForm({
         pharmacyId: form.pharmacyId,
         date: today,
@@ -288,18 +286,13 @@ export default function NewRevenuePage() {
       )}
 
       {selectedMonthClosed && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-md text-amber-800 text-sm">
-          <strong>Этот месяц уже закрыт.</strong> Запись будет сохранена, но не будет учитываться в закрытии месяца и будет помечена как исключённая.
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-800 text-sm">
+          <strong>Этот месяц уже закрыт.</strong> Внести запись нельзя. Сначала откройте месяц в разделе «Закрытие месяца».
         </div>
       )}
-      {success && !monthClosedWarning && (
+      {success && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-green-800 text-sm">
           Запись сохранена.
-        </div>
-      )}
-      {success && monthClosedWarning && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-md text-amber-800 text-sm">
-          <strong>Запись сохранена, но этот месяц уже закрыт.</strong> Данная запись не будет учитываться в закрытии месяца и помечена как исключённая.
         </div>
       )}
       {error && (
@@ -676,7 +669,7 @@ export default function NewRevenuePage() {
         )}
 
         <div className="flex gap-3 pt-2">
-          <button type="submit" className="btn-primary" disabled={submitting}>
+          <button type="submit" className="btn-primary" disabled={submitting || selectedMonthClosed}>
             {submitting ? 'Сохранение...' : 'Сохранить'}
           </button>
           <button

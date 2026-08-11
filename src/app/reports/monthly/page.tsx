@@ -346,6 +346,32 @@ export default function MonthlyReportPage() {
     setSaving(false);
   }
 
+  function exportCsv() {
+    const header = ['Показатель', ...pharmacies.map((p) => p.name), 'ИТОГО'];
+    const lines: string[][] = [header];
+
+    for (const row of MONTHLY_REPORT_ROWS) {
+      if (row.section) {
+        lines.push([row.label]);
+        continue;
+      }
+      const values = pharmacies.map((p) => getCurrentValue(p.id, row.key).toFixed(row.decimals ?? 0));
+      lines.push([row.label, ...values, rowTotal(row.key).toFixed(row.decimals ?? 0)]);
+    }
+
+    const csv = lines
+      .map((cols) => cols.map((c) => `"${c.replace(/"/g, '""')}"`).join(';'))
+      .join('\r\n');
+    // BOM — иначе Excel открывает кириллицу в CSV как кракозябры
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `otchet_${year}_${String(month).padStart(2, '0')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const overrideCount = Object.keys(overrideMap).length;
 
   return (
@@ -378,6 +404,13 @@ export default function MonthlyReportPage() {
           {MONTH_NAMES[month - 1]} {year}
         </div>
         <div className="ml-auto flex items-center gap-3 flex-wrap">
+          <button
+            className="btn-secondary text-xs"
+            onClick={exportCsv}
+            disabled={loading || pharmacies.length === 0}
+          >
+            Скачать CSV
+          </button>
           {!isClosed && overrideCount > 0 && (
             <>
               <span className="text-xs text-amber-600">

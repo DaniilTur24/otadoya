@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /** GET /api/working-calendar?year=2025 — возвращает все записи за год (до 12 штук) */
 export async function GET(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const year = Number(new URL(request.url).searchParams.get('year') || new Date().getFullYear());
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
 /** PUT /api/working-calendar — создаёт или обновляет рабочие дни для месяца */
 export async function PUT(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const body = await request.json();

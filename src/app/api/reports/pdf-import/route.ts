@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 // GET — список всех загруженных PDF-отчётов
 export async function GET(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 
 // POST — загрузить PDF, извлечь данные (НЕ сохранять — только вернуть превью)
 export async function POST(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const formData   = await request.formData();

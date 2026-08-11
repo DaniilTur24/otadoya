@@ -14,7 +14,7 @@ function dateKey(d: Date): string {
  * POST/DELETE на каждый день.
  */
 export async function PUT(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const { employeeId, pharmacyId, year, month, dates } = await request.json();

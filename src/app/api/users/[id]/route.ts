@@ -14,7 +14,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const id = Number((await params).id);
@@ -101,7 +101,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const id = Number((await params).id);

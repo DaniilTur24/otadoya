@@ -42,7 +42,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const id = Number((await params).id);
@@ -65,7 +65,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const id = Number((await params).id);
@@ -140,8 +140,14 @@ export async function PUT(
   if (employeeId !== undefined) data.employeeId = employeeId ? Number(employeeId) : null;
   if (shiftType !== undefined) data.shiftType = shiftType || null;
   if (bookkeeperComment !== undefined) data.bookkeeperComment = bookkeeperComment || null;
-  if (status) data.status = status;
-  if (excludedFromReport !== undefined) data.excludedFromReport = excludedFromReport;
+  // Подтверждение/отклонение — только через /approve и /reject (admin/bookkeeper). Без этой
+  // проверки менеджер мог редактировать свою же pending-запись и сам выставить status:
+  // 'approved', в обход бухгалтера, влияя на собственную зарплату (премия/бонусы считаются
+  // только по approved-записям). excludedFromReport по той же причине — тоже решение бухгалтера.
+  const requestRole = getRequestRole(request);
+  const canSetReviewFields = requestRole === 'admin' || requestRole === 'bookkeeper';
+  if (status && canSetReviewFields) data.status = status;
+  if (excludedFromReport !== undefined && canSetReviewFields) data.excludedFromReport = excludedFromReport;
 
   // Если переданы строки расходов — пересохраняем их и пересчитываем сумму
   if (Array.isArray(expenseItems)) {

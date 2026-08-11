@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { computeMonthlyData, buildMonthlySnapshot } from '@/lib/monthly-report-builder';
-import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
+import { requireAdmin, requireAnyRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-// GET — проверить закрыт ли месяц
+// GET — проверить закрыт ли месяц. Middleware явно разрешает этот путь менеджеру
+// (нужно, чтобы /revenue/new мог предупредить его до сохранения записи) — раньше здесь
+// стоял requireAdminOrBookkeeper, менеджер получал 403, и фронт молча трактовал это как
+// «месяц открыт», не показывая предупреждение.
 export async function GET(request: NextRequest) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -27,7 +30,7 @@ export async function GET(request: NextRequest) {
 
 // POST — закрыть месяц: снапшот строится на сервере из актуальных данных БД
 export async function POST(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   let year: number, month: number;
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
 
 // DELETE — открыть месяц обратно
 export async function DELETE(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   let year: number, month: number;

@@ -13,7 +13,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);

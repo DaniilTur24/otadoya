@@ -16,7 +16,7 @@ export function getRequestUserId(request: Request): number | null {
   return isNaN(parsed) ? null : parsed;
 }
 
-export function requireRole(request: Request, allowedRoles: UserRole[]): NextResponse | null {
+export async function requireRole(request: Request, allowedRoles: UserRole[]): Promise<NextResponse | null> {
   const role = getRequestRole(request);
 
   if (!role) {
@@ -27,18 +27,29 @@ export function requireRole(request: Request, allowedRoles: UserRole[]): NextRes
     return NextResponse.json({ error: 'Доступ запрещён' }, { status: 403 });
   }
 
+  // admin/bookkeeper — из env, isActive у них нет. У manager isActive проверяется здесь
+  // на каждый запрос (а не только при логине): токен живёт 7 дней, а без этой проверки
+  // отключённый/уволенный заведующий сохранял бы доступ до истечения токена.
+  if (role === 'manager') {
+    const userId = getRequestUserId(request);
+    const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true } }) : null;
+    if (!user || !user.isActive) {
+      return NextResponse.json({ error: 'Аккаунт отключён' }, { status: 403 });
+    }
+  }
+
   return null;
 }
 
-export function requireAdmin(request: Request): NextResponse | null {
+export async function requireAdmin(request: Request): Promise<NextResponse | null> {
   return requireRole(request, ['admin']);
 }
 
-export function requireAdminOrBookkeeper(request: Request): NextResponse | null {
+export async function requireAdminOrBookkeeper(request: Request): Promise<NextResponse | null> {
   return requireRole(request, ['admin', 'bookkeeper']);
 }
 
-export function requireAnyRole(request: Request): NextResponse | null {
+export async function requireAnyRole(request: Request): Promise<NextResponse | null> {
   return requireRole(request, ['admin', 'bookkeeper', 'manager']);
 }
 

@@ -40,7 +40,7 @@ function validateTierRanges(
 
 // GET /api/office-premium-settings — таблица диапазонов выручки → премия офиса (все аптеки)
 export async function GET(request: NextRequest) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const tiers = await prisma.officePremiumTier.findMany({ orderBy: { fromAmount: 'asc' } });
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
 // PUT /api/office-premium-settings — body: { tiers: { fromAmount, toAmount, bonusAmount }[] }
 // Полностью заменяет таблицу диапазонов переданным списком.
 export async function PUT(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { tiers } = await request.json();

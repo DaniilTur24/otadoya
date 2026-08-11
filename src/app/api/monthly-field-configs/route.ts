@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/api-auth';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const saved = await prisma.monthlyFieldConfig.findMany();
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { fieldKey, rowType } = await request.json();

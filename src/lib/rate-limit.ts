@@ -12,14 +12,20 @@ function nowMs() {
   return Date.now();
 }
 
+// Приложение раздаётся напрямую с *.up.railway.app, без Cloudflare или другого CDN перед ним —
+// поэтому cf-connecting-ip/x-real-ip доверять нельзя вообще: их может свободно подставить сам
+// клиент, никто перед Railway их не перезаписывает. x-forwarded-for — тоже клиентский заголовок,
+// но ПОСЛЕДНЕЕ звено в нём добавляет собственный edge-прокси Railway на основе настоящего TCP-
+// соединения, и клиент это значение подделать не может (он может только дописать себе фальшивые
+// IP ПЕРЕД настоящим, что не меняет последнее звено). Если домен когда-нибудь окажется за другим
+// прокси/CDN — эту логику нужно будет пересмотреть под его конкретную схему заголовков.
 export function getClientIp(request: Request): string {
-  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return (
-    request.headers.get('cf-connecting-ip') ||
-    request.headers.get('x-real-ip') ||
-    forwardedFor ||
-    'unknown'
-  );
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    const parts = forwardedFor.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return 'unknown';
 }
 
 export function checkLoginRateLimit(key: string): { allowed: boolean; retryAfterSeconds?: number } {

@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { BANK_IMPORT_TARGET_FIELDS } from '@/lib/monthly-report-fields';
 import { requireAdmin } from '@/lib/api-auth';
+import { unsafeRegexReason } from '@/lib/regex-safety';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const rules = await prisma.transactionImportRule.findMany({
@@ -26,16 +27,29 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const body = await request.json();
   const name = String(body.name ?? '').trim();
   const pattern = String(body.pattern ?? '').trim();
+  const matchType = String(body.matchType || 'contains');
   const distributionType = String(body.distributionType || 'detect_pharmacy_from_text');
 
   if (!name || !pattern) {
     return NextResponse.json({ error: 'Название и pattern обязательны' }, { status: 400 });
+  }
+
+  if (matchType === 'regex') {
+    try {
+      new RegExp(pattern);
+    } catch {
+      return NextResponse.json({ error: 'Некорректное регулярное выражение' }, { status: 400 });
+    }
+    const unsafeReason = unsafeRegexReason(pattern);
+    if (unsafeReason) {
+      return NextResponse.json({ error: unsafeReason }, { status: 400 });
+    }
   }
 
   const rule = await prisma.transactionImportRule.create({
@@ -43,7 +57,7 @@ export async function POST(request: NextRequest) {
       name,
       sourceField: String(body.sourceField || 'any_text'),
       pattern,
-      matchType: String(body.matchType || 'contains'),
+      matchType,
       targetFieldKey: String(body.targetFieldKey || '') || null,
       distributionType,
       pharmacyId:

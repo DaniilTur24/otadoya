@@ -6,7 +6,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const body = await request.json().catch(() => ({}));

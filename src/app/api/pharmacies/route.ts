@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin, requireAnyRole, getManagerPharmacyIds } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const allowedIds = await getManagerPharmacyIds(request);
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { name, isActive } = await request.json();

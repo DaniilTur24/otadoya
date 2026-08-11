@@ -10,7 +10,7 @@ function serialize(u: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const users = await prisma.user.findMany({
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const { username, password, displayName, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled, ladderPremiumEnabled, allowance, allowanceDescription } =

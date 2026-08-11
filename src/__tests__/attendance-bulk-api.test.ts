@@ -14,6 +14,7 @@ vi.mock('@/lib/prisma', () => ({
     employee: { findUnique: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
     attendanceShift: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
+    user: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -24,6 +25,7 @@ import { PUT } from '@/app/api/attendance/bulk/route';
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findManyShifts = prisma.attendanceShift.findMany as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
+const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown, opts: { role?: string; userId?: number } = {}): Request {
@@ -42,6 +44,7 @@ beforeEach(() => {
   findUniqueEmployee.mockReset().mockResolvedValue({ id: 28, employeeType: 'manager_fixed' });
   findManyShifts.mockReset().mockResolvedValue([]);
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
+  findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   transaction.mockReset().mockResolvedValue([]);
 });
 

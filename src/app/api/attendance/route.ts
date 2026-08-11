@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 // GET /api/attendance?employeeId=&date=&month=&year=&pharmacyId=
 // Возвращает отметки табеля посещаемости (manager_fixed / cleaner / office).
 export async function GET(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
 // POST /api/attendance { employeeId, date, pharmacyId? }
 // Отмечает одну отработанную смену сотрудника на дату (manager_fixed / cleaner / office).
 export async function POST(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const { employeeId, date, pharmacyId } = await request.json();

@@ -17,6 +17,9 @@ vi.mock('@/lib/prisma', () => ({
     userPharmacy: {
       findMany: vi.fn(),
     },
+    user: {
+      findUnique: vi.fn(),
+    },
   },
 }));
 
@@ -25,6 +28,7 @@ import { GET } from '@/app/api/employees/route';
 
 const findManyEmployees = prisma.employee.findMany as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
+const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(url: string, opts: { role?: string; userId?: number } = {}): Request {
   const headers: Record<string, string> = {};
@@ -36,7 +40,9 @@ function makeRequest(url: string, opts: { role?: string; userId?: number } = {})
 beforeEach(() => {
   findManyEmployees.mockReset();
   findManyUserPharmacy.mockReset();
+  findUniqueUser.mockReset();
   findManyEmployees.mockResolvedValue([]);
+  findUniqueUser.mockResolvedValue({ isActive: true });
 });
 
 describe('GET /api/employees — фильтрация по аптеке для заведующего', () => {

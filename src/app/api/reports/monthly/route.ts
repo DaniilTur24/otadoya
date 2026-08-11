@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/api-auth';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
 // PUT — сохранить или удалить override для одной ячейки
 export async function PUT(request: NextRequest) {
-  const auth = requireAdmin(request);
+  const auth = await requireAdmin(request);
   if (auth) return auth;
 
   const { year, month, pharmacyId, fieldKey, value } = await request.json();

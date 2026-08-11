@@ -19,20 +19,28 @@ describe('getClientIp', () => {
     return new Request('http://localhost/', { headers });
   }
 
-  it('prefers cf-connecting-ip', () => {
+  it('ignores cf-connecting-ip and x-real-ip — не за Cloudflare/прокси, клиент может их подделать', () => {
     expect(
       getClientIp(makeRequest({ 'cf-connecting-ip': '1.1.1.1', 'x-real-ip': '2.2.2.2' }))
-    ).toBe('1.1.1.1');
+    ).toBe('unknown');
   });
 
-  it('falls back to x-real-ip when cf-connecting-ip absent', () => {
-    expect(getClientIp(makeRequest({ 'x-real-ip': '3.3.3.3' }))).toBe('3.3.3.3');
-  });
-
-  it('falls back to first x-forwarded-for entry', () => {
+  it('uses the LAST x-forwarded-for entry — это то звено, которое добавляет сам Railway', () => {
     expect(
       getClientIp(makeRequest({ 'x-forwarded-for': '4.4.4.4, 5.5.5.5' }))
-    ).toBe('4.4.4.4');
+    ).toBe('5.5.5.5');
+  });
+
+  it('клиент не может подменить IP, дописав фальшивые адреса перед настоящим', () => {
+    // Атакующий шлёт свой собственный x-forwarded-for — но Railway дописывает
+    // РЕАЛЬНЫЙ IP последним звеном, поэтому подмена не проходит.
+    expect(
+      getClientIp(makeRequest({ 'x-forwarded-for': 'attacker-spoofed-1, attacker-spoofed-2, 9.9.9.9' }))
+    ).toBe('9.9.9.9');
+  });
+
+  it('handles a single x-forwarded-for entry (no proxy hops)', () => {
+    expect(getClientIp(makeRequest({ 'x-forwarded-for': '6.6.6.6' }))).toBe('6.6.6.6');
   });
 
   it('returns "unknown" when no IP headers present', () => {

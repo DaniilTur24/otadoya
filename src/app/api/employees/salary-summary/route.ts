@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 // Возвращает зарплаты всех активных сотрудников за указанный месяц.
 // Используется в закрытии месяца для расчёта статьи «Зарплата сотрудников».
 export async function GET(request: NextRequest) {
-  const auth = requireAdminOrBookkeeper(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);

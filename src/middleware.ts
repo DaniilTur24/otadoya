@@ -56,7 +56,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: 'Файл слишком большой' }, { status: 413 });
   }
 
-  if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
+  if (pathname.startsWith('/login') || pathname.startsWith('/api/auth') || pathname === '/api/health') {
     return NextResponse.next();
   }
 
@@ -99,6 +99,10 @@ export async function middleware(request: NextRequest) {
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-user-role', role);
+  // Всегда затираем клиентский x-user-id перед условной установкой — иначе для admin/bookkeeper
+  // (у которых в JWT нет userId) подставленный клиентом заголовок проходит насквозь и попадает
+  // в submittedById/approvedById, портя журнал «кто подтвердил запись».
+  requestHeaders.delete('x-user-id');
   if (userId !== null) requestHeaders.set('x-user-id', String(userId));
 
   return NextResponse.next({ request: { headers: requestHeaders } });

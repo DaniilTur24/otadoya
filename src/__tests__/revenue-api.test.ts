@@ -16,6 +16,7 @@ vi.mock('@/lib/prisma', () => ({
     closedMonth: { findUnique: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
     dailyRevenueEntry: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    user: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -31,6 +32,7 @@ const findUniqueRevenueEntry = prisma.dailyRevenueEntry.findUnique as unknown as
 const findFirstRevenueEntry = prisma.dailyRevenueEntry.findFirst as unknown as ReturnType<typeof vi.fn>;
 const updateRevenueEntry = prisma.dailyRevenueEntry.update as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
+const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(method: string, url: string, body: unknown, opts: { role?: string; userId?: number } = {}): Request {
@@ -60,6 +62,7 @@ beforeEach(() => {
   findUniqueRevenueEntry.mockReset();
   findFirstRevenueEntry.mockReset().mockResolvedValue(null);
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
+  findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   updateRevenueEntry.mockReset().mockResolvedValue({ id: 1, expenseItems: [] });
   transaction.mockReset().mockImplementation(async (cb: (tx: unknown) => unknown) =>
     cb({
@@ -137,6 +140,28 @@ describe('POST /api/revenue — дополнительные проверки', 
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/отрицательным/);
+  });
+
+  it('отклоняет новую запись в уже закрытый месяц', async () => {
+    findUniqueClosedMonth.mockResolvedValue({ id: 1 });
+
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', baseBody)
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(423);
+    expect(res.body.error).toMatch(/закрыт/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('разрешает бэкдейтинг в открытый месяц', async () => {
+    findUniqueClosedMonth.mockResolvedValue(null);
+
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', { ...baseBody, date: '2020-01-15' })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
   });
 });
 
@@ -250,5 +275,52 @@ describe('PUT /api/revenue/[id] — запрет смены для табель�
     ) as unknown as { status: number };
 
     expect(res.status).toBe(200);
+  });
+
+  it('заведующий не может сам подтвердить свою запись через status в PUT', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'pending', submittedById: 5, date: new Date('2026-06-26'),
+    });
+    findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 1 }]);
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { status: 'approved' }, { role: 'manager', userId: 5 }),
+      makeParams(1)
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    const lastCall = updateRevenueEntry.mock.calls[updateRevenueEntry.mock.calls.length - 1];
+    expect(lastCall[0].data.status).toBeUndefined();
+  });
+
+  it('заведующий не может скрыть свою запись из отчёта через excludedFromReport в PUT', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'pending', submittedById: 5, date: new Date('2026-06-26'),
+    });
+    findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 1 }]);
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { excludedFromReport: true }, { role: 'manager', userId: 5 }),
+      makeParams(1)
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    const lastCall = updateRevenueEntry.mock.calls[updateRevenueEntry.mock.calls.length - 1];
+    expect(lastCall[0].data.excludedFromReport).toBeUndefined();
+  });
+
+  it('бухгалтер может подтвердить запись через status в PUT', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'pending', submittedById: 5, date: new Date('2026-06-26'),
+    });
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { status: 'approved' }, { role: 'bookkeeper' }),
+      makeParams(1)
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    const lastCall = updateRevenueEntry.mock.calls[updateRevenueEntry.mock.calls.length - 1];
+    expect(lastCall[0].data.status).toBe('approved');
   });
 });

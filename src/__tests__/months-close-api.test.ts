@@ -13,25 +13,61 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     closedMonth: { findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
     dailyRevenueEntry: { updateMany: vi.fn() },
+    user: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
 
 import { prisma } from '@/lib/prisma';
-import { DELETE } from '@/app/api/months/close/route';
+import { GET, DELETE } from '@/app/api/months/close/route';
 
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
+const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(body: unknown): Request {
+function makeRequest(body: unknown, method = 'DELETE', role = 'admin'): Request {
   return new Request('http://localhost/api/months/close', {
-    method: 'DELETE',
-    headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
+    method,
+    headers: { 'x-user-role': role, 'x-user-id': '5', 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 }
 
+function makeGetRequest(year: number, month: number, role: string, userId?: number): Request {
+  const headers: Record<string, string> = { 'x-user-role': role };
+  if (userId !== undefined) headers['x-user-id'] = String(userId);
+  return new Request(`http://localhost/api/months/close?year=${year}&month=${month}`, { headers });
+}
+
 beforeEach(() => {
   transaction.mockReset().mockResolvedValue([{}, { count: 0 }]);
+  findUniqueClosedMonth.mockReset().mockResolvedValue(null);
+  findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
+});
+
+describe('GET /api/months/close — статус доступен и менеджеру', () => {
+  it('заведующий получает статус месяца, а не 403', async () => {
+    findUniqueClosedMonth.mockResolvedValue(null);
+
+    const res = await GET(makeGetRequest(2026, 6, 'manager', 5)) as unknown as { status: number; body: { isClosed: boolean } };
+
+    expect(res.status).toBe(200);
+    expect(res.body.isClosed).toBe(false);
+  });
+
+  it('заведующий видит isClosed: true для закрытого месяца', async () => {
+    findUniqueClosedMonth.mockResolvedValue({ id: 1, closedAt: new Date('2026-07-01') });
+
+    const res = await GET(makeGetRequest(2026, 6, 'manager', 5)) as unknown as { status: number; body: { isClosed: boolean } };
+
+    expect(res.status).toBe(200);
+    expect(res.body.isClosed).toBe(true);
+  });
+
+  it('без роли — 401', async () => {
+    const res = await GET(new Request('http://localhost/api/months/close?year=2026&month=6')) as unknown as { status: number };
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('DELETE /api/months/close — повторное открытие месяца', () => {

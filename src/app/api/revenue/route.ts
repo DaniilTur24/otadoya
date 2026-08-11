@@ -22,7 +22,7 @@ function serializeEntry(entry: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const { searchParams } = new URL(request.url);
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAnyRole(request);
+  const auth = await requireAnyRole(request);
   if (auth) return auth;
 
   const role = getRequestRole(request)!;
@@ -85,6 +85,19 @@ export async function POST(request: NextRequest) {
 
   const amountsError = validateNonNegativeAmounts({ cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue });
   if (amountsError) return NextResponse.json({ error: amountsError }, { status: 400 });
+
+  const entryDate = new Date(date);
+  const entryYear = entryDate.getFullYear();
+  const entryMonth = entryDate.getMonth() + 1;
+  const closedMonth = await prisma.closedMonth.findUnique({
+    where: { year_month: { year: entryYear, month: entryMonth } },
+  });
+  if (closedMonth) {
+    return NextResponse.json(
+      { error: 'Месяц закрыт — новые записи недопустимы. Сначала откройте месяц в разделе «Закрытие месяца»' },
+      { status: 423 }
+    );
+  }
 
   if (employeeId) {
     const shiftError = await validateShiftEmployeeType(Number(employeeId), shiftType || null);
@@ -147,14 +160,6 @@ export async function POST(request: NextRequest) {
           .join('; ')
       : null;
 
-  const entryDate = new Date(date);
-  const entryYear = entryDate.getFullYear();
-  const entryMonth = entryDate.getMonth() + 1;
-  const closedMonth = await prisma.closedMonth.findUnique({
-    where: { year_month: { year: entryYear, month: entryMonth } },
-  });
-  const isMonthClosed = !!closedMonth;
-
   // Менеджер создаёт записи со статусом pending; admin/bookkeeper — сразу approved
   const entryStatus = role === 'manager' ? 'pending' : 'approved';
 
@@ -174,7 +179,6 @@ export async function POST(request: NextRequest) {
         employeeId: employeeId ? Number(employeeId) : null,
         shiftType: shiftType || null,
         status: entryStatus,
-        excludedFromReport: isMonthClosed,
         submittedById: userId,
         ...(entryStatus === 'approved' ? { approvedAt: new Date() } : {}),
       },
@@ -198,8 +202,5 @@ export async function POST(request: NextRequest) {
     });
   });
 
-  return NextResponse.json(
-    { ...serializeEntry(entry as unknown as Record<string, unknown>), monthClosed: isMonthClosed },
-    { status: 201 }
-  );
+  return NextResponse.json(serializeEntry(entry as unknown as Record<string, unknown>), { status: 201 });
 }
