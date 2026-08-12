@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Standalone daily DB backup: pg_dump -> Cloudflare R2. Run as its own Railway cron
-// service (see docs/db-backup-setup.md) — not part of the main app's request path.
+// Standalone daily DB backup: pg_dump -> Cloudflare R2. Deployed as its own Railway
+// service (rootDirectory: backup/) so it gets a plain Node.js build — Railpack ships
+// only framework build output for the main Next.js app, not arbitrary source files.
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

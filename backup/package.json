@@ -1,0 +1,11 @@
+{
+  "name": "otadoya-backup",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node backup-db.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1051.0"
+  }
+}

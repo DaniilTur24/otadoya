@@ -10,7 +10,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "backup:db": "node scripts/backup-db.mjs",
+    "backup:db": "cd backup && npm install && node backup-db.mjs",
     "clean": "if exist .next rmdir /s /q .next",
     "test": "vitest run",
     "test:watch": "vitest"
