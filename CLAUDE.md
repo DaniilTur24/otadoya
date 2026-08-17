@@ -11,9 +11,9 @@ After large changes or adding new functions that could conflict with existing lo
 ## Commands
 
 ```bash
-npm run dev          # Start dev server (uses local SQLite)
+npm run dev          # Start dev server (connects to the staging Postgres via .env DATABASE_URL)
 npm run build        # Production build
-npm run db:push      # Sync Prisma schema to local SQLite (dev only)
+npm run db:push      # Sync Prisma schema to the database in DATABASE_URL (dev only)
 npm run db:studio    # Open Prisma Studio (GUI for local DB)
 npm test             # Run full Vitest suite once
 npm run test:watch   # Vitest in watch mode
@@ -29,9 +29,12 @@ For the full user-facing flow (entering daily revenue, the 6 employee types, sal
 
 ## Architecture
 
-**Next.js 15 App Router** with Prisma ORM. Two environments:
-- **Local dev**: SQLite (`prisma/dev.db`), files saved to `uploads/` folder
-- **Production (Railway)**: PostgreSQL, files stored in Cloudflare R2
+**Next.js 15 App Router** with Prisma ORM, PostgreSQL everywhere (no SQLite — the project migrated off it early on; `prisma/schema.prisma`'s datasource is hardcoded `provider = "postgresql"`). Three tiers, all on the same Railway project (`pharmacy-otadoya`):
+- **Local dev**: your machine, pointed via `.env` `DATABASE_URL` at the staging Postgres (public proxy connection string) — never at production. Uploaded files fall back to the local `uploads/` folder since staging has no R2 vars configured.
+- **Staging** (Railway environment `development`, service `otadoya-staging`): auto-deploys from the `feature` branch, its own Postgres (`Postgres-HKNu`), no R2 (falls back to local disk on the container — ephemeral). Domain: `otadoya-staging-development.up.railway.app`. Use this to check changes before they reach `dev`/production.
+- **Production** (Railway environment `production`, service `otadoya`): auto-deploys from the `dev` branch (yes — `dev` is the branch that ships to prod; `main` is stale and unused, missing several merged features including the pre-launch security hardening — don't treat it as canonical), its own Postgres, Cloudflare R2 for file storage. Domain: `otadoya-production.up.railway.app`.
+
+Real workflow: commit to `feature` → pushes auto-deploy staging → verify on the staging domain → merge `feature` into `dev` → pushes auto-deploy production.
 
 ### Auth & RBAC
 
@@ -61,7 +64,7 @@ Key Prisma models and what they store:
 | `DailyExpenseItem` | Детализация расходов по записи выручки; `category` — ключ из `MONTHLY_EXPENSE_KEYS`. Имеет собственный nullable `employeeId` — получатель, который может отличаться от сотрудника самой записи (используется для `employeeAdvance`, см. ниже) |
 | `AttendanceShift` | Отметка одной отработанной смены в табеле посещаемости (employeeId + date, опционально pharmacyId) — для типов из `ATTENDANCE_BASED_TYPES`, у которых смена не привязана к записи выручки |
 | `WorkingCalendar` | Кол-во рабочих дней по (год, месяц) — делитель оклада для пятидневной смены (`five_day` / табельных типов) |
-| `OfficePremiumSettings` | Синглтон: глобальная лестница премии офисных сотрудников от суммарной выручки всех аптек |
+| `OfficePremiumTier` | Глобальная таблица произвольных диапазонов выручки (fromAmount/toAmount/bonusAmount) для премии офисных сотрудников от суммарной выручки всех аптек; `toAmount = null` — последняя строка без верхней границы |
 | `UploadedFile` | Загруженный файл (bank_transactions_excel или другой тип) |
 | `ExtractedExpenseEntry` | Строки из не-банковских файлов; category: `rent` → `rentExpenses`, `expense` → `bankServices` |
 | `TransactionImportRule` | Правило сопоставления строк банк-выписки (sourceField, pattern, matchType, distributionType) |
@@ -125,10 +128,12 @@ Key Prisma models and what they store:
 | `manager_trading` | same as seller, shift `day`/`full_day` | same shift-based base pay as seller, but **no** revenuePremium — instead: 10% of the managed pharmacy's `pharmaBonus` total (`MANAGER_BONUS_SHARE_PERCENT`) + per-pharmacy `managerAllowance` + per-pharmacy ladder premium (see below) − advances |
 | `manager_fixed` | `AttendanceShift` (табель) | baseSalary / `WorkingCalendar.workingDays` × attendance count + 10% bonus share + managerAllowance + ladder premium − advances |
 | `cleaner` | `AttendanceShift` | `shiftRate` × attendance count − advances (no baseSalary involved) |
-| `office` | `AttendanceShift` | baseSalary / workingDays × attendance count + global office ladder premium (`OfficePremiumSettings`, from total revenue of **all** pharmacies) − advances |
+| `office` | `AttendanceShift` | baseSalary / workingDays × attendance count + global office tier premium (`OfficePremiumTier`, from total revenue of **all** pharmacies) − advances |
 | `pharmacy_manager` | `AttendanceShift` | baseSalary / workingDays × attendance count + optional per-pharmacy ladder premium (only if `managerPremiumEnabled`) − advances. No bonus share, no managerAllowance |
 
-"Ladder premium" (`computeLadderPremium`): if revenue ≥ `threshold`, pay `base`, then add one `stepBonus` for each full `stepAmount` of revenue above the threshold. Each pharmacy has its own threshold/base/step on the `Pharmacy` model; office uses the single global `OfficePremiumSettings` row instead.
+"Ladder premium" (`computeLadderPremium`): if revenue ≥ `threshold`, pay `base`, then add one `stepBonus` for each full `stepAmount` of revenue above the threshold. Each pharmacy has its own threshold/base/step on the `Pharmacy` model — used by `manager_trading`, `manager_fixed`, and `pharmacy_manager`.
+
+`office` uses a different mechanism: `findOfficeTierBonus` looks up total revenue of **all** pharmacies against a global, non-cumulative table of arbitrary ranges (`OfficePremiumTier`: `fromAmount`/`toAmount`/`bonusAmount`, matched `fromAmount < revenue <= toAmount`; `toAmount = null` = no upper bound) and pays the single bonus of the matching row — not a threshold+step formula.
 
 Only `status: 'approved'` records count. `totalSalary` can go negative if advances exceed earnings. `ATTENDANCE_BASED_TYPES` (`manager_fixed`, `cleaner`, `office`, `pharmacy_manager`) get their shift count from `AttendanceShift`, not from revenue entries — see Attendance Tracking below. `USER_LINKED_TYPES` (`manager_trading`, `manager_fixed`, `pharmacy_manager`) are included in `calculateAllEmployeesSalaries()` even with zero records, since their allowance/premium accrues regardless of personal shifts.
 
@@ -140,7 +145,7 @@ For `ATTENDANCE_BASED_TYPES` (`manager_fixed`, `cleaner`, `office`, `pharmacy_ma
 
 ### Office Premium (`/settings/office-premium`, `src/app/api/office-premium-settings/`)
 
-Single global ladder (`OfficePremiumSettings`, one row, admin-only `PUT`) applied to all `office`-type employees against the combined revenue of every pharmacy for the month — see ladder premium formula above.
+Global table of revenue tiers (`OfficePremiumTier`, admin-only `PUT` replaces the whole table) applied to all `office`-type employees against the combined revenue of every pharmacy for the month — see the tier-lookup formula above (distinct from the pharmacy ladder premium).
 
 ## CSS Conventions
 
@@ -164,11 +169,11 @@ R2_BUCKET_NAME       # R2 bucket name
 
 ## Deployment
 
-Railway auto-deploys from the `dev` branch. On each deploy:
+See the three-tier layout under Architecture above. Both `otadoya-staging` (from `feature`) and `otadoya` production (from `dev`) share the same `railway.toml`:
 1. Build: `npx prisma generate && npm run build`
 2. Start: `npx prisma migrate deploy && npm run start`
 
-Migration files live in `prisma/migrations/`. When changing the schema, create a new migration with `npx prisma migrate dev --name <name>` (requires local PostgreSQL or use `--create-only` to generate SQL without applying).
+Migration files live in `prisma/migrations/`. When changing the schema, create a new migration with `npx prisma migrate dev --name <name>` against the staging database (already wired up via local `.env`), then push `feature`/merge to `dev` — `migrate deploy` runs automatically on every deploy for both staging and production.
 
 ## gstack (REQUIRED — global install)
 
