@@ -753,7 +753,7 @@ export default function NewRevenuePage() {
 
         <div className="flex gap-3 pt-2">
           <button type="submit" className="btn-primary" disabled={submitting || selectedMonthClosed}>
-            {submitting ? 'Сохранение...' : 'Сохранить'}
+            {submitting && <span className="spinner" />}{submitting ? 'Сохранение...' : 'Сохранить'}
           </button>
           <button
             type="button"

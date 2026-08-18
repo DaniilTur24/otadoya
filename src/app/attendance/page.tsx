@@ -282,8 +282,12 @@ export default function AttendancePage() {
         {hasRange && (
           <div className="ml-auto flex items-center gap-2 text-sm">
             <span className="text-slate-500">Выделено {rangeDays.length} дн.</span>
-            <button type="button" className="btn-primary" disabled={busy} onClick={() => applyRange(true)}>Отметить</button>
-            <button type="button" className="btn-secondary" disabled={busy} onClick={() => applyRange(false)}>Снять</button>
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => applyRange(true)}>
+              {busy && <span className="spinner" />}Отметить
+            </button>
+            <button type="button" className="btn-secondary" disabled={busy} onClick={() => applyRange(false)}>
+              {busy && <span className="spinner" />}Снять
+            </button>
             <button type="button" className="text-slate-400 hover:text-slate-600" onClick={() => setAnchor(selected)}>✕</button>
           </div>
         )}
@@ -294,7 +298,9 @@ export default function AttendancePage() {
       )}
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : flatEmployees.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
           Нет сотрудников с типом «Уборщица», «Офис», «Менеджер», «Заведующая (не торгует)» или продавцов с включённой пятидневкой по табелю.

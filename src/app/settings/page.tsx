@@ -110,7 +110,9 @@ export default function SettingsPage() {
       <h2 className="font-semibold text-slate-800 mb-3">Аптеки</h2>
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : (
         <>
           {pharmacies.length > 0 && (
@@ -195,7 +197,7 @@ export default function SettingsPage() {
                 disabled={creating || !newName.trim()}
                 onClick={create}
               >
-                {creating ? 'Создание...' : 'Создать'}
+                {creating && <span className="spinner" />}{creating ? 'Создание...' : 'Создать'}
               </button>
             </div>
           </div>

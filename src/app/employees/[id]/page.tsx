@@ -214,7 +214,11 @@ export default function EmployeeDetailPage() {
   }
 
   if (!employee) {
-    return <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>;
+    return (
+      <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+        <span className="spinner" /> Загрузка...
+      </div>
+    );
   }
 
   const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
@@ -418,7 +422,7 @@ export default function EmployeeDetailPage() {
                       setAssignedPharmacyIds(updated.pharmacies.map((p) => p.id));
                     }}
                   >
-                    {pharmacySaving ? 'Сохранение...' : 'Сохранить'}
+                    {pharmacySaving && <span className="spinner" />}{pharmacySaving ? 'Сохранение...' : 'Сохранить'}
                   </button>
                   <button
                     type="button"
@@ -450,7 +454,7 @@ export default function EmployeeDetailPage() {
 
         <div className="flex gap-2 pt-1">
           <button type="submit" className="btn-primary text-sm" disabled={saving}>
-            {saving ? 'Сохранение...' : 'Сохранить'}
+            {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Сохранить'}
           </button>
         </div>
       </form>
@@ -499,7 +503,9 @@ export default function EmployeeDetailPage() {
         </div>
 
         {salaryLoading ? (
-          <div className="text-sm text-slate-400 py-4 text-center">Расчёт...</div>
+          <div className="text-sm text-slate-400 py-4 text-center flex items-center justify-center gap-2">
+            <span className="spinner" /> Расчёт...
+          </div>
         ) : salary && (
             salary.recordsCount > 0 ||
             salary.advances.length > 0 ||

@@ -76,7 +76,7 @@ export default function LoginPage() {
           </div>
 
           <button type="submit" className="btn-primary w-full" disabled={loading}>
-            {loading ? 'Вход...' : 'Войти'}
+            {loading && <span className="spinner" />}{loading ? 'Вход...' : 'Войти'}
           </button>
         </form>
       </div>

@@ -91,7 +91,11 @@ export default function PharmacyEditPage() {
   }
 
   if (loading) {
-    return <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>;
+    return (
+      <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+        <span className="spinner" /> Загрузка...
+      </div>
+    );
   }
 
   return (
@@ -224,7 +228,7 @@ export default function PharmacyEditPage() {
         {/* Кнопки */}
         <div className="flex gap-3 pt-2">
           <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? 'Сохранение...' : 'Сохранить'}
+            {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Сохранить'}
           </button>
           <button type="button" className="btn-secondary" onClick={() => router.push('/settings')}>
             Назад к списку

@@ -84,7 +84,9 @@ export default function WorkingCalendarPage() {
       </div>
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : (
         <div className="card divide-y divide-slate-100">
           {MONTHS.map((name, i) => {
@@ -111,7 +113,7 @@ export default function WorkingCalendarPage() {
                   disabled={isSaving || !entries[month]}
                   className="btn-primary text-xs ml-auto shrink-0"
                 >
-                  {isSaving ? '...' : isSaved ? 'Сохранено' : 'Сохранить'}
+                  {isSaving && <span className="spinner" />}{isSaving ? 'Сохранение' : isSaved ? 'Сохранено' : 'Сохранить'}
                 </button>
               </div>
             );

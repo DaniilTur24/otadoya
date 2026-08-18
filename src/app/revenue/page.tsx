@@ -712,7 +712,7 @@ export default function RevenueListPage() {
 
           <div className="flex gap-3">
             <button className="btn-primary" onClick={saveEdit} disabled={saving}>
-              {saving ? 'Сохранение...' : 'Сохранить изменения'}
+              {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Сохранить изменения'}
             </button>
             <button className="btn-secondary" onClick={cancelEdit}>Отмена</button>
           </div>
@@ -721,7 +721,9 @@ export default function RevenueListPage() {
 
       {/* Таблица записей */}
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : entries.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
           Нет записей за выбранный период

@@ -378,7 +378,7 @@ export default function MonthlyReportPage() {
     <div>
       <div className="flex items-center gap-4 mb-1 flex-wrap">
         <h1 className="text-lg font-semibold text-slate-900">Закрытие месяца</h1>
-        {saving && <span className="text-xs text-slate-700">Сохранение...</span>}
+        {saving && <span className="text-xs text-slate-700 inline-flex items-center gap-1.5"><span className="spinner" />Сохранение...</span>}
       </div>
       <p className="text-slate-500 text-sm mb-5">
         Кликните на ячейку, чтобы выбрать её — стрелки и Tab перемещают выбор. Enter, F2, двойной клик или начало ввода числа открывают редактирование;
@@ -423,19 +423,19 @@ export default function MonthlyReportPage() {
           )}
           {isClosed ? (
             <button
-              className="text-xs px-3 py-1.5 rounded border bg-white text-slate-600 border-slate-300 hover:border-slate-400"
+              className="text-xs px-3 py-1.5 rounded border bg-white text-slate-600 border-slate-300 hover:border-slate-400 inline-flex items-center gap-1.5"
               onClick={reopenMonth}
               disabled={closing}
             >
-              {closing ? 'Открытие...' : 'Открыть месяц'}
+              {closing && <span className="spinner" />}{closing ? 'Открытие...' : 'Открыть месяц'}
             </button>
           ) : (
             <button
-              className="text-xs px-3 py-1.5 rounded border bg-green-600 text-white border-green-600 hover:bg-green-700"
+              className="text-xs px-3 py-1.5 rounded border bg-green-600 text-white border-green-600 hover:bg-green-700 inline-flex items-center gap-1.5"
               onClick={closeMonth}
               disabled={closing || loading}
             >
-              {closing ? 'Закрытие...' : 'Закрыть месяц'}
+              {closing && <span className="spinner" />}{closing ? 'Закрытие...' : 'Закрыть месяц'}
             </button>
           )}
         </div>
@@ -451,7 +451,9 @@ export default function MonthlyReportPage() {
       )}
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">

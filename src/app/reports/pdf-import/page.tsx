@@ -287,7 +287,7 @@ export default function PdfImportPage() {
               </div>
             </div>
             <button type="submit" className="btn-primary" disabled={uploading || !file || !pharmacyId}>
-              {uploading ? 'Парсинг PDF...' : 'Загрузить и извлечь данные'}
+              {uploading && <span className="spinner" />}{uploading ? 'Парсинг PDF...' : 'Загрузить и извлечь данные'}
             </button>
           </form>
         </div>
@@ -364,15 +364,15 @@ export default function PdfImportPage() {
           <div className="flex gap-3">
             {existingReport ? (
               <button
-                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-1.5"
                 onClick={handleConfirm}
                 disabled={saving}
               >
-                {saving ? 'Сохранение...' : 'Да, заменить старый отчёт'}
+                {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Да, заменить старый отчёт'}
               </button>
             ) : (
               <button className="btn-primary" onClick={handleConfirm} disabled={saving}>
-                {saving ? 'Сохранение...' : 'Подтвердить и сохранить'}
+                {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Подтвердить и сохранить'}
               </button>
             )}
             <button className="btn-secondary" onClick={cancelPreview}>Отмена</button>

@@ -27,6 +27,7 @@ export default function UsersPage() {
   const [managers, setManagers] = useState<Manager[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -107,6 +108,7 @@ export default function UsersPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setSaving(true);
 
     const body: Record<string, unknown> = {
       displayName: form.displayName,
@@ -146,6 +148,7 @@ export default function UsersPage() {
       const d = await res.json();
       setError(d.error || 'Ошибка сохранения');
     }
+    setSaving(false);
   }
 
   async function toggleActive(m: Manager) {
@@ -364,8 +367,8 @@ export default function UsersPage() {
             </div>
 
             <div className="flex gap-3 pt-1">
-              <button type="submit" className="btn-primary">
-                {editingId !== null ? 'Сохранить' : 'Создать'}
+              <button type="submit" className="btn-primary" disabled={saving}>
+                {saving && <span className="spinner" />}{editingId !== null ? 'Сохранить' : 'Создать'}
               </button>
               <button type="button" className="btn-secondary" onClick={resetForm}>Отмена</button>
             </div>
@@ -374,7 +377,9 @@ export default function UsersPage() {
       )}
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : managers.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
           Нет заведующих и менеджеров. Нажмите «+ Добавить» чтобы создать первого.

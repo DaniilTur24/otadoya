@@ -297,7 +297,7 @@ export default function EmployeesPage() {
           )}
           <div className="flex gap-2 pt-1">
             <button type="submit" className="btn-primary text-sm" disabled={saving}>
-              {saving ? 'Сохранение...' : 'Создать'}
+              {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Создать'}
             </button>
             <button
               type="button"
@@ -311,7 +311,9 @@ export default function EmployeesPage() {
       )}
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : (
         <>
           {selectedIds.size > 0 && (

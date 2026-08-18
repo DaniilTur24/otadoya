@@ -30,6 +30,7 @@ export default function PharmacyAliasesSettingsPage() {
   const [aliases, setAliases] = useState<PharmacyAlias[]>([]);
   const [filterPharmacyId, setFilterPharmacyId] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     pharmacyId: '',
     alias: '',
@@ -68,11 +69,13 @@ export default function PharmacyAliasesSettingsPage() {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    setSaving(true);
     await fetch(editingId ? `/api/pharmacy-aliases/${editingId}` : '/api/pharmacy-aliases', {
       method: editingId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     });
+    setSaving(false);
     resetForm();
     load();
   }
@@ -147,7 +150,9 @@ export default function PharmacyAliasesSettingsPage() {
             Активно
           </label>
           <div className="flex gap-2">
-            <button className="btn-primary" type="submit">{editingId ? 'Сохранить' : 'Создать'}</button>
+            <button className="btn-primary" type="submit" disabled={saving}>
+              {saving && <span className="spinner" />}{editingId ? 'Сохранить' : 'Создать'}
+            </button>
             {editingId && <button className="btn-secondary" type="button" onClick={resetForm}>Отмена</button>}
           </div>
         </form>

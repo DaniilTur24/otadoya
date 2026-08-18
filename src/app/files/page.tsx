@@ -166,7 +166,7 @@ export default function FilesPage() {
           </div>
 
           <button className="btn-primary" disabled={uploading || !selectedFile}>
-            {uploading ? 'Импорт...' : 'Загрузить и разобрать'}
+            {uploading && <span className="spinner" />}{uploading ? 'Импорт...' : 'Загрузить и разобрать'}
           </button>
         </form>
 
@@ -176,7 +176,9 @@ export default function FilesPage() {
 
       <h2 className="font-semibold text-slate-800 mb-3">Загруженные банковские выписки</h2>
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : imports.length === 0 ? (
         <div className="card p-5 text-sm text-slate-500 text-center">Импортов пока нет</div>
       ) : (

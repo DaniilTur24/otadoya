@@ -264,7 +264,9 @@ export default function FileReviewPage() {
       )}
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : transactions.length === 0 ? (
         <div className="card p-5 text-center text-sm text-slate-500">Транзакций не найдено</div>
       ) : (
@@ -425,7 +427,7 @@ export default function FileReviewPage() {
 
                 <div className="mt-3 flex gap-2 items-center">
                   <button className="btn-success text-xs" disabled={isSaving} onClick={() => saveTransaction(transaction, 'approved')}>
-                    {isSaving ? 'Сохранение...' : 'Подтвердить'}
+                    {isSaving && <span className="spinner" />}{isSaving ? 'Сохранение...' : 'Подтвердить'}
                   </button>
                   <button className="btn-danger text-xs" disabled={isSaving} onClick={() => saveTransaction(transaction, 'rejected')}>
                     Отклонить

@@ -47,6 +47,7 @@ export default function BookkeeperPage() {
   const [statusFilter, setStatusFilter] = useState('pending');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [commentMap, setCommentMap] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
@@ -94,11 +95,13 @@ export default function BookkeeperPage() {
 
   async function saveEdit(id: number) {
     if (!editState) return;
+    setSavingEdit(true);
     await fetch(`/api/revenue/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(editState),
     });
+    setSavingEdit(false);
     setEditingId(null);
     setEditState(null);
     load();
@@ -142,7 +145,9 @@ export default function BookkeeperPage() {
       </div>
 
       {loading ? (
-        <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
+        <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
+          <span className="spinner" /> Загрузка...
+        </div>
       ) : entries.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
           Нет записей
@@ -227,8 +232,8 @@ export default function BookkeeperPage() {
                       <td className="td">
                         {editingId === entry.id ? (
                           <div className="flex gap-1">
-                            <button className="btn-success text-xs" onClick={() => saveEdit(entry.id)}>
-                              Сохранить
+                            <button className="btn-success text-xs" disabled={savingEdit} onClick={() => saveEdit(entry.id)}>
+                              {savingEdit && <span className="spinner" />}Сохранить
                             </button>
                             <button className="btn-secondary text-xs" onClick={() => setEditingId(null)}>
                               Отмена
