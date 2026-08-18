@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -23,12 +24,12 @@ import { POST } from '@/app/api/attendance/route';
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const createShift = prisma.attendanceShift.create as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(body: unknown): Request {
+function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/attendance', {
     method: 'POST',
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 beforeEach(() => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -28,12 +29,12 @@ const findUniqueTransaction = prisma.importedTransaction.findUnique as unknown a
 const countPharmacy = prisma.pharmacy.count as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(body: unknown): Request {
+function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/imported-transactions/1', {
     method: 'PUT',
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 function makeParams(id = 1) {

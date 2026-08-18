@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -30,12 +31,12 @@ const countAttendance = prisma.attendanceShift.count as unknown as ReturnType<ty
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(url: string, body: unknown): Request {
+function makeRequest(url: string, body: unknown): NextRequest {
   return new Request(url, {
     method: 'PUT',
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 function makeParams(id = 1) {

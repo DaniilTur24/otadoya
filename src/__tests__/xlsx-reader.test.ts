@@ -105,7 +105,7 @@ describe('readFirstWorksheetRows', () => {
   });
 
   it('returns empty array for empty sheet', async () => {
-    vi.mocked(readSheet).mockResolvedValue([]);
+    vi.mocked(readSheet).mockResolvedValue([] as unknown as ReturnType<typeof readSheet> extends Promise<infer R> ? R : never);
     const rows = await readFirstWorksheetRows(Buffer.from(''));
     expect(rows).toEqual([]);
   });

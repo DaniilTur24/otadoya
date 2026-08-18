@@ -38,28 +38,28 @@ describe('validateXlsxFile', () => {
 
   it('returns 400 for empty file', () => {
     const file = makeFile('report.xlsx', 0, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    const res = validateXlsxFile(file) as MockResponse;
+    const res = validateXlsxFile(file) as unknown as MockResponse;
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/пустой/i);
   });
 
   it('returns 400 for non-.xlsx extension', () => {
     const file = makeFile('report.csv', 100, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    const res = validateXlsxFile(file) as MockResponse;
+    const res = validateXlsxFile(file) as unknown as MockResponse;
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/\.xlsx/i);
   });
 
   it('returns 400 for wrong mime type', () => {
     const file = makeFile('report.xlsx', 100, 'text/plain');
-    const res = validateXlsxFile(file) as MockResponse;
+    const res = validateXlsxFile(file) as unknown as MockResponse;
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/некорректный тип/i);
   });
 
   it('returns 413 when file exceeds 10 MB', () => {
     const file = makeFile('report.xlsx', MAX_EXCEL_UPLOAD_BYTES + 1, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    const res = validateXlsxFile(file) as MockResponse;
+    const res = validateXlsxFile(file) as unknown as MockResponse;
     expect(res.status).toBe(413);
     expect(res.body.error).toMatch(/большой/i);
   });
@@ -85,28 +85,28 @@ describe('validatePdfFile', () => {
 
   it('returns 400 for empty file', () => {
     const file = makeFile('report.pdf', 0, 'application/pdf');
-    const res = validatePdfFile(file) as MockResponse;
+    const res = validatePdfFile(file) as unknown as MockResponse;
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/пустой/i);
   });
 
   it('returns 400 for non-.pdf extension', () => {
     const file = makeFile('report.docx', 100, 'application/pdf');
-    const res = validatePdfFile(file) as MockResponse;
+    const res = validatePdfFile(file) as unknown as MockResponse;
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/pdf/i);
   });
 
   it('returns 400 for wrong mime type', () => {
     const file = makeFile('report.pdf', 100, 'image/png');
-    const res = validatePdfFile(file) as MockResponse;
+    const res = validatePdfFile(file) as unknown as MockResponse;
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/некорректный тип/i);
   });
 
   it('returns 413 when file exceeds 15 MB', () => {
     const file = makeFile('report.pdf', MAX_PDF_UPLOAD_BYTES + 1, 'application/pdf');
-    const res = validatePdfFile(file) as MockResponse;
+    const res = validatePdfFile(file) as unknown as MockResponse;
     expect(res.status).toBe(413);
     expect(res.body.error).toMatch(/большой/i);
   });

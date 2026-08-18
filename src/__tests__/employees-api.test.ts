@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -30,11 +31,11 @@ const findManyEmployees = prisma.employee.findMany as unknown as ReturnType<type
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(url: string, opts: { role?: string; userId?: number } = {}): Request {
+function makeRequest(url: string, opts: { role?: string; userId?: number } = {}): NextRequest {
   const headers: Record<string, string> = {};
   if (opts.role) headers['x-user-role'] = opts.role;
   if (opts.userId) headers['x-user-id'] = String(opts.userId);
-  return new Request(url, { headers }) as unknown as import('next/server').NextRequest;
+  return new Request(url, { headers }) as unknown as NextRequest;
 }
 
 beforeEach(() => {

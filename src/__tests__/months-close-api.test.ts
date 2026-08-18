@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -25,18 +26,18 @@ const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(body: unknown, method = 'DELETE', role = 'admin'): Request {
+function makeRequest(body: unknown, method = 'DELETE', role = 'admin'): NextRequest {
   return new Request('http://localhost/api/months/close', {
     method,
     headers: { 'x-user-role': role, 'x-user-id': '5', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
-function makeGetRequest(year: number, month: number, role: string, userId?: number): Request {
+function makeGetRequest(year: number, month: number, role: string, userId?: number): NextRequest {
   const headers: Record<string, string> = { 'x-user-role': role };
   if (userId !== undefined) headers['x-user-id'] = String(userId);
-  return new Request(`http://localhost/api/months/close?year=${year}&month=${month}`, { headers });
+  return new Request(`http://localhost/api/months/close?year=${year}&month=${month}`, { headers }) as unknown as NextRequest;
 }
 
 beforeEach(() => {
@@ -65,7 +66,7 @@ describe('GET /api/months/close — статус доступен и менед�
   });
 
   it('без роли — 401', async () => {
-    const res = await GET(new Request('http://localhost/api/months/close?year=2026&month=6')) as unknown as { status: number };
+    const res = await GET(new Request('http://localhost/api/months/close?year=2026&month=6') as unknown as NextRequest) as unknown as { status: number };
     expect(res.status).toBe(401);
   });
 });

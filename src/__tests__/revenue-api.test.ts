@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -35,7 +36,7 @@ const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnTy
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(method: string, url: string, body: unknown, opts: { role?: string; userId?: number } = {}): Request {
+function makeRequest(method: string, url: string, body: unknown, opts: { role?: string; userId?: number } = {}): NextRequest {
   return new Request(url, {
     method,
     headers: {
@@ -44,7 +45,7 @@ function makeRequest(method: string, url: string, body: unknown, opts: { role?: 
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 const baseBody = {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -21,12 +22,12 @@ import { PUT } from '@/app/api/employees/[id]/route';
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const updateEmployee = prisma.employee.update as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(body: unknown): Request {
+function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/employees/1', {
     method: 'PUT',
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 function makeParams(id = 1) {

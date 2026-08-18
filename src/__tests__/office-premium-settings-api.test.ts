@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -21,12 +22,12 @@ import { PUT } from '@/app/api/office-premium-settings/route';
 
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(body: unknown): Request {
+function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/office-premium-settings', {
     method: 'PUT',
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 beforeEach(() => {

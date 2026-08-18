@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest } from 'next/server';
 
 vi.mock('next/server', () => ({
   NextResponse: {
@@ -23,12 +24,12 @@ const createRule = prisma.transactionImportRule.create as unknown as ReturnType<
 const updateRule = prisma.transactionImportRule.update as unknown as ReturnType<typeof vi.fn>;
 const findUniqueRule = prisma.transactionImportRule.findUnique as unknown as ReturnType<typeof vi.fn>;
 
-function makeRequest(method: string, body: unknown): Request {
+function makeRequest(method: string, body: unknown): NextRequest {
   return new Request('http://localhost/api/transaction-import-rules', {
     method,
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }) as unknown as NextRequest;
 }
 
 function makeParams(id = 1) {
