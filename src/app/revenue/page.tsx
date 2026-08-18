@@ -78,16 +78,20 @@ function pharmaBonusSum(items: ExpenseItem[]) {
 function advanceSum(items: ExpenseItem[]) {
   return items.filter((i) => i.category === 'employeeAdvance').reduce((s, i) => s + i.amount, 0);
 }
+function surchargeSum(items: ExpenseItem[]) {
+  return items.filter((i) => i.category === 'employeeSurcharge').reduce((s, i) => s + i.amount, 0);
+}
+const EXCLUDED_FROM_GENERIC_SUMS = new Set(['pharmaBonus', 'employeeAdvance', 'employeeSurcharge']);
 // Статьи с rowType 'income' — доходные, прибавляются к выручке
 function incomeItemsSum(items: ExpenseItem[]) {
   return items
-    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) === 'income')
+    .filter((i) => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? '') && monthlyFieldType(i.category) === 'income')
     .reduce((s, i) => s + i.amount, 0);
 }
 // Остальные статьи (expense / neutral) — расходы
 function expenseItemsSum(items: ExpenseItem[]) {
   return items
-    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) !== 'income')
+    .filter((i) => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? '') && monthlyFieldType(i.category) !== 'income')
     .reduce((s, i) => s + i.amount, 0);
 }
 
@@ -289,6 +293,12 @@ export default function RevenueListPage() {
       setSaving(false);
       return;
     }
+    const missingSurchargeEmployee = validItems.find((i) => i.category === 'employeeSurcharge' && !i.employeeId);
+    if (missingSurchargeEmployee) {
+      setSaveError('Выберите сотрудника, которому положена доплата');
+      setSaving(false);
+      return;
+    }
 
     const employeeName = editState.employeeName.trim();
     if (!employeeName) {
@@ -314,7 +324,7 @@ export default function RevenueListPage() {
           amount: i.amount,
           category: i.category || null,
           comment: i.comment || null,
-          employeeId: i.category === 'employeeAdvance' && i.employeeId ? Number(i.employeeId) : null,
+          employeeId: (i.category === 'employeeAdvance' || i.category === 'employeeSurcharge') && i.employeeId ? Number(i.employeeId) : null,
         })),
       }),
     });
@@ -668,6 +678,20 @@ export default function RevenueListPage() {
                         </p>
                       </div>
                     )}
+                    {item.category === 'employeeSurcharge' && (
+                      <div className="mt-1 ml-5 space-y-1">
+                        <select className="input" value={item.employeeId} required
+                          onChange={(e) => updateExpenseItem(item.id, 'employeeId', e.target.value)}>
+                          <option value="">— кому доплата —</option>
+                          {employees.map((emp) => (
+                            <option key={emp.id} value={emp.id}>{emp.name}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                          Эта сумма пойдёт в расходы и прибавится к зарплате сотрудника за месяц. В статистику бонусов не входит.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {editState.expenseItems.length > 1 && (
@@ -732,6 +756,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Доп. доходы</th>
                   <th className="th text-right">Бонусы</th>
                   <th className="th text-right">Авансы</th>
+                  <th className="th text-right">Доплаты</th>
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
@@ -740,8 +765,9 @@ export default function RevenueListPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {entries.map((entry) => {
-                  const bonuses  = pharmaBonusSum(entry.expenseItems);
-                  const advances = advanceSum(entry.expenseItems);
+                  const bonuses    = pharmaBonusSum(entry.expenseItems);
+                  const advances   = advanceSum(entry.expenseItems);
+                  const surcharges = surchargeSum(entry.expenseItems);
                   const incomes  = incomeItemsSum(entry.expenseItems);
                   const expenses = expenseItemsSum(entry.expenseItems);
                   return (
@@ -778,6 +804,9 @@ export default function RevenueListPage() {
                         </td>
                         <td className="td text-right text-red-600">
                           {advances > 0 ? fmt(advances) : '—'}
+                        </td>
+                        <td className="td text-right text-red-600">
+                          {surcharges > 0 ? fmt(surcharges) : '—'}
                         </td>
                         <td className="td text-right font-semibold text-green-700">
                           {fmt(entry.totalRevenue)}
@@ -853,9 +882,10 @@ export default function RevenueListPage() {
             const totalIncomes  = entries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
             const totalBonuses  = entries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
             const totalAdvances = entries.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
+            const totalSurcharges = entries.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
             const totalExpenses = entries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
-            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances;
-            const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
+            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
+            const cashNet = totalCash - totalBonuses - totalAdvances - totalSurcharges - totalExpenses;
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
                 <span className="text-slate-500">Итого по выбранным записям:</span>
@@ -868,6 +898,9 @@ export default function RevenueListPage() {
                 )}
                 {totalAdvances > 0 && (
                   <span>Авансы: <strong className="text-red-600">{fmt(totalAdvances)}</strong></span>
+                )}
+                {totalSurcharges > 0 && (
+                  <span>Доплаты: <strong className="text-red-600">{fmt(totalSurcharges)}</strong></span>
                 )}
                 {totalExpenses > 0 && (
                   <span>Расходы: <strong className="text-red-600">{fmt(totalExpenses)}</strong></span>
@@ -885,9 +918,10 @@ export default function RevenueListPage() {
       )}
 
       {tooltipEntry && (() => {
-        const items = tooltipEntry.expenseItems.filter(i => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance');
+        const items = tooltipEntry.expenseItems.filter(i => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? ''));
         const advanceItems = tooltipEntry.expenseItems.filter(i => i.category === 'employeeAdvance');
-        const hasContent = items.length > 0 || advanceItems.length > 0 || tooltipEntry.generalComment;
+        const surchargeItems = tooltipEntry.expenseItems.filter(i => i.category === 'employeeSurcharge');
+        const hasContent = items.length > 0 || advanceItems.length > 0 || surchargeItems.length > 0 || tooltipEntry.generalComment;
         if (!hasContent) return null;
         return (
           <div
@@ -924,8 +958,23 @@ export default function RevenueListPage() {
                 })}
               </div>
             )}
+            {surchargeItems.length > 0 && (
+              <div className={`space-y-1.5 ${(items.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
+                {surchargeItems.map((item) => {
+                  const recipient = employees.find((e) => e.id === item.employeeId);
+                  return (
+                    <div key={item.id} className="flex gap-2 items-baseline">
+                      <span className="font-semibold shrink-0 text-red-600">−{fmt(item.amount)}</span>
+                      <span className="text-slate-700">Доплата</span>
+                      <span className="text-slate-400">→ {recipient?.name ?? 'сотрудник не указан'}</span>
+                      {item.comment && <span className="text-slate-400">— {item.comment}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {tooltipEntry.generalComment && (
-              <div className={`text-slate-400 italic ${(items.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
+              <div className={`text-slate-400 italic ${(items.length > 0 || advanceItems.length > 0 || surchargeItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
                 {tooltipEntry.generalComment}
               </div>
             )}

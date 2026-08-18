@@ -106,6 +106,9 @@ model Employee {
   managerPremiumEnabled Boolean @default(false) @map("manager_premium_enabled")
   // Для manager_trading: если true — получает лестничную премию аптеки вместо личной премии за выручку смены
   ladderPremiumEnabled  Boolean @default(false) @map("ladder_premium_enabled")
+  // Для seller/manager_trading: если true — пятидневные смены отмечаются в табеле посещаемости
+  // (AttendanceShift), а не записью выручки — сотрудник не считает кассу, просто отмечает рабочий день
+  fiveDayViaAttendance  Boolean @default(false) @map("five_day_via_attendance")
   // Фиксированная ежемесячная доплата сотруднику (любого типа) + описание, за что она начисляется
   allowance            Decimal @default(0) @map("allowance")
   allowanceDescription String  @default("") @map("allowance_description")

@@ -65,6 +65,10 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
       // totalAdvances в расчёте зарплаты ниже, а не как отдельная строка расходов
       // (показывается сотруднику в его профиле на /employees/[id]).
       if (cat === 'employeeAdvance') continue;
+      // Доплата — персональная надбавка сотруднику, отдельная от pharmaBonus (общий котёл
+      // для доли заведующей). Учитывается через totalSurcharges в расчёте зарплаты ниже —
+      // без этого пропуска попала бы в otherExpenses ВДОБАВОК к зарплате и задвоилась бы.
+      if (cat === 'employeeSurcharge') continue;
       const amt = Number(item.amount);
       if (cat && cat in systemData[e.pharmacyId]) {
         systemData[e.pharmacyId][cat] += amt;

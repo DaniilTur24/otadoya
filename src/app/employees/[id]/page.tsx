@@ -21,6 +21,7 @@ interface Employee {
   allowanceDescription: string;
   isActive: boolean;
   pharmacies: Pharmacy[];
+  fiveDayViaAttendance: boolean;
 }
 
 interface Pharmacy {
@@ -40,6 +41,14 @@ interface ShiftEntry {
 }
 
 interface AdvanceEntry {
+  id: number;
+  date: string;
+  pharmacyName: string;
+  amount: number;
+  comment: string | null;
+}
+
+interface SurchargeEntry {
   id: number;
   date: string;
   pharmacyName: string;
@@ -73,6 +82,7 @@ interface SalaryResult {
   totalRevenuePremium: number;
   totalBonuses: number;
   totalAdvances: number;
+  totalSurcharges: number;
   attendanceShiftsCount: number;
   shiftRate: number | null;
   salaryFromShiftRate: number;
@@ -88,6 +98,7 @@ interface SalaryResult {
   recordsCount: number;
   shifts: ShiftEntry[];
   advances: AdvanceEntry[];
+  surcharges: SurchargeEntry[];
   attendance: AttendanceEntry[];
 }
 
@@ -106,7 +117,7 @@ export default function EmployeeDetailPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [form, setForm] = useState({
     name: '', employeeType: 'seller', baseSalary: '', shiftRate: '',
-    allowance: '', allowanceDescription: '', isActive: true,
+    allowance: '', allowanceDescription: '', isActive: true, fiveDayViaAttendance: false,
   });
   const [assignedPharmacyIds, setAssignedPharmacyIds] = useState<number[]>([]);
   const [editingPharmacies, setEditingPharmacies] = useState(false);
@@ -135,6 +146,7 @@ export default function EmployeeDetailPage() {
           allowance: e.allowance ? String(e.allowance) : '',
           allowanceDescription: e.allowanceDescription ?? '',
           isActive: e.isActive,
+          fiveDayViaAttendance: e.fiveDayViaAttendance,
         });
         setAssignedPharmacyIds((e.pharmacies ?? []).map((p) => p.id));
       })
@@ -185,6 +197,7 @@ export default function EmployeeDetailPage() {
           allowanceDescription: form.allowanceDescription.trim(),
         }),
         shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
+        fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
         isActive: form.isActive,
       }),
     });
@@ -300,9 +313,22 @@ export default function EmployeeDetailPage() {
           )}
         </div>
 
+        {form.employeeType === 'seller' && !USER_LINKED_TYPES.has(employee.employeeType) && (
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.fiveDayViaAttendance}
+              onChange={(e) => setForm((f) => ({ ...f, fiveDayViaAttendance: e.target.checked }))}
+              className="rounded"
+            />
+            Пятидневка — отмечается в табеле посещаемости
+            <span className="text-slate-400 font-normal">(вместо записи выручки на каждый рабочий день)</span>
+          </label>
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">Доплата (₸/мес)</label>
+            <label className="label">Фиксированная доплата (₸/мес)</label>
             <input
               type="number"
               value={form.allowance}
@@ -477,6 +503,7 @@ export default function EmployeeDetailPage() {
         ) : salary && (
             salary.recordsCount > 0 ||
             salary.advances.length > 0 ||
+            salary.surcharges.length > 0 ||
             USER_LINKED_TYPES.has(salary.employeeType)
           ) ? (
           <>
@@ -596,9 +623,16 @@ export default function EmployeeDetailPage() {
                     {salary.allowance > 0 && (
                       <>
                         <span className="text-slate-500">
-                          Доплата{salary.allowanceDescription ? ` (${salary.allowanceDescription})` : ''}
+                          Фиксированная доплата{salary.allowanceDescription ? ` (${salary.allowanceDescription})` : ''}
                         </span>
                         <span className="font-medium text-right">{fmt(salary.allowance)} ₸</span>
+                      </>
+                    )}
+
+                    {salary.totalSurcharges > 0 && (
+                      <>
+                        <span className="text-slate-500">Доплаты</span>
+                        <span className="font-medium text-right">+{fmt(salary.totalSurcharges)} ₸</span>
                       </>
                     )}
 
@@ -733,6 +767,37 @@ export default function EmployeeDetailPage() {
                         {a.comment && <span className="text-slate-400"> — {a.comment}</span>}
                       </span>
                       <span className="text-right font-medium text-red-600">−{fmt(a.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Доплаты */}
+            {salary.surcharges.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-2">Доплаты за период</h3>
+                <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
+                  <div className="grid text-xs text-slate-400 font-medium px-3 py-1.5 bg-slate-50"
+                    style={{ gridTemplateColumns: '6rem 1fr 6rem' }}>
+                    <span>Дата</span>
+                    <span>Аптека / комментарий</span>
+                    <span className="text-right">Сумма</span>
+                  </div>
+                  {salary.surcharges.map((s) => (
+                    <div
+                      key={s.id}
+                      className="grid text-sm px-3 py-2 hover:bg-slate-50"
+                      style={{ gridTemplateColumns: '6rem 1fr 6rem' }}
+                    >
+                      <span className="text-slate-600">
+                        {new Date(s.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
+                      </span>
+                      <span className="text-slate-800 truncate pr-2">
+                        {s.pharmacyName}
+                        {s.comment && <span className="text-slate-400"> — {s.comment}</span>}
+                      </span>
+                      <span className="text-right font-medium">+{fmt(s.amount)}</span>
                     </div>
                   ))}
                 </div>

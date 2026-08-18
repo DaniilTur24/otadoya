@@ -15,6 +15,13 @@ interface Employee {
   employeeType: string;
   isActive: boolean;
   pharmacies: Pharmacy[];
+  fiveDayViaAttendance?: boolean;
+}
+
+// Продавец с включённым fiveDayViaAttendance отмечается в табеле как пятидневник,
+// хотя формально его тип 'seller' — не входит в ATTENDANCE_BASED_TYPES.
+function isAttendanceEligible(e: Employee): boolean {
+  return ATTENDANCE_BASED_TYPES.has(e.employeeType) || (e.employeeType === 'seller' && !!e.fiveDayViaAttendance);
 }
 interface AttendanceRecord {
   id: number;
@@ -61,7 +68,7 @@ export default function AttendancePage() {
       fetch('/api/employees?isActive=true').then((r) => r.json()),
       fetch(`/api/attendance?year=${year}&month=${month}`).then((r) => r.json()),
     ]);
-    setEmployees((emps as Employee[]).filter((e) => ATTENDANCE_BASED_TYPES.has(e.employeeType)));
+    setEmployees((emps as Employee[]).filter(isAttendanceEligible));
     setRecords(recs);
   }, [year, month]);
 
@@ -78,6 +85,11 @@ export default function AttendancePage() {
 
   const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office']
     .map((type) => ({ type, label: EMPLOYEE_TYPE_LABELS[type], items: employees.filter((e) => e.employeeType === type) }))
+    .concat([{
+      type: 'seller_five_day',
+      label: 'Продавцы (пятидневка)',
+      items: employees.filter((e) => e.employeeType === 'seller' && e.fiveDayViaAttendance),
+    }])
     .filter((g) => g.items.length > 0);
 
   const flatEmployees = useMemo(() => groups.flatMap((g) => g.items), [groups]);
@@ -285,7 +297,7 @@ export default function AttendancePage() {
         <div className="text-slate-500 text-sm py-5 text-center">Загрузка...</div>
       ) : flatEmployees.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
-          Нет сотрудников с типом «Уборщица», «Офис», «Менеджер» или «Заведующая (не торгует)».
+          Нет сотрудников с типом «Уборщица», «Офис», «Менеджер», «Заведующая (не торгует)» или продавцов с включённой пятидневкой по табелю.
         </div>
       ) : (
         <div className="card overflow-x-auto">

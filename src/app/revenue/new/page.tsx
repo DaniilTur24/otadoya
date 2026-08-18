@@ -69,6 +69,9 @@ export default function NewRevenuePage() {
     shiftType: '',
     avans: '',
     avansEmployeeId: '',
+    doplata: '',
+    doplataEmployeeId: '',
+    doplataComment: '',
   });
 
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
@@ -166,6 +169,7 @@ export default function NewRevenuePage() {
 
   const cashRevenueNum = parseFloat(form.cashRevenue) || 0;
   const avansNum = parseFloat(form.avans) || 0;
+  const doplataNum = parseFloat(form.doplata) || 0;
   const summaryBonuses = expenseItems
     .filter((i) => i.category === 'pharmaBonus')
     .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
@@ -173,14 +177,18 @@ export default function NewRevenuePage() {
     expenseItems
       .filter((i) => i.category === 'employeeAdvance')
       .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0) + avansNum;
+  const summarySurcharges =
+    expenseItems
+      .filter((i) => i.category === 'employeeSurcharge')
+      .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0) + doplataNum;
   const summaryIncomes = expenseItems
-    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) === 'income')
+    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && i.category !== 'employeeSurcharge' && monthlyFieldType(i.category) === 'income')
     .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
   const summaryExpenses = expenseItems
-    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && monthlyFieldType(i.category) !== 'income')
+    .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && i.category !== 'employeeSurcharge' && monthlyFieldType(i.category) !== 'income')
     .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
-  const grandTotal = totalRevenue + summaryIncomes - summaryExpenses - summaryBonuses - summaryAdvances;
-  const cashNet = cashRevenueNum - summaryBonuses - summaryAdvances - summaryExpenses;
+  const grandTotal = totalRevenue + summaryIncomes - summaryExpenses - summaryBonuses - summaryAdvances - summarySurcharges;
+  const cashNet = cashRevenueNum - summaryBonuses - summaryAdvances - summarySurcharges - summaryExpenses;
 
   const selectedDate = new Date(form.date);
   const now = new Date();
@@ -215,6 +223,13 @@ export default function NewRevenuePage() {
       return;
     }
 
+    const doplataAmount = parseFloat(form.doplata) || 0;
+    if (doplataAmount > 0 && !form.doplataEmployeeId) {
+      setError('Выберите сотрудника, которому положена доплата');
+      setSubmitting(false);
+      return;
+    }
+
     type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId?: number };
     const allExpenseItems: SubmitExpenseItem[] = validItems.map((i) => ({
       amount: i.amount,
@@ -228,6 +243,16 @@ export default function NewRevenuePage() {
         category: 'employeeAdvance',
         comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
         employeeId: Number(form.avansEmployeeId),
+      });
+    }
+    if (doplataAmount > 0 && form.doplataEmployeeId) {
+      const doplataEmployee = employees.find((e) => e.id === Number(form.doplataEmployeeId));
+      const label = doplataEmployee ? `Доплата: ${doplataEmployee.name}` : 'Доплата';
+      allExpenseItems.push({
+        amount: form.doplata,
+        category: 'employeeSurcharge',
+        comment: form.doplataComment.trim() ? `${label} — ${form.doplataComment.trim()}` : label,
+        employeeId: Number(form.doplataEmployeeId),
       });
     }
 
@@ -262,6 +287,9 @@ export default function NewRevenuePage() {
         shiftType: form.shiftType,
         avans: '',
         avansEmployeeId: '',
+        doplata: '',
+        doplataEmployeeId: '',
+        doplataComment: '',
       });
       setExpenseItems([]);
       setTimeout(() => setSuccess(false), 4000);
@@ -436,6 +464,61 @@ export default function NewRevenuePage() {
           {employees.length > 0 && !form.avansEmployeeId && form.avans && parseFloat(form.avans) > 0 && (
             <p className="mt-2 text-xs text-amber-600">
               Выберите сотрудника, которому выдан аванс
+            </p>
+          )}
+        </div>
+
+        {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
+        <div className="rounded border border-slate-300 p-3">
+          <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <select
+                name="doplataEmployeeId"
+                value={form.doplataEmployeeId}
+                onChange={handleChange}
+                className="input"
+                disabled={employees.length === 0}
+              >
+                <option value="">— кому доплата —</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <input
+                type="number"
+                name="doplata"
+                value={form.doplata}
+                onChange={handleChange}
+                min="0"
+                step="0.01"
+                placeholder="Сумма доплаты"
+                className="input"
+                disabled={!form.doplataEmployeeId}
+              />
+            </div>
+            <div>
+              <input
+                type="text"
+                name="doplataComment"
+                value={form.doplataComment}
+                onChange={handleChange}
+                placeholder="Комментарий (за что доплата)"
+                className="input"
+                disabled={!form.doplataEmployeeId}
+              />
+            </div>
+          </div>
+          {form.doplataEmployeeId && parseFloat(form.doplata) > 0 && (
+            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+              Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки и наличные на руках за день. В статистику бонусов не входит.
+            </p>
+          )}
+          {employees.length > 0 && !form.doplataEmployeeId && form.doplata && parseFloat(form.doplata) > 0 && (
+            <p className="mt-2 text-xs text-amber-600">
+              Выберите сотрудника, которому положена доплата
             </p>
           )}
         </div>
@@ -651,7 +734,7 @@ export default function NewRevenuePage() {
           />
         </div>
 
-        {(totalRevenue > 0 || summaryExpenses > 0 || summaryBonuses > 0 || summaryAdvances > 0) && (
+        {(totalRevenue > 0 || summaryExpenses > 0 || summaryBonuses > 0 || summaryAdvances > 0 || summarySurcharges > 0) && (
           <div className="card px-3 py-2 bg-slate-50 flex flex-wrap gap-4 text-sm">
             <span>
               Итого:{' '}

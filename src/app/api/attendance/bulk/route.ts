@@ -26,7 +26,8 @@ export async function PUT(request: NextRequest) {
   const employee = await prisma.employee.findUnique({ where: { id: Number(employeeId) } });
   if (!employee) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType)) {
+  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
+  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType) && !isFiveDaySeller) {
     return NextResponse.json(
       { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }

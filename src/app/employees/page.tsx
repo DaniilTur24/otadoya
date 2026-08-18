@@ -24,6 +24,7 @@ interface Employee {
   allowanceDescription: string;
   isActive: boolean;
   pharmacies: Pharmacy[];
+  fiveDayViaAttendance: boolean;
 }
 
 export default function EmployeesPage() {
@@ -39,6 +40,7 @@ export default function EmployeesPage() {
     allowance: '',
     allowanceDescription: '',
     pharmacyIds: [] as number[],
+    fiveDayViaAttendance: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -95,6 +97,7 @@ export default function EmployeesPage() {
         shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
         allowance: form.allowance || 0,
         allowanceDescription: form.allowanceDescription.trim(),
+        fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
       }),
     });
     if (res.ok) {
@@ -106,7 +109,7 @@ export default function EmployeesPage() {
           body: JSON.stringify({ pharmacyIds: form.pharmacyIds }),
         });
       }
-      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', allowance: '', allowanceDescription: '', pharmacyIds: [] });
+      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', allowance: '', allowanceDescription: '', pharmacyIds: [], fiveDayViaAttendance: false });
       setShowForm(false);
       load();
     } else {
@@ -238,9 +241,21 @@ export default function EmployeesPage() {
               </div>
             )}
           </div>
+          {form.employeeType === 'seller' && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.fiveDayViaAttendance}
+                onChange={(e) => setForm((f) => ({ ...f, fiveDayViaAttendance: e.target.checked }))}
+                className="rounded"
+              />
+              Пятидневка — отмечается в табеле посещаемости
+              <span className="text-slate-400 font-normal">(вместо записи выручки на каждый рабочий день)</span>
+            </label>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Доплата (₸/мес)</label>
+              <label className="label">Фиксированная доплата (₸/мес)</label>
               <input
                 type="number"
                 value={form.allowance}
@@ -418,7 +433,7 @@ function EmployeeRow({
             )}
             {emp.allowance > 0 && (
               <span title={emp.allowanceDescription || undefined}>
-                Доплата: <span className="text-slate-600 font-medium">
+                Фиксированная доплата: <span className="text-slate-600 font-medium">
                   {emp.allowance.toLocaleString('ru-RU')} ₸
                 </span>
                 {emp.allowanceDescription && <span className="text-slate-400"> ({emp.allowanceDescription})</span>}

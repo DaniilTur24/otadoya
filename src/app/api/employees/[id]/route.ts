@@ -38,7 +38,7 @@ export async function PUT(
   if (auth) return auth;
 
   const employeeId = Number((await params).id);
-  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription, fiveDayViaAttendance } = await request.json();
 
   if (employeeType != null && !(employeeType in EMPLOYEE_TYPES)) {
     return NextResponse.json({ error: 'Некорректный тип сотрудника' }, { status: 400 });
@@ -66,6 +66,7 @@ export async function PUT(
   if (shiftRate !== undefined) data.shiftRate = shiftRate != null ? String(shiftRate) : null;
   if (allowance !== undefined) data.allowance = String(allowance ?? 0);
   if (allowanceDescription !== undefined) data.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
+  if (fiveDayViaAttendance !== undefined) data.fiveDayViaAttendance = Boolean(fiveDayViaAttendance);
 
   const employee = await prisma.employee.update({
     where: { id: employeeId },

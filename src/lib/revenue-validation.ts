@@ -8,9 +8,18 @@ import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
  */
 export async function validateShiftEmployeeType(employeeId: number, shiftType: string | null): Promise<string | null> {
   if (!employeeId || !shiftType) return null;
-  const employee = await prisma.employee.findUnique({ where: { id: employeeId }, select: { employeeType: true } });
+  const employee = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { employeeType: true, fiveDayViaAttendance: true },
+  });
   if (employee && ATTENDANCE_BASED_TYPES.has(employee.employeeType)) {
     return 'Этому типу сотрудника нельзя назначить смену в записи выручки — он учитывается через табель посещаемости';
+  }
+  // Продавец/заведующая-которая-торгует с включённым fiveDayViaAttendance отмечает пятидневку
+  // в табеле — назначить её ещё и записью выручки означало бы задвоить оплату за тот же день.
+  // Дневная/суточная смена ему по-прежнему разрешена (мог подменить кого-то на кассе).
+  if (employee?.fiveDayViaAttendance && shiftType === 'five_day') {
+    return 'У этого сотрудника пятидневка отмечается в табеле посещаемости, а не записью выручки';
   }
   return null;
 }

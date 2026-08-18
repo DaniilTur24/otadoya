@@ -3,6 +3,7 @@ import {
   calculateEmployeeMonthlySalary,
   getEmployeeMonthlyShifts,
   getEmployeeMonthlyAdvances,
+  getEmployeeMonthlySurcharges,
   getEmployeeMonthlyAttendance,
 } from '@/lib/salary-calculator';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
@@ -25,14 +26,15 @@ export async function GET(
 
   const employeeId = Number((await params).id);
 
-  const [summary, shifts, advances, attendance] = await Promise.all([
+  const [summary, shifts, advances, surcharges, attendance] = await Promise.all([
     calculateEmployeeMonthlySalary(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyShifts(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyAdvances(employeeId, month, year, pharmacyId),
+    getEmployeeMonthlySurcharges(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyAttendance(employeeId, month, year, pharmacyId),
   ]);
 
   if (!summary) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  return NextResponse.json({ ...summary, shifts, advances, attendance });
+  return NextResponse.json({ ...summary, shifts, advances, surcharges, attendance });
 }

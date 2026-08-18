@@ -120,24 +120,25 @@ export async function POST(request: NextRequest) {
       ? expenseItems.filter((i) => parseFloat(i.amount) > 0)
       : [];
 
-  // Авансы привязываются к конкретному сотруднику (может отличаться от employeeId записи).
-  // Проверяем, что выбранный сотрудник действительно работает в этой аптеке.
-  const advanceEmployeeIds = [
+  // Авансы и доплаты привязываются к конкретному сотруднику (может отличаться от employeeId
+  // записи). Проверяем, что выбранный сотрудник действительно работает в этой аптеке.
+  const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
+  const recipientEmployeeIds = [
     ...new Set(
       items
-        .filter((i) => i.category === 'employeeAdvance' && i.employeeId)
+        .filter((i) => i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId)
         .map((i) => Number(i.employeeId))
     ),
   ];
-  if (advanceEmployeeIds.length > 0) {
+  if (recipientEmployeeIds.length > 0) {
     const links = await prisma.employeePharmacy.findMany({
-      where: { employeeId: { in: advanceEmployeeIds }, pharmacyId: Number(pharmacyId) },
+      where: { employeeId: { in: recipientEmployeeIds }, pharmacyId: Number(pharmacyId) },
       select: { employeeId: true },
     });
     const linkedIds = new Set(links.map((l) => l.employeeId));
-    if (advanceEmployeeIds.some((id) => !linkedIds.has(id))) {
+    if (recipientEmployeeIds.some((id) => !linkedIds.has(id))) {
       return NextResponse.json(
-        { error: 'Аванс можно записать только сотруднику выбранной аптеки' },
+        { error: 'Аванс/доплату можно записать только сотруднику выбранной аптеки' },
         { status: 400 }
       );
     }
@@ -191,7 +192,7 @@ export async function POST(request: NextRequest) {
           amount: i.amount,
           category: i.category || null,
           comment: i.comment || null,
-          employeeId: i.category === 'employeeAdvance' && i.employeeId ? Number(i.employeeId) : null,
+          employeeId: i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId ? Number(i.employeeId) : null,
         })),
       });
     }

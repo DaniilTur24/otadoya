@@ -74,7 +74,9 @@ export async function POST(request: NextRequest) {
 
   // Сменные типы (seller/manager_trading) учитываются через смену в записи выручки, а не через
   // табель — их зарплата не читает AttendanceShift, отметка здесь была бы мёртвой и вводящей в заблуждение.
-  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType)) {
+  // Исключение — продавец с включённым fiveDayViaAttendance: его пятидневка отмечается именно здесь.
+  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
+  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType) && !isFiveDaySeller) {
     return NextResponse.json(
       { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }

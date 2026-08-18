@@ -153,24 +153,25 @@ export async function PUT(
   if (Array.isArray(expenseItems)) {
     const filled = expenseItems.filter((i: { amount: string }) => parseFloat(i.amount) > 0);
 
-    // Авансы привязываются к конкретному сотруднику — проверяем, что он работает в этой аптеке
+    // Авансы и доплаты привязываются к конкретному сотруднику — проверяем, что он работает в этой аптеке
     const targetPharmacyId = pharmacyId != null ? Number(pharmacyId) : existing.pharmacyId;
-    const advanceEmployeeIds = [
+    const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
+    const recipientEmployeeIds = [
       ...new Set(
         filled
-          .filter((i: { category?: string; employeeId?: number | null }) => i.category === 'employeeAdvance' && i.employeeId)
+          .filter((i: { category?: string; employeeId?: number | null }) => i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId)
           .map((i: { employeeId?: number | null }) => Number(i.employeeId))
       ),
     ];
-    if (advanceEmployeeIds.length > 0) {
+    if (recipientEmployeeIds.length > 0) {
       const links = await prisma.employeePharmacy.findMany({
-        where: { employeeId: { in: advanceEmployeeIds }, pharmacyId: targetPharmacyId },
+        where: { employeeId: { in: recipientEmployeeIds }, pharmacyId: targetPharmacyId },
         select: { employeeId: true },
       });
       const linkedIds = new Set(links.map((l) => l.employeeId));
-      if (advanceEmployeeIds.some((empId) => !linkedIds.has(empId))) {
+      if (recipientEmployeeIds.some((empId) => !linkedIds.has(empId))) {
         return NextResponse.json(
-          { error: 'Аванс можно записать только сотруднику выбранной аптеки' },
+          { error: 'Аванс/доплату можно записать только сотруднику выбранной аптеки' },
           { status: 400 }
         );
       }
@@ -201,7 +202,7 @@ export async function PUT(
             amount: i.amount,
             category: i.category || null,
             comment: i.comment || null,
-            employeeId: i.category === 'employeeAdvance' && i.employeeId ? Number(i.employeeId) : null,
+            employeeId: i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId ? Number(i.employeeId) : null,
           })),
         });
       }

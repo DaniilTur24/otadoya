@@ -45,10 +45,11 @@ function mockShifts(shifts: { shiftType: string; cashRevenue: number; terminalRe
   vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(shifts);
 }
 
-function mockAggregates(bonuses: number, advances = 0) {
+function mockAggregates(bonuses: number, advances = 0, surcharges = 0) {
   vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockImplementation(
     (args: { where?: { category?: string } }) => {
-      const amount = args?.where?.category === 'employeeAdvance' ? advances : bonuses;
+      const category = args?.where?.category;
+      const amount = category === 'employeeAdvance' ? advances : category === 'employeeSurcharge' ? surcharges : bonuses;
       return Promise.resolve({ _sum: { amount } });
     }
   );
@@ -228,6 +229,50 @@ describe('calculateEmployeeMonthlySalary', () => {
     expect(result!.salaryFromFiveDayShifts).toBe(0);
   });
 
+  it('sources fiveDayShiftsCount from attendance, not revenue entries, when fiveDayViaAttendance is on', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockEmployee,
+      fiveDayViaAttendance: true,
+    });
+    mockCalendar(20);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(3);
+    mockShifts([]); // no revenue entries at all — attendance is the only source now
+    const result = await calculateEmployeeMonthlySalary(1, 6, 2025);
+    expect(result!.fiveDayShiftsCount).toBe(3);
+    expect(result!.salaryFromFiveDayShifts).toBeCloseTo((150000 / 20) * 3, 5);
+  });
+
+  it('ignores legacy five_day revenue entries (does not double-count) once fiveDayViaAttendance is on', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockEmployee,
+      fiveDayViaAttendance: true,
+    });
+    mockCalendar(20);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+    // Old revenue-entry-based five_day shifts recorded before the flag was turned on
+    mockShifts([
+      { shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+      { shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+    ]);
+    const result = await calculateEmployeeMonthlySalary(1, 6, 2025);
+    // Count comes from attendance (2), not from the 2 legacy entries on top of it
+    expect(result!.fiveDayShiftsCount).toBe(2);
+    expect(result!.salaryFromFiveDayShifts).toBeCloseTo((150000 / 20) * 2, 5);
+  });
+
+  it('day/full_day shifts still count from revenue entries even when fiveDayViaAttendance is on', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockEmployee,
+      fiveDayViaAttendance: true,
+    });
+    mockCalendar(20);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    mockShifts([{ shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 }]);
+    const result = await calculateEmployeeMonthlySalary(1, 6, 2025);
+    expect(result!.dayShiftsCount).toBe(1);
+    expect(result!.salaryFromDayShifts).toBeCloseTo(150000 / 15, 5);
+  });
+
   it('workingCalendarDays is exposed in result even when no five_day shifts', async () => {
     mockCalendar(22);
     mockShifts([{ shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 }]);
@@ -392,11 +437,12 @@ describe('calculateAllEmployeesSalaries', () => {
 
 // ─── manager_trading / manager_fixed / cleaner / office ──────────────────────
 
-function mockExpenseAggregates(opts: { ownBonuses?: number; advances?: number; managerBonusBase?: number } = {}) {
-  const { ownBonuses = 0, advances = 0, managerBonusBase = 0 } = opts;
+function mockExpenseAggregates(opts: { ownBonuses?: number; advances?: number; surcharges?: number; managerBonusBase?: number } = {}) {
+  const { ownBonuses = 0, advances = 0, surcharges = 0, managerBonusBase = 0 } = opts;
   vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockImplementation(
     (args: { where?: { category?: string; entry?: { employeeId?: number } } }) => {
       if (args?.where?.category === 'employeeAdvance') return Promise.resolve({ _sum: { amount: advances } });
+      if (args?.where?.category === 'employeeSurcharge') return Promise.resolve({ _sum: { amount: surcharges } });
       if (args?.where?.entry?.employeeId !== undefined) return Promise.resolve({ _sum: { amount: ownBonuses } });
       return Promise.resolve({ _sum: { amount: managerBonusBase } });
     }
@@ -475,6 +521,24 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     expect(result!.managedBonusTotal).toBe(50000);
     expect(result!.totalBonuses).toBe(1000);
     expect(result!.totalSalary).toBeCloseTo(150000 / 15 + 1000 + 5000, 5);
+  });
+
+  it('rounds managerBonusShare to the nearest 5 tenge', async () => {
+    mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 }] });
+    // 10% of these totals: 123410 -> 12341 -> rounds to 12340
+    //                       123430 -> 12343 -> rounds to 12345
+    //                       123480 -> 12348 -> rounds to 12350
+    mockExpenseAggregates({ ownBonuses: 0, managerBonusBase: 123410 });
+    let result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.managerBonusShare).toBe(12340);
+
+    mockExpenseAggregates({ ownBonuses: 0, managerBonusBase: 123430 });
+    result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.managerBonusShare).toBe(12345);
+
+    mockExpenseAggregates({ ownBonuses: 0, managerBonusBase: 123480 });
+    result = await calculateEmployeeMonthlySalary(5, 5, 2025);
+    expect(result!.managerBonusShare).toBe(12350);
   });
 
   it('adds the employee allowance', async () => {

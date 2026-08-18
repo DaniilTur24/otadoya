@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdmin(request);
   if (auth) return auth;
 
-  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription, fiveDayViaAttendance } = await request.json();
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Имя сотрудника обязательно' }, { status: 400 });
@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
       shiftRate: shiftRate != null ? String(shiftRate) : null,
       allowance: String(allowance ?? 0),
       allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
+      fiveDayViaAttendance: Boolean(fiveDayViaAttendance),
     },
   });
 
