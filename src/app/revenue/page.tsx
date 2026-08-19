@@ -898,7 +898,7 @@ export default function RevenueListPage() {
             const totalSurcharges = entries.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
             const totalExpenses = entries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
             const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
-            const cashNet = totalCash - totalBonuses - totalAdvances - totalSurcharges - totalExpenses;
+            const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
                 <span className="text-slate-500">Итого по выбранным записям:</span>

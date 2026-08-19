@@ -195,7 +195,7 @@ export default function NewRevenuePage() {
     .filter((i) => i.category !== 'pharmaBonus' && i.category !== 'employeeAdvance' && i.category !== 'employeeSurcharge' && monthlyFieldType(i.category) !== 'income')
     .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
   const grandTotal = totalRevenue + summaryIncomes - summaryExpenses - summaryBonuses - summaryAdvances - summarySurcharges;
-  const cashNet = cashRevenueNum - summaryBonuses - summaryAdvances - summarySurcharges - summaryExpenses;
+  const cashNet = cashRevenueNum - summaryBonuses - summaryAdvances - summaryExpenses;
 
   const selectedDate = new Date(form.date);
   const now = new Date();
@@ -525,7 +525,7 @@ export default function NewRevenuePage() {
           </div>
           {form.doplataEmployeeId && parseFloat(form.doplata) > 0 && (
             <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-              Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки и наличные на руках за день. В статистику бонусов не входит.
+              Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
             </p>
           )}
           {employees.length > 0 && !form.doplataEmployeeId && form.doplata && parseFloat(form.doplata) > 0 && (
