@@ -405,7 +405,6 @@ async function calculateTradingEmployeeSalary(
   const baseSalary = Number(employee.baseSalary);
   let dayShiftsCount = 0;
   let fullDayShiftsCount = 0;
-  let fiveDayShiftsCount = 0;
   let revenueTotal = 0;
   let revenueDayShifts = 0;
   let revenueFullDayShifts = 0;
@@ -418,18 +417,13 @@ async function calculateTradingEmployeeSalary(
     } else if (e.shiftType === 'full_day') {
       fullDayShiftsCount++;
       revenueFullDayShifts += revenue;
-    } else if (e.shiftType === 'five_day' && !fiveDayViaAttendance) {
-      // Если для сотрудника включён fiveDayViaAttendance, пятидневка считается из табеля
-      // (ниже) — старые five_day-записи выручки (до включения флага) в счётчик не идут,
-      // чтобы не задвоить смену.
-      fiveDayShiftsCount++;
     }
+    // 'five_day' в записи выручки — устаревший способ, зарплату он больше не даёт вообще:
+    // пятидневка сотрудника считается только через табель (fiveDayViaAttendance), см. ниже.
     revenueTotal += revenue;
   }
 
-  if (fiveDayViaAttendance) {
-    fiveDayShiftsCount = attendanceFiveDayCount;
-  }
+  const fiveDayShiftsCount = fiveDayViaAttendance ? attendanceFiveDayCount : 0;
 
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
   const salaryFromFullDayShifts = baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0;

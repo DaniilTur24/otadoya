@@ -14,8 +14,10 @@ export const SHIFT_TYPE_LABELS: Record<string, string> = {
   five_day: 'Пятидневная',
 };
 
+// 'five_day' сюда не входит: пятидневка сотрудника с включённым fiveDayViaAttendance назначается
+// в табеле посещаемости, а не смену выручки; на зарплату этот тип смены в выручке больше не влияет
+// (см. salary-calculator.ts), поэтому в форме внесения выручки его выбирать незачем.
 export const SHIFT_OPTIONS = [
   { value: 'day', label: 'Дневная' },
   { value: 'full_day', label: 'Суточная' },
-  { value: 'five_day', label: 'Пятидневная' },
 ] as const;

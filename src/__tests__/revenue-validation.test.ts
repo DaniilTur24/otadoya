@@ -26,16 +26,17 @@ describe('validateShiftEmployeeType', () => {
       fiveDayViaAttendance: true,
     });
     const error = await validateShiftEmployeeType(1, 'five_day');
-    expect(error).toBe('У этого сотрудника пятидневка отмечается в табеле посещаемости, а не записью выручки');
+    expect(error).toBe('У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смену в записи выручки ему назначать нельзя');
   });
 
-  it('still allows day/full_day shifts for a seller with fiveDayViaAttendance on', async () => {
+  it('also blocks day/full_day shifts for a seller with fiveDayViaAttendance on', async () => {
     vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       employeeType: 'seller',
       fiveDayViaAttendance: true,
     });
-    expect(await validateShiftEmployeeType(1, 'day')).toBeNull();
-    expect(await validateShiftEmployeeType(1, 'full_day')).toBeNull();
+    const error = await validateShiftEmployeeType(1, 'day');
+    expect(error).toBe('У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смену в записи выручки ему назначать нельзя');
+    expect(await validateShiftEmployeeType(1, 'full_day')).toBe(error);
   });
 
   it('still blocks attendance-based types regardless of fiveDayViaAttendance', async () => {

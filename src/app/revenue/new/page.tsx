@@ -15,6 +15,7 @@ interface Employee {
   id: number;
   name: string;
   employeeType: string;
+  fiveDayViaAttendance?: boolean;
 }
 
 interface ExpenseItem {
@@ -134,6 +135,10 @@ export default function NewRevenuePage() {
       if (name === 'employeeId') {
         const emp = employees.find((em) => em.id === Number(value));
         updated.employeeName = emp ? emp.name : '';
+        // У пятидневщика зарплата считается по табелю — смену в записи выручки ему не назначаем
+        if (emp?.fiveDayViaAttendance) {
+          updated.shiftType = '';
+        }
       }
       return updated;
     });
@@ -156,6 +161,8 @@ export default function NewRevenuePage() {
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
   const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
+  const selectedEmployee = employees.find((e) => e.id === Number(form.employeeId));
+  const isFiveDayEmployee = Boolean(selectedEmployee?.fiveDayViaAttendance);
 
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),
@@ -410,13 +417,18 @@ export default function NewRevenuePage() {
               value={form.shiftType}
               onChange={handleChange}
               className="input"
+              disabled={isFiveDayEmployee}
             >
               <option value="">— не указан —</option>
               {SHIFT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-            {!form.shiftType && (
+            {isFiveDayEmployee ? (
+              <p className="mt-1 text-xs text-slate-400">
+                У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смена здесь не назначается
+              </p>
+            ) : !form.shiftType && (
               <p className="mt-1 text-xs text-amber-600">
                 Без типа смены зарплата не рассчитается
               </p>

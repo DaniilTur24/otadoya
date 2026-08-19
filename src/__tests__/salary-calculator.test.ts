@@ -170,29 +170,21 @@ describe('calculateEmployeeMonthlySalary', () => {
   });
 
   // ─── пятидневная смена ────────────────────────────────────────────────────
+  // 'five_day' в записи выручки — устаревший способ и больше не выбирается в UI
+  // (см. src/lib/shift-types.ts); зарплату он не даёт ни при каких условиях —
+  // пятидневка считается только через табель (fiveDayViaAttendance), см. ниже.
 
-  it('calculates five_day shift salary correctly (baseSalary / workingDays)', async () => {
+  it('gives no salary for a legacy five_day revenue entry, even with a calendar configured', async () => {
     mockCalendar(22);
     mockShifts([{ shiftType: 'five_day', cashRevenue: 10000, terminalRevenue: 0, kaspiRevenue: 0 }]);
     const result = await calculateEmployeeMonthlySalary(1, 6, 2025);
-    expect(result!.fiveDayShiftsCount).toBe(1);
-    expect(result!.salaryFromFiveDayShifts).toBeCloseTo(150000 / 22, 5);
-    expect(result!.workingCalendarDays).toBe(22);
+    expect(result!.fiveDayShiftsCount).toBe(0);
+    expect(result!.salaryFromFiveDayShifts).toBe(0);
     expect(result!.salaryFromDayShifts).toBe(0);
     expect(result!.salaryFromFullDayShifts).toBe(0);
   });
 
-  it('returns zero for five_day salary when calendar not configured', async () => {
-    mockCalendar(null);
-    mockShifts([{ shiftType: 'five_day', cashRevenue: 5000, terminalRevenue: 0, kaspiRevenue: 0 }]);
-    const result = await calculateEmployeeMonthlySalary(1, 6, 2025);
-    expect(result!.fiveDayShiftsCount).toBe(1);
-    expect(result!.salaryFromFiveDayShifts).toBe(0);
-    expect(result!.workingCalendarDays).toBeNull();
-    expect(result!.totalSalary).toBe(0);
-  });
-
-  it('sums all three shift types into totalSalary', async () => {
+  it('day/full_day shifts still pay normally when legacy five_day entries are mixed in', async () => {
     mockCalendar(20);
     mockShifts([
       { shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
@@ -203,30 +195,11 @@ describe('calculateEmployeeMonthlySalary', () => {
     const result = await calculateEmployeeMonthlySalary(1, 2, 2025);
     // Zero revenue on both shift types — premium floors at 0, not negative
     const revenuePremium = Math.max(0, (0 - 200000) * 0.015) + Math.max(0, (0 - 300000) * 0.015);
-    const expected = 150000 / 15 + 150000 / 10 + (150000 / 20) * 2 + revenuePremium;
+    const expected = 150000 / 15 + 150000 / 10 + revenuePremium;
     expect(result!.dayShiftsCount).toBe(1);
     expect(result!.fullDayShiftsCount).toBe(1);
-    expect(result!.fiveDayShiftsCount).toBe(2);
+    expect(result!.fiveDayShiftsCount).toBe(0);
     expect(result!.totalSalary).toBeCloseTo(expected, 5);
-  });
-
-  it('five_day salary uses workingDays from calendar, not a fixed divisor', async () => {
-    mockCalendar(19); // январь — 19 рабочих дней
-    mockShifts([
-      { shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
-      { shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
-      { shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
-    ]);
-    const result = await calculateEmployeeMonthlySalary(1, 1, 2025);
-    expect(result!.salaryFromFiveDayShifts).toBeCloseTo((150000 / 19) * 3, 5);
-  });
-
-  it('returns zero five_day salary when baseSalary is 0', async () => {
-    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({ ...mockEmployee, baseSalary: 0 });
-    mockCalendar(22);
-    mockShifts([{ shiftType: 'five_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 }]);
-    const result = await calculateEmployeeMonthlySalary(1, 6, 2025);
-    expect(result!.salaryFromFiveDayShifts).toBe(0);
   });
 
   it('sources fiveDayShiftsCount from attendance, not revenue entries, when fiveDayViaAttendance is on', async () => {
