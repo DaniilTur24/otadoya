@@ -400,7 +400,6 @@ export default function UsersPage() {
                 <th className="th">Логин</th>
                 <th className="th">Тип / оклад</th>
                 <th className="th">Аптеки</th>
-                <th className="th">Статус</th>
                 <th className="th"></th>
               </tr>
             </thead>
@@ -449,13 +448,6 @@ export default function UsersPage() {
                         ))}
                       </div>
                     )}
-                  </td>
-                  <td className="td">
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded border ${
-                      m.isActive ? 'bg-green-50 text-green-700 border-green-300' : 'bg-slate-100 text-slate-500 border-slate-300'
-                    }`}>
-                      {m.isActive ? 'Активен' : 'Отключён'}
-                    </span>
                   </td>
                   <td className="td">
                     <div className="flex gap-1">

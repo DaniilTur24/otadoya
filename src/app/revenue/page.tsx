@@ -19,7 +19,7 @@ const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
 ).map((row) => ({ key: row.key, label: row.label }));
 
 interface Pharmacy { id: number; name: string }
-interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean }
+interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean; pharmacies: Pharmacy[] }
 
 interface ExpenseItem {
   id: number;
@@ -132,6 +132,10 @@ export default function RevenueListPage() {
   const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
   const editSelectedEmployee = editState ? employees.find((e) => e.id === Number(editState.employeeId)) : undefined;
   const isEditFiveDayEmployee = Boolean(editSelectedEmployee?.fiveDayViaAttendance);
+  // Аванс/доплату можно назначить только сотруднику, привязанному к аптеке этой записи
+  const editPharmacyEmployees = editState
+    ? employees.filter((e) => e.pharmacies.some((p) => p.id === Number(editState.pharmacyId)))
+    : [];
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
@@ -200,6 +204,14 @@ export default function RevenueListPage() {
   function startEdit(entry: RevenueEntry) {
     setEditingId(entry.id);
     setSaveError('');
+
+    // Существующая доплата (если есть) редактируется через выделенное поле
+    // «Доплата сотруднику» ниже, а не как обычная строка в «Дополнительных статьях» —
+    // иначе можно случайно добавить её туда повторно.
+    const surchargeItem = entry.expenseItems.find((i) => i.category === 'employeeSurcharge');
+    const rawComment = surchargeItem?.comment ?? '';
+    const separatorIndex = rawComment.indexOf(' — ');
+
     setEditState({
       pharmacyId: String(entry.pharmacy.id),
       date: entry.date.split('T')[0],
@@ -210,18 +222,18 @@ export default function RevenueListPage() {
       employeeId: entry.employeeId ? String(entry.employeeId) : '',
       employeeName: entry.employeeName,
       shiftType: entry.shiftType ?? '',
-      doplata: '',
-      doplataEmployeeId: '',
-      doplataComment: '',
-      expenseItems: entry.expenseItems.length > 0
-        ? entry.expenseItems.map((i) => ({
-            id: nextItemId++,
-            amount: String(i.amount),
-            category: i.category ?? '',
-            comment: i.comment ?? '',
-            employeeId: i.employeeId ? String(i.employeeId) : '',
-          }))
-        : [],
+      doplata: surchargeItem ? String(surchargeItem.amount) : '',
+      doplataEmployeeId: surchargeItem?.employeeId ? String(surchargeItem.employeeId) : '',
+      doplataComment: separatorIndex !== -1 ? rawComment.slice(separatorIndex + 3) : '',
+      expenseItems: entry.expenseItems
+        .filter((i) => i !== surchargeItem)
+        .map((i) => ({
+          id: nextItemId++,
+          amount: String(i.amount),
+          category: i.category ?? '',
+          comment: i.comment ?? '',
+          employeeId: i.employeeId ? String(i.employeeId) : '',
+        })),
     });
   }
 
@@ -634,10 +646,10 @@ export default function RevenueListPage() {
                   className="input"
                   value={editState.doplataEmployeeId}
                   onChange={(e) => updateField('doplataEmployeeId', e.target.value)}
-                  disabled={employees.length === 0}
+                  disabled={editPharmacyEmployees.length === 0}
                 >
                   <option value="">— кому доплата —</option>
-                  {employees.map((emp) => (
+                  {editPharmacyEmployees.map((emp) => (
                     <option key={emp.id} value={emp.id}>{emp.name}</option>
                   ))}
                 </select>
@@ -670,7 +682,7 @@ export default function RevenueListPage() {
                 Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
               </p>
             )}
-            {employees.length > 0 && !editState.doplataEmployeeId && editState.doplata && parseFloat(editState.doplata) > 0 && (
+            {editPharmacyEmployees.length > 0 && !editState.doplataEmployeeId && editState.doplata && parseFloat(editState.doplata) > 0 && (
               <p className="mt-2 text-xs text-amber-600">
                 Выберите сотрудника, которому положена доплата
               </p>
@@ -765,7 +777,7 @@ export default function RevenueListPage() {
                         <select className="input" value={item.employeeId} required
                           onChange={(e) => updateExpenseItem(item.id, 'employeeId', e.target.value)}>
                           <option value="">— кому выдан аванс —</option>
-                          {employees.map((emp) => (
+                          {editPharmacyEmployees.map((emp) => (
                             <option key={emp.id} value={emp.id}>{emp.name}</option>
                           ))}
                         </select>
@@ -779,7 +791,7 @@ export default function RevenueListPage() {
                         <select className="input" value={item.employeeId} required
                           onChange={(e) => updateExpenseItem(item.id, 'employeeId', e.target.value)}>
                           <option value="">— кому доплата —</option>
-                          {employees.map((emp) => (
+                          {editPharmacyEmployees.map((emp) => (
                             <option key={emp.id} value={emp.id}>{emp.name}</option>
                           ))}
                         </select>
