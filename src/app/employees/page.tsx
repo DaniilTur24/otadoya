@@ -119,15 +119,6 @@ export default function EmployeesPage() {
     setSaving(false);
   }
 
-  async function toggleActive(id: number, current: boolean) {
-    await fetch(`/api/employees/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !current }),
-    });
-    load();
-  }
-
   async function handleDelete(id: number, name: string) {
     if (!confirm(`Удалить сотрудника «${name}»?\n\nЗаписи выручки останутся, но привязка к этому сотруднику будет потеряна.`)) return;
     await fetch(`/api/employees/${id}`, { method: 'DELETE' });
@@ -150,15 +141,6 @@ export default function EmployeesPage() {
       Array.from(selectedIds).map((id) => fetch(`/api/employees/${id}`, { method: 'DELETE' }))
     );
     setSelectedIds(new Set());
-    load();
-  }
-
-  async function updatePharmacies(id: number, pharmacyIds: number[]) {
-    await fetch(`/api/employees/${id}/pharmacies`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pharmacyIds }),
-    });
     load();
   }
 
@@ -334,12 +316,9 @@ export default function EmployeesPage() {
                 <EmployeeRow
                   key={emp.id}
                   emp={emp}
-                  allPharmacies={pharmacies}
                   isSelected={selectedIds.has(emp.id)}
                   onToggleSelect={toggleSelect}
-                  onToggle={toggleActive}
                   onDelete={handleDelete}
-                  onUpdatePharmacies={updatePharmacies}
                 />
               ))
             )}
@@ -355,12 +334,9 @@ export default function EmployeesPage() {
                   <EmployeeRow
                     key={emp.id}
                     emp={emp}
-                    allPharmacies={pharmacies}
                     isSelected={selectedIds.has(emp.id)}
                     onToggleSelect={toggleSelect}
-                    onToggle={toggleActive}
                     onDelete={handleDelete}
-                    onUpdatePharmacies={updatePharmacies}
                   />
                 ))}
               </div>
@@ -374,38 +350,15 @@ export default function EmployeesPage() {
 
 function EmployeeRow({
   emp,
-  allPharmacies,
   isSelected,
   onToggleSelect,
-  onToggle,
   onDelete,
-  onUpdatePharmacies,
 }: {
   emp: Employee;
-  allPharmacies: Pharmacy[];
   isSelected: boolean;
   onToggleSelect: (id: number) => void;
-  onToggle: (id: number, current: boolean) => void;
   onDelete: (id: number, name: string) => void;
-  onUpdatePharmacies: (id: number, pharmacyIds: number[]) => void;
 }) {
-  const [editingPharmacies, setEditingPharmacies] = useState(false);
-  const [selected, setSelected] = useState<number[]>(emp.pharmacies.map((p) => p.id));
-
-  function toggle(id: number) {
-    setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
-  }
-
-  function openEdit() {
-    setSelected(emp.pharmacies.map((p) => p.id));
-    setEditingPharmacies(true);
-  }
-
-  function save() {
-    onUpdatePharmacies(emp.id, selected);
-    setEditingPharmacies(false);
-  }
-
   return (
     <div className="px-3 py-2.5 hover:bg-slate-50">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -453,14 +406,6 @@ function EmployeeRow({
                 </span>
               ))
             )}
-            {allPharmacies.length > 0 && (
-              <button
-                onClick={openEdit}
-                className="text-xs text-slate-400 hover:text-slate-700 underline ml-1"
-              >
-                изменить
-              </button>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -468,18 +413,8 @@ function EmployeeRow({
             href={`/employees/${emp.id}`}
             className="text-xs text-slate-700 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100"
           >
-            Зарплата / изменить
+            Изменить/посмотреть
           </Link>
-          <button
-            onClick={() => onToggle(emp.id, emp.isActive)}
-            className={`text-xs font-medium px-2 py-1 rounded transition-colors ${
-              emp.isActive
-                ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
-                : 'text-slate-400 hover:text-green-600 hover:bg-green-50'
-            }`}
-          >
-            {emp.isActive ? 'Деактивировать' : 'Активировать'}
-          </button>
           <button
             onClick={() => onDelete(emp.id, emp.name)}
             className="text-xs font-medium px-2 py-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
@@ -488,29 +423,6 @@ function EmployeeRow({
           </button>
         </div>
       </div>
-
-      {editingPharmacies && (
-        <div className="mt-2 p-3 bg-slate-50 border border-slate-300 rounded">
-          <p className="text-xs font-medium text-slate-700 mb-2">Аптеки сотрудника:</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
-            {allPharmacies.map((p) => (
-              <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(p.id)}
-                  onChange={() => toggle(p.id)}
-                  className="rounded"
-                />
-                <span>{p.name}</span>
-              </label>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={save} className="btn-primary text-xs">Сохранить</button>
-            <button onClick={() => setEditingPharmacies(false)} className="btn-secondary text-xs">Отмена</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

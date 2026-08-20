@@ -59,6 +59,9 @@ interface EditState {
   employeeId: string;
   employeeName: string;
   shiftType: string;
+  doplata: string;
+  doplataEmployeeId: string;
+  doplataComment: string;
   expenseItems: EditExpenseItem[];
 }
 
@@ -207,6 +210,9 @@ export default function RevenueListPage() {
       employeeId: entry.employeeId ? String(entry.employeeId) : '',
       employeeName: entry.employeeName,
       shiftType: entry.shiftType ?? '',
+      doplata: '',
+      doplataEmployeeId: '',
+      doplataComment: '',
       expenseItems: entry.expenseItems.length > 0
         ? entry.expenseItems.map((i) => ({
             id: nextItemId++,
@@ -283,6 +289,13 @@ export default function RevenueListPage() {
 
   async function saveEdit() {
     if (!editState || editingId === null) return;
+
+    if (!isEditFiveDayEmployee && !editState.shiftType) {
+      if (!confirm('Без типа смены зарплата фармацевта не рассчитается, вы уверены?')) {
+        return;
+      }
+    }
+
     setSaving(true);
     setSaveError('');
 
@@ -306,11 +319,36 @@ export default function RevenueListPage() {
       return;
     }
 
+    const doplataAmount = parseFloat(editState.doplata) || 0;
+    if (doplataAmount > 0 && !editState.doplataEmployeeId) {
+      setSaveError('Выберите сотрудника, которому положена доплата');
+      setSaving(false);
+      return;
+    }
+
     const employeeName = editState.employeeName.trim();
     if (!employeeName) {
       setSaveError('Выберите сотрудника из списка');
       setSaving(false);
       return;
+    }
+
+    type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId: number | null };
+    const allExpenseItems: SubmitExpenseItem[] = validItems.map((i) => ({
+      amount: i.amount,
+      category: i.category || null,
+      comment: i.comment || null,
+      employeeId: (i.category === 'employeeAdvance' || i.category === 'employeeSurcharge') && i.employeeId ? Number(i.employeeId) : null,
+    }));
+    if (doplataAmount > 0 && editState.doplataEmployeeId) {
+      const doplataEmployee = employees.find((e) => e.id === Number(editState.doplataEmployeeId));
+      const label = doplataEmployee ? `Доплата: ${doplataEmployee.name}` : 'Доплата';
+      allExpenseItems.push({
+        amount: editState.doplata,
+        category: 'employeeSurcharge',
+        comment: editState.doplataComment.trim() ? `${label} — ${editState.doplataComment.trim()}` : label,
+        employeeId: Number(editState.doplataEmployeeId),
+      });
     }
 
     const res = await fetch(`/api/revenue/${editingId}`, {
@@ -326,12 +364,7 @@ export default function RevenueListPage() {
         employeeId: editState.employeeId ? Number(editState.employeeId) : null,
         employeeName,
         shiftType: editState.shiftType || null,
-        expenseItems: validItems.map((i) => ({
-          amount: i.amount,
-          category: i.category || null,
-          comment: i.comment || null,
-          employeeId: (i.category === 'employeeAdvance' || i.category === 'employeeSurcharge') && i.employeeId ? Number(i.employeeId) : null,
-        })),
+        expenseItems: allExpenseItems,
       }),
     });
 
@@ -590,6 +623,58 @@ export default function RevenueListPage() {
                 <p className="mt-1 text-xs text-amber-600">Без типа смены зарплата не рассчитается</p>
               )}
             </div>
+          </div>
+
+          {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
+          <div className="rounded border border-slate-300 p-3 mb-4">
+            <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <select
+                  className="input"
+                  value={editState.doplataEmployeeId}
+                  onChange={(e) => updateField('doplataEmployeeId', e.target.value)}
+                  disabled={employees.length === 0}
+                >
+                  <option value="">— кому доплата —</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <input
+                  type="number"
+                  value={editState.doplata}
+                  onChange={(e) => updateField('doplata', e.target.value)}
+                  min="0"
+                  step="0.01"
+                  placeholder="Сумма доплаты"
+                  className="input"
+                  disabled={!editState.doplataEmployeeId}
+                />
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={editState.doplataComment}
+                  onChange={(e) => updateField('doplataComment', e.target.value)}
+                  placeholder="Комментарий (за что доплата)"
+                  className="input"
+                  disabled={!editState.doplataEmployeeId}
+                />
+              </div>
+            </div>
+            {editState.doplataEmployeeId && parseFloat(editState.doplata) > 0 && (
+              <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
+              </p>
+            )}
+            {employees.length > 0 && !editState.doplataEmployeeId && editState.doplata && parseFloat(editState.doplata) > 0 && (
+              <p className="mt-2 text-xs text-amber-600">
+                Выберите сотрудника, которому положена доплата
+              </p>
+            )}
           </div>
 
           {/* Выручка */}

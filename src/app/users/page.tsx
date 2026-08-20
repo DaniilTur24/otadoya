@@ -151,15 +151,6 @@ export default function UsersPage() {
     setSaving(false);
   }
 
-  async function toggleActive(m: Manager) {
-    await fetch(`/api/users/${m.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !m.isActive }),
-    });
-    load();
-  }
-
   async function deleteManager(id: number) {
     if (!confirm('Удалить аккаунт? Записи выручки и табеля останутся.')) return;
     await fetch(`/api/users/${id}`, { method: 'DELETE' });
@@ -470,16 +461,6 @@ export default function UsersPage() {
                     <div className="flex gap-1">
                       <button className="btn-secondary text-xs" onClick={() => startEdit(m)}>
                         Изменить
-                      </button>
-                      <button
-                        className={`text-xs px-2 py-1 rounded font-medium border transition-colors ${
-                          m.isActive
-                            ? 'border-amber-300 text-amber-700 hover:bg-amber-50'
-                            : 'border-green-300 text-green-700 hover:bg-green-50'
-                        }`}
-                        onClick={() => toggleActive(m)}
-                      >
-                        {m.isActive ? 'Отключить' : 'Включить'}
                       </button>
                       <button className="btn-danger text-xs" onClick={() => deleteManager(m.id)}>
                         Удалить

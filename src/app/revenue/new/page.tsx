@@ -205,6 +205,13 @@ export default function NewRevenuePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (!isFiveDayEmployee && !form.shiftType) {
+      if (!confirm('Без типа смены зарплата фармацевта не рассчитается, вы уверены?')) {
+        return;
+      }
+    }
+
     setSubmitting(true);
     setError('');
 
