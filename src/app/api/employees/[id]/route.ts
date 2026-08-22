@@ -87,6 +87,19 @@ export async function DELETE(
   const auth = await requireAdmin(request);
   if (auth) return auth;
 
-  await prisma.employee.delete({ where: { id: Number((await params).id) } });
+  const employeeId = Number((await params).id);
+
+  // Заведующие/менеджеры (USER_LINKED_TYPES) привязаны к аккаунту User — удаление
+  // отсюда оставило бы аккаунт без карточки сотрудника. Удалять их нужно на /users,
+  // где вместе с аккаунтом удаляется и эта карточка.
+  const current = await prisma.employee.findUnique({ where: { id: employeeId }, select: { employeeType: true } });
+  if (current && USER_LINKED_TYPES.has(current.employeeType)) {
+    return NextResponse.json(
+      { error: 'Этот сотрудник привязан к аккаунту заведующего/менеджера — удалить его можно только на странице /users' },
+      { status: 400 }
+    );
+  }
+
+  await prisma.employee.delete({ where: { id: employeeId } });
   return NextResponse.json({ ok: true });
 }

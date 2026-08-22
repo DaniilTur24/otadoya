@@ -12,21 +12,29 @@ vi.mock('next/server', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    employee: { findUnique: vi.fn(), update: vi.fn() },
+    employee: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
   },
 }));
 
 import { prisma } from '@/lib/prisma';
-import { PUT } from '@/app/api/employees/[id]/route';
+import { PUT, DELETE } from '@/app/api/employees/[id]/route';
 
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const updateEmployee = prisma.employee.update as unknown as ReturnType<typeof vi.fn>;
+const deleteEmployee = prisma.employee.delete as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/employees/1', {
     method: 'PUT',
     headers: { 'x-user-role': 'admin', 'content-type': 'application/json' },
     body: JSON.stringify(body),
+  }) as unknown as NextRequest;
+}
+
+function makeDeleteRequest(): NextRequest {
+  return new Request('http://localhost/api/employees/1', {
+    method: 'DELETE',
+    headers: { 'x-user-role': 'admin' },
   }) as unknown as NextRequest;
 }
 
@@ -37,6 +45,7 @@ function makeParams(id = 1) {
 beforeEach(() => {
   findUniqueEmployee.mockReset();
   updateEmployee.mockReset().mockResolvedValue({ id: 1, pharmacies: [] });
+  deleteEmployee.mockReset().mockResolvedValue({ id: 1 });
 });
 
 describe('PUT /api/employees/[id] — защита USER_LINKED_TYPES от редактирования вне /users', () => {
@@ -88,5 +97,44 @@ describe('PUT /api/employees/[id] — защита USER_LINKED_TYPES от ред
 
     expect(res.status).toBe(200);
     expect(updateEmployee).toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /api/employees/[id] — заведующих/менеджеров можно удалить только на /users', () => {
+  it.each(['manager_trading', 'manager_fixed', 'pharmacy_manager'])(
+    'отклоняет удаление %s — нужно удалять на /users',
+    async (employeeType) => {
+      findUniqueEmployee.mockResolvedValue({ employeeType });
+
+      const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as {
+        status: number;
+        body: { error: string };
+      };
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/\/users/);
+      expect(deleteEmployee).not.toHaveBeenCalled();
+    }
+  );
+
+  it('разрешает удалить обычного seller', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller' });
+
+    const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(deleteEmployee).toHaveBeenCalledWith({ where: { id: 1 } });
+  });
+
+  it('разрешает удалить уборщицу и офисного сотрудника', async () => {
+    for (const employeeType of ['cleaner', 'office']) {
+      deleteEmployee.mockClear();
+      findUniqueEmployee.mockResolvedValue({ employeeType });
+
+      const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as { status: number };
+
+      expect(res.status).toBe(200);
+      expect(deleteEmployee).toHaveBeenCalled();
+    }
   });
 });

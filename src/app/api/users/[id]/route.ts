@@ -105,6 +105,17 @@ export async function DELETE(
   if (auth) return auth;
 
   const id = Number((await params).id);
-  await prisma.user.delete({ where: { id } });
+
+  // Удаление аккаунта заведующего/менеджера должно убирать и его привязанную
+  // карточку сотрудника (Employee) — иначе она остаётся в системе как "невидимый"
+  // дубликат, которого не видно на /users, но который всё ещё считается в зарплате.
+  await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id }, select: { employeeId: true } });
+    if (user?.employeeId != null) {
+      await tx.employee.delete({ where: { id: user.employeeId } });
+    }
+    await tx.user.delete({ where: { id } });
+  });
+
   return NextResponse.json({ ok: true });
 }

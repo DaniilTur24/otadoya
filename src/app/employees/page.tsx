@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { EMPLOYEE_TYPE_LABELS } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, USER_LINKED_TYPES } from '@/lib/employee-types';
 
 // Заведующих (manager_trading / manager_fixed) создают на /users — туда же
 // автоматически попадает их карточка сотрудника. Здесь создаются только
@@ -359,15 +359,21 @@ function EmployeeRow({
   onToggleSelect: (id: number) => void;
   onDelete: (id: number, name: string) => void;
 }) {
+  const isUserLinked = USER_LINKED_TYPES.has(emp.employeeType);
+
   return (
     <div className="px-3 py-2.5 hover:bg-slate-50">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-        <input
-          type="checkbox"
-          className="rounded mt-1 sm:mt-0 shrink-0"
-          checked={isSelected}
-          onChange={() => onToggleSelect(emp.id)}
-        />
+        {isUserLinked ? (
+          <span className="w-4 shrink-0" />
+        ) : (
+          <input
+            type="checkbox"
+            className="rounded mt-1 sm:mt-0 shrink-0"
+            checked={isSelected}
+            onChange={() => onToggleSelect(emp.id)}
+          />
+        )}
         <div className="flex-1 min-w-0">
           <div className={`font-medium ${emp.isActive ? 'text-slate-900' : 'text-slate-400'}`}>
             {emp.name}
@@ -415,12 +421,22 @@ function EmployeeRow({
           >
             Изменить/посмотреть
           </Link>
-          <button
-            onClick={() => onDelete(emp.id, emp.name)}
-            className="text-xs font-medium px-2 py-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-          >
-            Удалить
-          </button>
+          {isUserLinked ? (
+            <Link
+              href="/users"
+              title="Заведующие и менеджеры удаляются на странице «Заведующие»"
+              className="text-xs font-medium px-2 py-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              Удалить на /users
+            </Link>
+          ) : (
+            <button
+              onClick={() => onDelete(emp.id, emp.name)}
+              className="text-xs font-medium px-2 py-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            >
+              Удалить
+            </button>
+          )}
         </div>
       </div>
     </div>
