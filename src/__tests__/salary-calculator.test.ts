@@ -471,15 +471,15 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   });
 
-  it('applies the same revenue premium as a seller (200k/300k threshold, 1.5%)', async () => {
+  it('never applies the personal revenue premium, even when shift revenue clears the threshold', async () => {
     mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 220000, terminalRevenue: 0, kaspiRevenue: 0 }] });
     const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
-    // (220000 - 200000) * 1.5% = 300
-    expect(result!.revenuePremiumDayShifts).toBeCloseTo(300, 5);
-    expect(result!.totalRevenuePremium).toBeCloseTo(300, 5);
+    // A seller would get (220000 - 200000) * 1.5% = 300, but a заведующая never does.
+    expect(result!.revenuePremiumDayShifts).toBe(0);
+    expect(result!.totalRevenuePremium).toBe(0);
   });
 
-  it('floors the revenue premium at 0 when revenue is below threshold, like a seller', async () => {
+  it('applies zero revenue premium when revenue is below threshold too', async () => {
     mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 }] });
     const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
     expect(result!.revenuePremiumDayShifts).toBe(0);

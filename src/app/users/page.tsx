@@ -332,7 +332,7 @@ export default function UsersPage() {
                   checked={form.ladderPremiumEnabled}
                   onChange={(e) => setForm((f) => ({ ...f, ladderPremiumEnabled: e.target.checked }))}
                 />
-                Премия по выручке аптеки (лестница с порогом и шагом, вместо личной премии за смену)
+                Премия по выручке аптеки (лестница с порогом и шагом)
               </label>
             )}
 

@@ -337,10 +337,11 @@ const EMPTY_RESULT_BASE = {
  *   salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
  *
  * Премия по личной выручке (revenuePremium: 200k/300k порог, 1.5% от избытка за смену,
- * floor в 0 на каждый тип смены независимо — недобор не вычитается из оклада) одинакова
- * для обоих типов. У заведующей, которая торгует, дополнительно прибавляется 10% от бонусов
- * управляемой аптеки (managerBonusShare) — лестничная премия аптеки (managerLadderPremium)
- * ей не полагается, она есть только у заведующей без торговли (calculateFixedManagerSalary).
+ * floor в 0 на каждый тип смены независимо — недобор не вычитается из оклада) полагается
+ * только продавцу (seller). Заведующая, которая торгует (manager_trading), эту премию
+ * никогда не получает — вместо неё у неё 10% от бонусов управляемой аптеки
+ * (managerBonusShare) и, если включено (ladderPremiumEnabled), лестничная премия аптеки
+ * (managerLadderPremium) — как у заведующей без торговли (calculateFixedManagerSalary).
  * Фиксированная доплата (Employee.allowance) добавляется для любого типа сотрудника.
  */
 async function calculateTradingEmployeeSalary(
@@ -432,10 +433,11 @@ async function calculateTradingEmployeeSalary(
     baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount : 0;
   const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
 
-  // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
-  // Иначе — личная премия как у продавца (floor в 0 на каждый тип смены независимо).
-  const revenuePremiumDayShifts = useLadder ? 0 : Math.max(0, (revenueDayShifts - 200000 * dayShiftsCount) * 0.015);
-  const revenuePremiumFullDayShifts = useLadder ? 0 : Math.max(0, (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015);
+  // Личная премия за выручку смены полагается только продавцу (seller) — заведующая
+  // (manager_trading) её не получает никогда, независимо от ladderPremiumEnabled
+  // (floor в 0 на каждый тип смены независимо).
+  const revenuePremiumDayShifts = isManager ? 0 : Math.max(0, (revenueDayShifts - 200000 * dayShiftsCount) * 0.015);
+  const revenuePremiumFullDayShifts = isManager ? 0 : Math.max(0, (revenueFullDayShifts - 300000 * fullDayShiftsCount) * 0.015);
   const totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts;
 
   const managerLadderPremium = ladderStats.premium;
@@ -709,9 +711,10 @@ async function calculatePharmacyManagerSalary(
 /**
  * Рассчитывает зарплату сотрудника за указанный месяц. Формула зависит от Employee.employeeType:
  *  - seller          — смены (день/сутки) + бонусы + revenuePremium (200k/300k, 1.5%) − авансы
- *  - manager_trading — то же, что seller (включая revenuePremium) + 10% бонусов аптеки.
- *                      Если ladderPremiumEnabled=true — вместо личной revenuePremium получает
- *                      лестничную премию аптеки, как у manager_fixed.
+ *  - manager_trading — те же смены (день/сутки) и бонусы, что у seller, но БЕЗ revenuePremium
+ *                      (заведующая никогда не получает личную премию с продаж) + 10% бонусов
+ *                      аптеки. Если ladderPremiumEnabled=true — дополнительно лестничная
+ *                      премия аптеки, как у manager_fixed.
  *  - manager_fixed   — пятидневка по табелю посещаемости + 10% бонусов + лестничная премия
  *  - cleaner         — ставка за смену × количество смен в табеле − авансы
  *  - office          — пятидневка по табелю посещаемости + лестничная премия от выручки всех аптек
