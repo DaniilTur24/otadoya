@@ -7,7 +7,7 @@ vi.mock('@/lib/prisma', () => ({
       findMany: vi.fn(),
     },
     pharmacy: {
-      findMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     dailyRevenueEntry: {
       findMany: vi.fn(),
@@ -340,6 +340,61 @@ describe('calculateEmployeeMonthlySalary', () => {
   });
 });
 
+// ─── pooled average revenue premium (Pharmacy.poolAverageRevenuePremium) ────
+
+describe('calculateEmployeeMonthlySalary — pool average revenue premium', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockBonuses(0);
+    mockCalendar(null);
+  });
+
+  it('uses the pharmacy-wide average revenue per shift instead of personal revenue when enabled', async () => {
+    vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockImplementation(
+      (args: { where?: { employeeId?: number } }) => {
+        if (args?.where?.employeeId !== undefined) {
+          // Личная выручка сотрудника за смену — ниже порога, сама по себе премии не дала бы.
+          return Promise.resolve([
+            { pharmacyId: 10, shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 },
+          ]);
+        }
+        // Общая выручка аптеки за все дневные смены месяца: (500000)/2 = 250000 средняя.
+        return Promise.resolve([
+          { pharmacyId: 10, shiftType: 'day', cashRevenue: 300000, terminalRevenue: 0, kaspiRevenue: 0 },
+          { pharmacyId: 10, shiftType: 'day', cashRevenue: 200000, terminalRevenue: 0, kaspiRevenue: 0 },
+        ]);
+      }
+    );
+    vi.mocked(prisma.pharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 10, poolAverageRevenuePremium: true },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
+    // (250000 - 200000) * 1.5% = 750 за смену, у сотрудника 1 такая смена.
+    expect(result!.revenuePremiumDayShifts).toBeCloseTo(750, 5);
+  });
+
+  it('falls back to personal revenue when the pharmacy flag is off', async () => {
+    vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockImplementation(
+      (args: { where?: { employeeId?: number } }) => {
+        if (args?.where?.employeeId !== undefined) {
+          return Promise.resolve([
+            { pharmacyId: 10, shiftType: 'day', cashRevenue: 220000, terminalRevenue: 0, kaspiRevenue: 0 },
+          ]);
+        }
+        return Promise.resolve([]);
+      }
+    );
+    vi.mocked(prisma.pharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 10, poolAverageRevenuePremium: false },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
+    // (220000 - 200000) * 1.5% = 300, от собственной выручки.
+    expect(result!.revenuePremiumDayShifts).toBeCloseTo(300, 5);
+  });
+});
+
 // ─── calculateAllEmployeesSalaries ───────────────────────────────────────────
 
 describe('calculateAllEmployeesSalaries', () => {
@@ -471,15 +526,15 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   });
 
-  it('never applies the personal revenue premium, even when shift revenue clears the threshold', async () => {
+  it('applies the same revenue premium as a seller (200k/300k threshold, 1.5%)', async () => {
     mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 220000, terminalRevenue: 0, kaspiRevenue: 0 }] });
     const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
-    // A seller would get (220000 - 200000) * 1.5% = 300, but a заведующая never does.
-    expect(result!.revenuePremiumDayShifts).toBe(0);
-    expect(result!.totalRevenuePremium).toBe(0);
+    // (220000 - 200000) * 1.5% = 300
+    expect(result!.revenuePremiumDayShifts).toBeCloseTo(300, 5);
+    expect(result!.totalRevenuePremium).toBeCloseTo(300, 5);
   });
 
-  it('applies zero revenue premium when revenue is below threshold too', async () => {
+  it('floors the revenue premium at 0 when revenue is below threshold, like a seller', async () => {
     mockRevenueEntries({ shifts: [{ shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 }] });
     const result = await calculateEmployeeMonthlySalary(5, 5, 2025);
     expect(result!.revenuePremiumDayShifts).toBe(0);

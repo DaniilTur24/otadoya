@@ -32,25 +32,33 @@ totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayS
 
 ## manager_trading — заведующая, которая торгует
 
-Окладная часть идентична `seller` (те же `/15`, `/10`, `/workingCalendarDays` за day/full_day/five_day смены). Личной премии за выручку смены (`revenuePremium`) у заведующей **нет никогда** — `revenuePremiumDayShifts`/`revenuePremiumFullDayShifts` жёстко равны 0, независимо от `ladderPremiumEnabled`; такая премия полагается только продавцу. Вместо этого заведующая получает **10% от бонусов управляемых аптек** (`managerBonusShare`) и, если на её карточке включён флаг `ladderPremiumEnabled`, **лестничную премию аптеки** (`managerLadderPremium`) — ту же лестницу, что и у `manager_fixed` (см. ниже).
+Окладная часть идентична `seller` (те же `/15`, `/10`, `/workingCalendarDays` за day/full_day/five_day смены). Дополнительно к этому — **10% от бонусов управляемых аптек**.
+
+Премия за выручку смены (`revenuePremium`) зависит от флага `ladderPremiumEnabled` на карточке сотрудника (`/users`):
+- **выключен** (по умолчанию) — заведующая получает премию за выручку смены, по той же формуле, что и продавец (порог 200k/300k, ставка 1.5%, floor в 0 на каждый тип смены независимо);
+- **включён** — вместо этой премии она получает лестничную премию аптеки (`managerLadderPremium`), как у `manager_fixed` (см. ниже).
 
 ```
-revenuePremiumDayShifts     = 0
-revenuePremiumFullDayShifts = 0
-totalRevenuePremium = 0
+useLadder = ladderPremiumEnabled
+
+revenuePremiumDayShifts     = useLadder ? 0 : max(0, (revenueDayShifts     − 200000 × dayShiftsCount)     × 0.015)
+revenuePremiumFullDayShifts = useLadder ? 0 : max(0, (revenueFullDayShifts − 300000 × fullDayShiftsCount) × 0.015)
+totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts
 
 managerBonusShare = 0.10 × Σ(pharmaBonus управляемых аптек за месяц)   // MANAGER_BONUS_SHARE_PERCENT
 
-managerLadderPremium = ladderPremiumEnabled
-  ? computeLadderPremium(revenue управляемых аптек, Pharmacy.managerPremium*)
+managerLadderPremium = useLadder
+  ? computeManagerLadderPremium(revenue управляемых аптек, Pharmacy.managerPremium*)
   : 0
 
 totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayShifts
-            + totalBonuses + managerBonusShare + managerLadderPremium + allowance
+            + totalBonuses + totalRevenuePremium + managerBonusShare + managerLadderPremium + allowance
             − totalAdvances
 ```
 
 `totalBonuses` здесь — те же бонусы, что у продавца (по своим сменам), а `managerBonusShare` — отдельная 10%-доля от **всех** бонусов аптек, которыми управляет заведующая (может включать бонусы других продавцов той же аптеки). Если передан `pharmacyId`, управляемые аптеки сужаются до пересечения с этим `pharmacyId`.
+
+`revenueDayShifts`/`revenueFullDayShifts` в этой премии считаются **по каждой аптеке отдельно** (сотрудник может отработать смены в разных аптеках за месяц): если у аптеки, где отработана смена, включён `Pharmacy.poolAverageRevenuePremium` — вместо личной выручки сотрудника за смену берётся средняя выручка всей аптеки за смену того же типа за месяц (см. `computePooledShiftAverages` и раздел «Пул-премия по аптеке» ниже). Это касается и `seller`, и `manager_trading` (когда у неё выключена лестница).
 
 ## manager_fixed — заведующая без торговли
 
@@ -114,7 +122,21 @@ totalSalary = salaryFromFiveDayShifts + managerLadderPremium + allowance − tot
   премия += steps × stepBonus
 ```
 
-Используется для `manager_fixed` (всегда), для `manager_trading` (опционально, флаг `ladderPremiumEnabled`) и для `pharmacy_manager` (опционально, флаг `managerPremiumEnabled`) — поля `Pharmacy.managerPremiumThreshold/Base/StepAmount/StepBonus`, настраиваются на `/settings/pharmacies/[id]`. Личной `revenuePremium` (как у продавца) ни у одного из типов заведующих/менеджеров нет. У офиса — другая функция (`findOfficeTierBonus`, диапазоны без накопления шагов), см. выше.
+Используется для `manager_fixed` (всегда), для `manager_trading` (опционально, флаг `ladderPremiumEnabled`) и для `pharmacy_manager` (опционально, флаг `managerPremiumEnabled`) — поля `Pharmacy.managerPremiumThreshold/Base/StepAmount/StepBonus`, настраиваются на `/settings/pharmacies/[id]`. У офиса — другая функция (`findOfficeTierBonus`, диапазоны без накопления шагов), см. выше.
+
+## Пул-премия по аптеке (`Pharmacy.poolAverageRevenuePremium`, `computePooledShiftAverages`)
+
+По умолчанию `revenuePremium` (и у `seller`, и у `manager_trading` без включённой лестницы) считается от **личной** выручки сотрудника за его смены. Если на карточке аптеки (`/settings/pharmacies/[id]`) включить галочку «Премия по средней выручке аптеки за смену», для смен, отработанных в этой аптеке, вместо личной выручки используется **средняя выручка аптеки** за смену того же типа за месяц:
+
+```
+avgDayRevenue     = Σ(выручка всех подтверждённых смен «день» аптеки за месяц)  / кол-во таких смен
+avgFullDayRevenue = Σ(выручка всех подтверждённых смен «сутки» аптеки за месяц) / кол-во таких смен
+
+revenuePremiumDayShifts (для этой аптеки)     = max(0, (avgDayRevenue     − 200000) × 0.015) × dayShiftsCount сотрудника
+revenuePremiumFullDayShifts (для этой аптеки) = max(0, (avgFullDayRevenue − 300000) × 0.015) × fullDayShiftsCount сотрудника
+```
+
+Каждому сотруднику, отработавшему смену в этой аптеке в этом месяце (продавцу или заведующей без включённой лестницы), достаётся одна и та же премия «за смену», умноженная на количество его личных смен — а не сумма, зависящая от того, сколько лично он продал. «Пятидневки» (табельные типы и `shiftType = 'five_day'`) в этот расчёт не входят вовсе, как и обычно.
 
 ## Калькулятор для всех сотрудников разом
 

@@ -22,6 +22,10 @@ model Pharmacy {
   managerPremiumBase       Decimal? @map("manager_premium_base")
   managerPremiumStepAmount Decimal? @map("manager_premium_step_amount")
   managerPremiumStepBonus  Decimal? @map("manager_premium_step_bonus")
+  // Если включено — revenuePremium (личная премия за смену: 200k/300k порог, 1.5%) считается
+  // не от личной выручки сотрудника, а от средней выручки этой аптеки за смену того же типа
+  // (день/сутки) за месяц, поровну на всех, кто отработал такие смены.
+  poolAverageRevenuePremium Boolean @default(false) @map("pool_average_revenue_premium")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

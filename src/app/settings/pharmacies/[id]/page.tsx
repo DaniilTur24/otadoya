@@ -13,6 +13,7 @@ interface Pharmacy {
   managerPremiumBase: number | null;
   managerPremiumStepAmount: number | null;
   managerPremiumStepBonus: number | null;
+  poolAverageRevenuePremium: boolean;
 }
 
 export default function PharmacyEditPage() {
@@ -34,6 +35,7 @@ export default function PharmacyEditPage() {
     managerPremiumBase: '',
     managerPremiumStepAmount: '',
     managerPremiumStepBonus: '',
+    poolAverageRevenuePremium: false,
   });
 
   useEffect(() => {
@@ -49,6 +51,7 @@ export default function PharmacyEditPage() {
           managerPremiumBase:       p.managerPremiumBase != null ? String(p.managerPremiumBase) : '',
           managerPremiumStepAmount: p.managerPremiumStepAmount != null ? String(p.managerPremiumStepAmount) : '',
           managerPremiumStepBonus:  p.managerPremiumStepBonus != null ? String(p.managerPremiumStepBonus) : '',
+          poolAverageRevenuePremium: p.poolAverageRevenuePremium ?? false,
         });
         setLoading(false);
       });
@@ -76,6 +79,7 @@ export default function PharmacyEditPage() {
         managerPremiumBase:       form.managerPremiumBase ? parseFloat(form.managerPremiumBase) : null,
         managerPremiumStepAmount: form.managerPremiumStepAmount ? parseFloat(form.managerPremiumStepAmount) : null,
         managerPremiumStepBonus:  form.managerPremiumStepBonus ? parseFloat(form.managerPremiumStepBonus) : null,
+        poolAverageRevenuePremium: form.poolAverageRevenuePremium,
       }),
     });
 
@@ -223,6 +227,27 @@ export default function PharmacyEditPage() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Премия за смену: личная или средняя по аптеке */}
+        <div className="border-t border-slate-100 pt-4">
+          <h2 className="text-sm font-semibold text-slate-700 mb-1">Премия за смену (продавцы и торгующая заведующая)</h2>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-slate-700"
+              checked={form.poolAverageRevenuePremium}
+              onChange={(e) => set('poolAverageRevenuePremium', e.target.checked)}
+            />
+            Премия по средней выручке аптеки за смену (не по личной выручке сотрудника)
+          </label>
+          <p className="text-xs text-slate-400 mt-1">
+            По умолчанию премия (1,5% сверх порога 200 000 ₸ за смену «день» и 300 000 ₸ за «сутки») считается
+            от личной выручки каждого сотрудника за его смену. Если включить эту галочку — вместо личной выручки
+            берётся средняя выручка аптеки за смену того же типа за месяц (сумма выручки всех смен «день» этого месяца,
+            делённая на их количество; отдельно то же самое для «сутки»), и по ней считается такая же премия — поровну
+            на смену, независимо от того, кто именно её отработал.
+          </p>
         </div>
 
         {/* Кнопки */}
