@@ -8,7 +8,7 @@ import { EMPLOYEE_TYPE_LABELS, USER_LINKED_TYPES } from '@/lib/employee-types';
 // автоматически попадает их карточка сотрудника. Здесь создаются только
 // продавцы, уборщицы и офисные сотрудники.
 const CREATABLE_TYPES = [
-  { value: 'seller', label: 'Продавец' },
+  { value: 'seller', label: 'На кассе' },
   { value: 'cleaner', label: 'Уборщица' },
   { value: 'office', label: 'Офис' },
 ] as const;

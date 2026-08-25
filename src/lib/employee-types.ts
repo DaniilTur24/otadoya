@@ -12,7 +12,7 @@ export const EMPLOYEE_TYPES = {
 export type EmployeeType = keyof typeof EMPLOYEE_TYPES;
 
 export const EMPLOYEE_TYPE_LABELS: Record<string, string> = {
-  seller: 'Продавец',
+  seller: 'На кассе',
   manager_trading: 'Заведующая (торгует)',
   manager_fixed: 'Заведующая (не торгует)',
   cleaner: 'Уборщица',
@@ -21,7 +21,7 @@ export const EMPLOYEE_TYPE_LABELS: Record<string, string> = {
 };
 
 export const EMPLOYEE_TYPE_OPTIONS = [
-  { value: 'seller', label: 'Продавец' },
+  { value: 'seller', label: 'На кассе' },
   { value: 'manager_trading', label: 'Заведующая (торгует)' },
   { value: 'manager_fixed', label: 'Заведующая (не торгует)' },
   { value: 'cleaner', label: 'Уборщица' },

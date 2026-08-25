@@ -6,7 +6,7 @@ import { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 const EDITABLE_TYPES = [
-  { value: 'seller', label: 'Продавец' },
+  { value: 'seller', label: 'На кассе' },
   { value: 'cleaner', label: 'Уборщица' },
   { value: 'office', label: 'Офис' },
 ] as const;
