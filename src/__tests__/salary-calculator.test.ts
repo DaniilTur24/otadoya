@@ -215,6 +215,22 @@ describe('calculateEmployeeMonthlySalary', () => {
     expect(result!.salaryFromFiveDayShifts).toBeCloseTo((150000 / 20) * 3, 5);
   });
 
+  it('recordsCount includes attendance-based five-day shifts when there are no revenue entries', async () => {
+    // Продавец с включённой «Пятидневкой» не создаёт DailyRevenueEntry — recordsCount
+    // должен всё равно быть > 0, иначе карточка сотрудника и calculateAllEmployeesSalaries
+    // скрывают/пропускают уже начисленную зарплату (regression: recordsCount игнорировал табель).
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockEmployee,
+      fiveDayViaAttendance: true,
+    });
+    mockCalendar(20);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+    mockShifts([]);
+    const result = await calculateEmployeeMonthlySalary(1, 8, 2026);
+    expect(result!.recordsCount).toBe(2);
+    expect(result!.totalSalary).toBeCloseTo((150000 / 20) * 2, 5);
+  });
+
   it('ignores legacy five_day revenue entries (does not double-count) once fiveDayViaAttendance is on', async () => {
     vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...mockEmployee,
@@ -431,6 +447,30 @@ describe('calculateAllEmployeesSalaries', () => {
     const result = await calculateAllEmployeesSalaries(1, 2025);
     expect(result).toHaveLength(1);
     expect(result[0].employeeName).toBe('Работник');
+  });
+
+  it('includes a fiveDayViaAttendance seller even with zero revenue entries this month', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 6, name: 'Продавец на пятидневке', baseSalary: 150000, isActive: true },
+    ]);
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 6,
+      name: 'Продавец на пятидневке',
+      baseSalary: 150000,
+      employeeType: 'seller',
+      fiveDayViaAttendance: true,
+      pharmacies: [],
+      allowance: 0,
+    });
+    vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({ _sum: { amount: 0 } });
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+
+    const result = await calculateAllEmployeesSalaries(8, 2026);
+    expect(result).toHaveLength(1);
+    expect(result[0].recordsCount).toBe(2);
+    expect(result[0].totalSalary).toBeCloseTo((150000 / 20) * 2, 5);
   });
 
   it('includes a manager_trading employee even with zero personal shifts this month', async () => {

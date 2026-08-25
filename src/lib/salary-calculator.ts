@@ -560,7 +560,7 @@ async function calculateTradingEmployeeSalary(
     managedRevenueTotal,
     totalSalary,
     revenueTotal,
-    recordsCount: entries.length,
+    recordsCount: entries.length + fiveDayShiftsCount,
   };
 }
 
