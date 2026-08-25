@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { AmountInput } from '@/components/AmountInput';
 
 const EDITABLE_TYPES = [
   { value: 'seller', label: 'На кассе' },
@@ -292,24 +293,18 @@ export default function EmployeeDetailPage() {
           {form.employeeType === 'cleaner' && !USER_LINKED_TYPES.has(employee.employeeType) ? (
             <div>
               <label className="label">Ставка за смену (₸)</label>
-              <input
-                type="number"
+              <AmountInput
                 value={form.shiftRate}
-                onChange={(e) => setForm((f) => ({ ...f, shiftRate: e.target.value }))}
-                min="0"
-                step="1"
+                onChange={(value) => setForm((f) => ({ ...f, shiftRate: value }))}
                 className="input"
               />
             </div>
           ) : (
             <div>
               <label className="label">Оклад (₸)</label>
-              <input
-                type="number"
+              <AmountInput
                 value={form.baseSalary}
-                onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
-                min="0"
-                step="1"
+                onChange={(value) => setForm((f) => ({ ...f, baseSalary: value }))}
                 disabled={USER_LINKED_TYPES.has(employee.employeeType)}
                 className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-slate-50 text-slate-400' : ''}`}
               />
@@ -333,12 +328,9 @@ export default function EmployeeDetailPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Фиксированная доплата (₸/мес)</label>
-            <input
-              type="number"
+            <AmountInput
               value={form.allowance}
-              onChange={(e) => setForm((f) => ({ ...f, allowance: e.target.value }))}
-              min="0"
-              step="1"
+              onChange={(value) => setForm((f) => ({ ...f, allowance: value }))}
               disabled={USER_LINKED_TYPES.has(employee.employeeType)}
               className={`input ${USER_LINKED_TYPES.has(employee.employeeType) ? 'bg-slate-50 text-slate-400' : ''}`}
             />

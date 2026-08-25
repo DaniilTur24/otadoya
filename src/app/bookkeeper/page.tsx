@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { StatusBadge } from '@/components/StatusBadge';
+import { AmountInput } from '@/components/AmountInput';
 
 interface Pharmacy {
   id: number;
@@ -179,19 +180,17 @@ export default function BookkeeperPage() {
                       {editingId === entry.id && editState ? (
                         <>
                           <td className="td">
-                            <input
-                              type="number"
+                            <AmountInput
                               className="input w-28"
                               value={editState.cashRevenue}
-                              onChange={(e) => setEditState({ ...editState, cashRevenue: e.target.value })}
+                              onChange={(value) => setEditState({ ...editState, cashRevenue: value })}
                             />
                           </td>
                           <td className="td">
-                            <input
-                              type="number"
+                            <AmountInput
                               className="input w-28"
                               value={editState.terminalRevenue}
-                              onChange={(e) => setEditState({ ...editState, terminalRevenue: e.target.value })}
+                              onChange={(value) => setEditState({ ...editState, terminalRevenue: value })}
                             />
                           </td>
                           <td className="td text-right font-medium">
@@ -201,11 +200,10 @@ export default function BookkeeperPage() {
                             )}
                           </td>
                           <td className="td">
-                            <input
-                              type="number"
+                            <AmountInput
                               className="input w-28"
                               value={editState.additionalExpenses}
-                              onChange={(e) => setEditState({ ...editState, additionalExpenses: e.target.value })}
+                              onChange={(value) => setEditState({ ...editState, additionalExpenses: value })}
                             />
                           </td>
                         </>

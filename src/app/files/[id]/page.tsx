@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { StatusBadge } from '@/components/StatusBadge';
+import { AmountInput } from '@/components/AmountInput';
 import { BANK_IMPORT_TARGET_FIELDS, monthlyFieldLabel } from '@/lib/monthly-report-fields';
 
 interface Pharmacy {
@@ -380,16 +381,13 @@ export default function FileReviewPage() {
                                 />
                                 <span className="text-xs flex-1 truncate">{pharmacy.name}</span>
                                 {isChecked && (
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
+                                  <AmountInput
                                     className="input text-xs py-0.5 w-28 text-right"
                                     placeholder="0.00"
                                     value={entry.amount}
-                                    onChange={(e) => {
+                                    onChange={(value) => {
                                       const next = draft.customDistribution.map((d) =>
-                                        d.pharmacyId === pharmacy.id ? { ...d, amount: e.target.value } : d
+                                        d.pharmacyId === pharmacy.id ? { ...d, amount: value } : d
                                       );
                                       updateDraft(transaction.id, { customDistribution: next });
                                     }}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { AmountInput } from '@/components/AmountInput';
 
 interface Pharmacy {
   id: number;
@@ -470,28 +471,22 @@ export default function NewRevenuePage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Выручка наличными *</label>
-            <input
-              type="number"
+            <AmountInput
               name="cashRevenue"
               value={form.cashRevenue}
-              onChange={handleChange}
+              onChange={(value) => handleChange({ target: { name: 'cashRevenue', value } } as unknown as React.ChangeEvent<HTMLInputElement>)}
               required
-              min="0"
-              step="0.01"
               placeholder="0.00"
               className="input"
             />
           </div>
           <div>
             <label className="label">Выручка по терминалу *</label>
-            <input
-              type="number"
+            <AmountInput
               name="terminalRevenue"
               value={form.terminalRevenue}
-              onChange={handleChange}
+              onChange={(value) => handleChange({ target: { name: 'terminalRevenue', value } } as unknown as React.ChangeEvent<HTMLInputElement>)}
               required
-              min="0"
-              step="0.01"
               placeholder="0.00"
               className="input"
             />
@@ -501,13 +496,10 @@ export default function NewRevenuePage() {
               Выручка Каспи
               <span className="ml-1 text-slate-400 font-normal">— входит в общую</span>
             </label>
-            <input
-              type="number"
+            <AmountInput
               name="kaspiRevenue"
               value={form.kaspiRevenue}
-              onChange={handleChange}
-              min="0"
-              step="0.01"
+              onChange={(value) => handleChange({ target: { name: 'kaspiRevenue', value } } as unknown as React.ChangeEvent<HTMLInputElement>)}
               placeholder="0.00"
               className="input"
             />
@@ -525,13 +517,10 @@ export default function NewRevenuePage() {
           <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <input
-                type="number"
+              <AmountInput
                 name="doplata"
                 value={form.doplata}
-                onChange={handleChange}
-                min="0"
-                step="0.01"
+                onChange={(value) => handleChange({ target: { name: 'doplata', value } } as unknown as React.ChangeEvent<HTMLInputElement>)}
                 placeholder="Сумма доплаты"
                 className="input"
               />
@@ -594,12 +583,9 @@ export default function NewRevenuePage() {
               {avansItems.map((item) => (
                 <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
                   <div>
-                    <input
-                      type="number"
+                    <AmountInput
                       value={item.amount}
-                      onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
-                      min="0"
-                      step="0.01"
+                      onChange={(value) => updateAvansItem(item.id, 'amount', value)}
                       placeholder="Сумма аванса"
                       className="input"
                       autoFocus
@@ -669,12 +655,9 @@ export default function NewRevenuePage() {
                   <div className="sm:hidden bg-slate-50 rounded-md p-3 space-y-2">
                     <div className="flex gap-2 items-center">
                       <span className="text-xs text-slate-400 w-5 shrink-0">{idx + 1}.</span>
-                      <input
-                        type="number"
+                      <AmountInput
                         value={item.amount}
-                        onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)}
-                        min="0"
-                        step="0.01"
+                        onChange={(value) => updateExpenseItem(item.id, 'amount', value)}
                         placeholder="Сумма"
                         className="input flex-1"
                         autoFocus={idx === expenseItems.length - 1}
@@ -719,12 +702,9 @@ export default function NewRevenuePage() {
                     <span className="text-xs text-slate-400 mt-2.5 text-right pr-1">
                       {idx + 1}.
                     </span>
-                    <input
-                      type="number"
+                    <AmountInput
                       value={item.amount}
-                      onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)}
-                      min="0"
-                      step="0.01"
+                      onChange={(value) => updateExpenseItem(item.id, 'amount', value)}
                       placeholder="0.00"
                       className="input"
                       autoFocus={idx === expenseItems.length - 1}

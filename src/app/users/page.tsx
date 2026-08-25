@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { AmountInput } from '@/components/AmountInput';
 
 const MANAGER_TYPE_OPTIONS = [
   { value: 'manager_trading', label: 'Заведующая (торгует)' },
@@ -275,13 +276,10 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="label">Оклад (₸) *</label>
-                <input
-                  type="number"
+                <AmountInput
                   className="input"
                   value={form.baseSalary}
-                  onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
-                  min="0"
-                  step="1"
+                  onChange={(value) => setForm((f) => ({ ...f, baseSalary: value }))}
                   placeholder="150000"
                   required
                 />
@@ -291,13 +289,10 @@ export default function UsersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Фиксированная доплата (₸/мес)</label>
-                <input
-                  type="number"
+                <AmountInput
                   className="input"
                   value={form.allowance}
-                  onChange={(e) => setForm((f) => ({ ...f, allowance: e.target.value }))}
-                  min="0"
-                  step="1"
+                  onChange={(value) => setForm((f) => ({ ...f, allowance: value }))}
                   placeholder="0"
                 />
               </div>

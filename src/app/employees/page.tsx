@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { EMPLOYEE_TYPE_LABELS, USER_LINKED_TYPES } from '@/lib/employee-types';
+import { AmountInput } from '@/components/AmountInput';
 
 // Заведующих (manager_trading / manager_fixed) создают на /users — туда же
 // автоматически попадает их карточка сотрудника. Здесь создаются только
@@ -196,12 +197,9 @@ export default function EmployeesPage() {
             {form.employeeType === 'cleaner' ? (
               <div>
                 <label className="label">Ставка за смену (₸) *</label>
-                <input
-                  type="number"
+                <AmountInput
                   value={form.shiftRate}
-                  onChange={(e) => setForm((f) => ({ ...f, shiftRate: e.target.value }))}
-                  min="1"
-                  step="1"
+                  onChange={(value) => setForm((f) => ({ ...f, shiftRate: value }))}
                   placeholder="5000"
                   className="input"
                   required
@@ -210,12 +208,9 @@ export default function EmployeesPage() {
             ) : (
               <div>
                 <label className="label">Оклад (₸) *</label>
-                <input
-                  type="number"
+                <AmountInput
                   value={form.baseSalary}
-                  onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
-                  min="1"
-                  step="1"
+                  onChange={(value) => setForm((f) => ({ ...f, baseSalary: value }))}
                   placeholder="150000"
                   className="input"
                   required
@@ -238,12 +233,9 @@ export default function EmployeesPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Фиксированная доплата (₸/мес)</label>
-              <input
-                type="number"
+              <AmountInput
                 value={form.allowance}
-                onChange={(e) => setForm((f) => ({ ...f, allowance: e.target.value }))}
-                min="0"
-                step="1"
+                onChange={(value) => setForm((f) => ({ ...f, allowance: value }))}
                 placeholder="0"
                 className="input"
               />

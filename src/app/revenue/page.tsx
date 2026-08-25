@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { AmountInput } from '@/components/AmountInput';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
@@ -680,24 +681,24 @@ export default function RevenueListPage() {
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div>
               <label className="label">Наличные</label>
-              <input type="number" min="0" step="0.01" className="input"
+              <AmountInput className="input"
                 value={editState.cashRevenue}
-                onChange={(e) => updateField('cashRevenue', e.target.value)} />
+                onChange={(value) => updateField('cashRevenue', value)} />
             </div>
             <div>
               <label className="label">Терминал</label>
-              <input type="number" min="0" step="0.01" className="input"
+              <AmountInput className="input"
                 value={editState.terminalRevenue}
-                onChange={(e) => updateField('terminalRevenue', e.target.value)} />
+                onChange={(value) => updateField('terminalRevenue', value)} />
             </div>
             <div>
               <label className="label">
                 Каспи
                 <span className="ml-1 text-slate-400 font-normal text-xs">— входит в общую</span>
               </label>
-              <input type="number" min="0" step="0.01" className="input"
+              <AmountInput className="input"
                 value={editState.kaspiRevenue}
-                onChange={(e) => updateField('kaspiRevenue', e.target.value)} />
+                onChange={(value) => updateField('kaspiRevenue', value)} />
             </div>
           </div>
 
@@ -712,12 +713,9 @@ export default function RevenueListPage() {
             <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <input
-                  type="number"
+                <AmountInput
                   value={editState.doplata}
-                  onChange={(e) => updateField('doplata', e.target.value)}
-                  min="0"
-                  step="0.01"
+                  onChange={(value) => updateField('doplata', value)}
                   placeholder="Сумма доплаты"
                   className="input"
                 />
@@ -773,12 +771,9 @@ export default function RevenueListPage() {
                 {editState.avansItems.map((item) => (
                   <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
                     <div>
-                      <input
-                        type="number"
+                      <AmountInput
                         value={item.amount}
-                        onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
-                        min="0"
-                        step="0.01"
+                        onChange={(value) => updateAvansItem(item.id, 'amount', value)}
                         placeholder="Сумма аванса"
                         className="input"
                       />
@@ -834,9 +829,9 @@ export default function RevenueListPage() {
                     <div className="grid gap-2 items-start"
                       style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
                       <span className="text-xs text-slate-400 mt-2.5 text-right pr-1">{idx + 1}.</span>
-                      <input type="number" min="0" step="0.01" placeholder="0.00"
+                      <AmountInput placeholder="0.00"
                         className="input" value={item.amount}
-                        onChange={(e) => updateExpenseItem(item.id, 'amount', e.target.value)} />
+                        onChange={(value) => updateExpenseItem(item.id, 'amount', value)} />
                       <select className="input" value={item.category} required
                         onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}>
                         <option value="">— статья —</option>

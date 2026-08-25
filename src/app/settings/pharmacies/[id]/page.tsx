@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { AmountInput } from '@/components/AmountInput';
 
 interface Pharmacy {
   id: number;
@@ -180,50 +181,38 @@ export default function PharmacyEditPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Порог выручки для премии (₸)</label>
-              <input
-                type="number"
+              <AmountInput
                 className="input"
-                min="0"
-                step="1"
                 placeholder="400000"
                 value={form.managerPremiumThreshold}
-                onChange={(e) => set('managerPremiumThreshold', e.target.value)}
+                onChange={(value) => set('managerPremiumThreshold', value)}
               />
             </div>
             <div>
               <label className="label">Премия за порог (₸)</label>
-              <input
-                type="number"
+              <AmountInput
                 className="input"
-                min="0"
-                step="1"
                 placeholder="10000"
                 value={form.managerPremiumBase}
-                onChange={(e) => set('managerPremiumBase', e.target.value)}
+                onChange={(value) => set('managerPremiumBase', value)}
               />
             </div>
             <div>
               <label className="label">Шаг выручки (₸)</label>
-              <input
-                type="number"
+              <AmountInput
                 className="input"
-                min="0"
-                step="1"
                 placeholder="50000"
                 value={form.managerPremiumStepAmount}
-                onChange={(e) => set('managerPremiumStepAmount', e.target.value)}
+                onChange={(value) => set('managerPremiumStepAmount', value)}
               />
             </div>
             <div>
               <label className="label">Прибавка премии за шаг (₸)</label>
-              <input
-                type="number"
+              <AmountInput
                 className="input"
-                min="0"
-                step="1"
                 placeholder="5000"
                 value={form.managerPremiumStepBonus}
-                onChange={(e) => set('managerPremiumStepBonus', e.target.value)}
+                onChange={(value) => set('managerPremiumStepBonus', value)}
               />
             </div>
           </div>

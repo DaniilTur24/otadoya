@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { AmountInput } from '@/components/AmountInput';
 
 interface Tier {
   id: number;
@@ -133,20 +134,20 @@ export default function OfficePremiumSettingsPage() {
 
         {tiers.map((t) => (
           <div key={t.id} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-3 items-center">
-            <input
-              type="number" className="input" min="0" step="1" placeholder="130000000"
+            <AmountInput
+              className="input" placeholder="130000000"
               value={t.fromAmount}
-              onChange={(e) => setTierField(t.id, 'fromAmount', e.target.value)}
+              onChange={(value) => setTierField(t.id, 'fromAmount', value)}
             />
-            <input
-              type="number" className="input" min="0" step="1" placeholder="без границы"
+            <AmountInput
+              className="input" placeholder="без границы"
               value={t.toAmount}
-              onChange={(e) => setTierField(t.id, 'toAmount', e.target.value)}
+              onChange={(value) => setTierField(t.id, 'toAmount', value)}
             />
-            <input
-              type="number" className="input" min="0" step="1" placeholder="10000"
+            <AmountInput
+              className="input" placeholder="10000"
               value={t.bonusAmount}
-              onChange={(e) => setTierField(t.id, 'bonusAmount', e.target.value)}
+              onChange={(value) => setTierField(t.id, 'bonusAmount', value)}
             />
             <button
               type="button"
