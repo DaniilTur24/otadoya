@@ -512,117 +512,6 @@ export default function NewRevenuePage() {
           </div>
         )}
 
-        {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
-        <div className="rounded border border-slate-300 p-3">
-          <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <AmountInput
-                name="doplata"
-                value={form.doplata}
-                onChange={(value) => handleChange({ target: { name: 'doplata', value } } as unknown as React.ChangeEvent<HTMLInputElement>)}
-                placeholder="Сумма доплаты"
-                className="input"
-              />
-            </div>
-            <div>
-              <select
-                name="doplataEmployeeId"
-                value={form.doplataEmployeeId}
-                onChange={handleChange}
-                className="input"
-                disabled={employees.length === 0}
-              >
-                <option value="">— кому доплата —</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <input
-                type="text"
-                name="doplataComment"
-                value={form.doplataComment}
-                onChange={handleChange}
-                placeholder="Комментарий (за что доплата)"
-                className="input"
-              />
-            </div>
-          </div>
-          {form.doplataEmployeeId && parseFloat(form.doplata) > 0 && (
-            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-              Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
-            </p>
-          )}
-          {employees.length > 0 && !form.doplataEmployeeId && form.doplata && parseFloat(form.doplata) > 0 && (
-            <p className="mt-2 text-xs text-amber-600">
-              Выберите сотрудника, которому положена доплата
-            </p>
-          )}
-        </div>
-
-        {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене; можно добавить несколько за день */}
-        <div className="rounded border border-slate-300 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <label className="label mb-0">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-            <button
-              type="button"
-              onClick={addAvansItem}
-              className="text-sm text-slate-700 hover:text-slate-900 font-medium"
-            >
-              + Добавить аванс
-            </button>
-          </div>
-          {avansItems.length === 0 ? (
-            <p className="text-sm text-slate-400 italic py-1">
-              Нет авансов — нажмите «+ Добавить аванс»
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {avansItems.map((item) => (
-                <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
-                  <div>
-                    <AmountInput
-                      value={item.amount}
-                      onChange={(value) => updateAvansItem(item.id, 'amount', value)}
-                      placeholder="Сумма аванса"
-                      className="input"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="col-span-2 flex gap-2 items-center">
-                    <select
-                      value={item.employeeId}
-                      onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
-                      className="input"
-                      disabled={employees.length === 0}
-                    >
-                      <option value="">— кому выдан аванс —</option>
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>{emp.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => removeAvansItem(item.id)}
-                      className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
-                      title="Удалить"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {avansTotal > 0 && (
-            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-              Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
-            </p>
-          )}
-        </div>
-
         {/* Дополнительные расходы */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -758,6 +647,117 @@ export default function NewRevenuePage() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене; можно добавить несколько за день */}
+        <div className="rounded border border-slate-300 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+            <button
+              type="button"
+              onClick={addAvansItem}
+              className="text-sm text-slate-700 hover:text-slate-900 font-medium"
+            >
+              + Добавить аванс
+            </button>
+          </div>
+          {avansItems.length === 0 ? (
+            <p className="text-sm text-slate-400 italic py-1">
+              Нет авансов — нажмите «+ Добавить аванс»
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {avansItems.map((item) => (
+                <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                  <div>
+                    <AmountInput
+                      value={item.amount}
+                      onChange={(value) => updateAvansItem(item.id, 'amount', value)}
+                      placeholder="Сумма аванса"
+                      className="input"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="col-span-2 flex gap-2 items-center">
+                    <select
+                      value={item.employeeId}
+                      onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
+                      className="input"
+                      disabled={employees.length === 0}
+                    >
+                      <option value="">— кому выдан аванс —</option>
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeAvansItem(item.id)}
+                      className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                      title="Удалить"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {avansTotal > 0 && (
+            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+              Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
+            </p>
+          )}
+        </div>
+
+        {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
+        <div className="rounded border border-slate-300 p-3">
+          <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <AmountInput
+                name="doplata"
+                value={form.doplata}
+                onChange={(value) => handleChange({ target: { name: 'doplata', value } } as unknown as React.ChangeEvent<HTMLInputElement>)}
+                placeholder="Сумма доплаты"
+                className="input"
+              />
+            </div>
+            <div>
+              <select
+                name="doplataEmployeeId"
+                value={form.doplataEmployeeId}
+                onChange={handleChange}
+                className="input"
+                disabled={employees.length === 0}
+              >
+                <option value="">— кому доплата —</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <input
+                type="text"
+                name="doplataComment"
+                value={form.doplataComment}
+                onChange={handleChange}
+                placeholder="Комментарий (за что доплата)"
+                className="input"
+              />
+            </div>
+          </div>
+          {form.doplataEmployeeId && parseFloat(form.doplata) > 0 && (
+            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+              Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
+            </p>
+          )}
+          {employees.length > 0 && !form.doplataEmployeeId && form.doplata && parseFloat(form.doplata) > 0 && (
+            <p className="mt-2 text-xs text-amber-600">
+              Выберите сотрудника, которому положена доплата
+            </p>
           )}
         </div>
 
