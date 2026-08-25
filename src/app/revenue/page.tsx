@@ -59,6 +59,8 @@ interface EditState {
   employeeId: string;
   employeeName: string;
   shiftType: string;
+  avans: string;
+  avansEmployeeId: string;
   doplata: string;
   doplataEmployeeId: string;
   doplataComment: string;
@@ -205,9 +207,10 @@ export default function RevenueListPage() {
     setEditingId(entry.id);
     setSaveError('');
 
-    // Существующая доплата (если есть) редактируется через выделенное поле
-    // «Доплата сотруднику» ниже, а не как обычная строка в «Дополнительных статьях» —
-    // иначе можно случайно добавить её туда повторно.
+    // Существующие аванс/доплата (если есть) редактируются через выделенные поля
+    // «Аванс сотруднику» / «Доплата сотруднику» ниже, а не как обычные строки в
+    // «Дополнительных статьях» — иначе можно случайно добавить их туда повторно.
+    const advanceItem = entry.expenseItems.find((i) => i.category === 'employeeAdvance');
     const surchargeItem = entry.expenseItems.find((i) => i.category === 'employeeSurcharge');
     const rawComment = surchargeItem?.comment ?? '';
     const separatorIndex = rawComment.indexOf(' — ');
@@ -222,11 +225,13 @@ export default function RevenueListPage() {
       employeeId: entry.employeeId ? String(entry.employeeId) : '',
       employeeName: entry.employeeName,
       shiftType: entry.shiftType ?? '',
+      avans: advanceItem ? String(advanceItem.amount) : '',
+      avansEmployeeId: advanceItem?.employeeId ? String(advanceItem.employeeId) : '',
       doplata: surchargeItem ? String(surchargeItem.amount) : '',
       doplataEmployeeId: surchargeItem?.employeeId ? String(surchargeItem.employeeId) : '',
       doplataComment: separatorIndex !== -1 ? rawComment.slice(separatorIndex + 3) : '',
       expenseItems: entry.expenseItems
-        .filter((i) => i !== surchargeItem)
+        .filter((i) => i !== surchargeItem && i !== advanceItem)
         .map((i) => ({
           id: nextItemId++,
           amount: String(i.amount),
@@ -331,6 +336,13 @@ export default function RevenueListPage() {
       return;
     }
 
+    const avansAmount = parseFloat(editState.avans) || 0;
+    if (avansAmount > 0 && !editState.avansEmployeeId) {
+      setSaveError('Выберите сотрудника, которому выдан аванс');
+      setSaving(false);
+      return;
+    }
+
     const doplataAmount = parseFloat(editState.doplata) || 0;
     if (doplataAmount > 0 && !editState.doplataEmployeeId) {
       setSaveError('Выберите сотрудника, которому положена доплата');
@@ -352,6 +364,15 @@ export default function RevenueListPage() {
       comment: i.comment || null,
       employeeId: (i.category === 'employeeAdvance' || i.category === 'employeeSurcharge') && i.employeeId ? Number(i.employeeId) : null,
     }));
+    if (avansAmount > 0 && editState.avansEmployeeId) {
+      const avansEmployee = employees.find((e) => e.id === Number(editState.avansEmployeeId));
+      allExpenseItems.push({
+        amount: editState.avans,
+        category: 'employeeAdvance',
+        comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
+        employeeId: Number(editState.avansEmployeeId),
+      });
+    }
     if (doplataAmount > 0 && editState.doplataEmployeeId) {
       const doplataEmployee = employees.find((e) => e.id === Number(editState.doplataEmployeeId));
       const label = doplataEmployee ? `Доплата: ${doplataEmployee.name}` : 'Доплата';
@@ -635,6 +656,48 @@ export default function RevenueListPage() {
                 <p className="mt-1 text-xs text-amber-600">Без типа смены зарплата не рассчитается</p>
               )}
             </div>
+          </div>
+
+          {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене */}
+          <div className="rounded border border-slate-300 p-3 mb-4">
+            <label className="label mb-2">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="col-span-2">
+                <select
+                  className="input"
+                  value={editState.avansEmployeeId}
+                  onChange={(e) => updateField('avansEmployeeId', e.target.value)}
+                  disabled={editPharmacyEmployees.length === 0}
+                >
+                  <option value="">— кому выдан аванс —</option>
+                  {editPharmacyEmployees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <input
+                  type="number"
+                  value={editState.avans}
+                  onChange={(e) => updateField('avans', e.target.value)}
+                  min="0"
+                  step="0.01"
+                  placeholder="Сумма аванса"
+                  className="input"
+                  disabled={!editState.avansEmployeeId}
+                />
+              </div>
+            </div>
+            {editState.avansEmployeeId && parseFloat(editState.avans) > 0 && (
+              <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
+              </p>
+            )}
+            {editPharmacyEmployees.length > 0 && !editState.avansEmployeeId && editState.avans && parseFloat(editState.avans) > 0 && (
+              <p className="mt-2 text-xs text-amber-600">
+                Выберите сотрудника, которому выдан аванс
+              </p>
+            )}
           </div>
 
           {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
