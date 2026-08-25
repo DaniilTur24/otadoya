@@ -712,6 +712,17 @@ export default function RevenueListPage() {
             <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
+                <input
+                  type="number"
+                  value={editState.doplata}
+                  onChange={(e) => updateField('doplata', e.target.value)}
+                  min="0"
+                  step="0.01"
+                  placeholder="Сумма доплаты"
+                  className="input"
+                />
+              </div>
+              <div>
                 <select
                   className="input"
                   value={editState.doplataEmployeeId}
@@ -726,24 +737,11 @@ export default function RevenueListPage() {
               </div>
               <div>
                 <input
-                  type="number"
-                  value={editState.doplata}
-                  onChange={(e) => updateField('doplata', e.target.value)}
-                  min="0"
-                  step="0.01"
-                  placeholder="Сумма доплаты"
-                  className="input"
-                  disabled={!editState.doplataEmployeeId}
-                />
-              </div>
-              <div>
-                <input
                   type="text"
                   value={editState.doplataComment}
                   onChange={(e) => updateField('doplataComment', e.target.value)}
                   placeholder="Комментарий (за что доплата)"
                   className="input"
-                  disabled={!editState.doplataEmployeeId}
                 />
               </div>
             </div>
@@ -774,7 +772,18 @@ export default function RevenueListPage() {
               <div className="space-y-2">
                 {editState.avansItems.map((item) => (
                   <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
-                    <div className="col-span-2">
+                    <div>
+                      <input
+                        type="number"
+                        value={item.amount}
+                        onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
+                        min="0"
+                        step="0.01"
+                        placeholder="Сумма аванса"
+                        className="input"
+                      />
+                    </div>
+                    <div className="col-span-2 flex gap-2 items-center">
                       <select
                         className="input"
                         value={item.employeeId}
@@ -786,17 +795,6 @@ export default function RevenueListPage() {
                           <option key={emp.id} value={emp.id}>{emp.name}</option>
                         ))}
                       </select>
-                    </div>
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="number"
-                        value={item.amount}
-                        onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
-                        min="0"
-                        step="0.01"
-                        placeholder="Сумма аванса"
-                        className="input"
-                      />
                       <button type="button" onClick={() => removeAvansItem(item.id)}
                         className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
                         title="Удалить">

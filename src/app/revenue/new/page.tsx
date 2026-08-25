@@ -525,6 +525,18 @@ export default function NewRevenuePage() {
           <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
+              <input
+                type="number"
+                name="doplata"
+                value={form.doplata}
+                onChange={handleChange}
+                min="0"
+                step="0.01"
+                placeholder="Сумма доплаты"
+                className="input"
+              />
+            </div>
+            <div>
               <select
                 name="doplataEmployeeId"
                 value={form.doplataEmployeeId}
@@ -540,26 +552,12 @@ export default function NewRevenuePage() {
             </div>
             <div>
               <input
-                type="number"
-                name="doplata"
-                value={form.doplata}
-                onChange={handleChange}
-                min="0"
-                step="0.01"
-                placeholder="Сумма доплаты"
-                className="input"
-                disabled={!form.doplataEmployeeId}
-              />
-            </div>
-            <div>
-              <input
                 type="text"
                 name="doplataComment"
                 value={form.doplataComment}
                 onChange={handleChange}
                 placeholder="Комментарий (за что доплата)"
                 className="input"
-                disabled={!form.doplataEmployeeId}
               />
             </div>
           </div>
@@ -595,7 +593,19 @@ export default function NewRevenuePage() {
             <div className="space-y-2">
               {avansItems.map((item) => (
                 <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
-                  <div className="col-span-2">
+                  <div>
+                    <input
+                      type="number"
+                      value={item.amount}
+                      onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
+                      min="0"
+                      step="0.01"
+                      placeholder="Сумма аванса"
+                      className="input"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="col-span-2 flex gap-2 items-center">
                     <select
                       value={item.employeeId}
                       onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
@@ -607,18 +617,6 @@ export default function NewRevenuePage() {
                         <option key={emp.id} value={emp.id}>{emp.name}</option>
                       ))}
                     </select>
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="number"
-                      value={item.amount}
-                      onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
-                      min="0"
-                      step="0.01"
-                      placeholder="Сумма аванса"
-                      className="input"
-                      autoFocus
-                    />
                     <button
                       type="button"
                       onClick={() => removeAvansItem(item.id)}
