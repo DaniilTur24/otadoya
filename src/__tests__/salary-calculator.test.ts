@@ -342,6 +342,15 @@ describe('calculateEmployeeMonthlySalary', () => {
     expect(result!.totalRevenuePremium).toBe(0);
   });
 
+  it('excludes kaspi revenue from the personal revenue premium', async () => {
+    // Порог 200000 — cash+terminal одни не дотягивают, kaspi добавляет ещё 100000, но он
+    // не должен учитываться при расчёте премии продавца.
+    mockShifts([{ shiftType: 'day', cashRevenue: 150000, terminalRevenue: 0, kaspiRevenue: 100000 }]);
+    const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
+    expect(result!.revenuePremiumDayShifts).toBe(0);
+    expect(result!.totalRevenuePremium).toBe(0);
+  });
+
   it('adds the fixed employee allowance to totalSalary regardless of employee type', async () => {
     vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...mockEmployee,
@@ -408,6 +417,30 @@ describe('calculateEmployeeMonthlySalary — pool average revenue premium', () =
     const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
     // (220000 - 200000) * 1.5% = 300, от собственной выручки.
     expect(result!.revenuePremiumDayShifts).toBeCloseTo(300, 5);
+  });
+
+  it('excludes kaspi revenue from the pool average too', async () => {
+    vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockImplementation(
+      (args: { where?: { employeeId?: number } }) => {
+        if (args?.where?.employeeId !== undefined) {
+          return Promise.resolve([
+            { pharmacyId: 10, shiftType: 'day', cashRevenue: 100000, terminalRevenue: 0, kaspiRevenue: 0 },
+          ]);
+        }
+        // Без kaspi cash+terminal среднее — ровно порог (200000), премии быть не должно,
+        // хотя с учётом kaspi среднее было бы 300000 и дало бы 1500.
+        return Promise.resolve([
+          { pharmacyId: 10, shiftType: 'day', cashRevenue: 200000, terminalRevenue: 0, kaspiRevenue: 100000 },
+          { pharmacyId: 10, shiftType: 'day', cashRevenue: 200000, terminalRevenue: 0, kaspiRevenue: 100000 },
+        ]);
+      }
+    );
+    vi.mocked(prisma.pharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 10, poolAverageRevenuePremium: true },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 5, 2025);
+    expect(result!.revenuePremiumDayShifts).toBe(0);
   });
 });
 

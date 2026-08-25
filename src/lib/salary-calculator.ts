@@ -183,7 +183,7 @@ async function computePooledShiftAverages(
       status: 'approved',
       date: { gte: startOfMonth(year, month), lte: endOfMonth(year, month) },
     },
-    select: { shiftType: true, cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
+    select: { shiftType: true, cashRevenue: true, terminalRevenue: true },
   });
 
   let dayRevenue = 0;
@@ -191,7 +191,8 @@ async function computePooledShiftAverages(
   let fullDayRevenue = 0;
   let fullDayCount = 0;
   for (const e of entries) {
-    const revenue = Number(e.cashRevenue) + Number(e.terminalRevenue) + Number(e.kaspiRevenue ?? 0);
+    // Личная премия продавца (и её пул-среднее) считается без kaspi — только cash + terminal.
+    const revenue = Number(e.cashRevenue) + Number(e.terminalRevenue);
     if (e.shiftType === 'day') {
       dayRevenue += revenue;
       dayCount++;
@@ -459,6 +460,8 @@ async function calculateTradingEmployeeSalary(
 
   for (const e of entries) {
     const revenue = Number(e.cashRevenue) + Number(e.terminalRevenue) + Number(e.kaspiRevenue ?? 0);
+    // Личная премия продавца считается без kaspi — только по cash + terminal.
+    const revenueForPremium = Number(e.cashRevenue) + Number(e.terminalRevenue);
     let grp = byPharmacy.get(e.pharmacyId);
     if (!grp) {
       grp = { dayCount: 0, dayRevenue: 0, fullDayCount: 0, fullDayRevenue: 0 };
@@ -468,12 +471,12 @@ async function calculateTradingEmployeeSalary(
       dayShiftsCount++;
       revenueDayShifts += revenue;
       grp.dayCount++;
-      grp.dayRevenue += revenue;
+      grp.dayRevenue += revenueForPremium;
     } else if (e.shiftType === 'full_day') {
       fullDayShiftsCount++;
       revenueFullDayShifts += revenue;
       grp.fullDayCount++;
-      grp.fullDayRevenue += revenue;
+      grp.fullDayRevenue += revenueForPremium;
     }
     // 'five_day' в записи выручки — устаревший способ, зарплату он больше не даёт вообще:
     // пятидневка сотрудника считается только через табель (fiveDayViaAttendance), см. ниже.
