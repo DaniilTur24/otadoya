@@ -25,6 +25,12 @@ interface ExpenseItem {
   comment: string;
 }
 
+interface AvansItem {
+  id: number;
+  employeeId: string;
+  amount: string;
+}
+
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
     !row.section &&
@@ -44,6 +50,10 @@ let nextId = 1;
 
 function emptyItem(): ExpenseItem {
   return { id: nextId++, amount: '', category: '', comment: '' };
+}
+
+function emptyAvansItem(): AvansItem {
+  return { id: nextId++, employeeId: '', amount: '' };
 }
 
 export default function NewRevenuePage() {
@@ -68,14 +78,13 @@ export default function NewRevenuePage() {
     employeeId: '',
     employeeName: '',
     shiftType: '',
-    avans: '',
-    avansEmployeeId: '',
     doplata: '',
     doplataEmployeeId: '',
     doplataComment: '',
   });
 
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
+  const [avansItems, setAvansItems] = useState<AvansItem[]>([]);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -158,6 +167,20 @@ export default function NewRevenuePage() {
     );
   }
 
+  function addAvansItem() {
+    setAvansItems((items) => [...items, emptyAvansItem()]);
+  }
+
+  function removeAvansItem(id: number) {
+    setAvansItems((items) => items.filter((i) => i.id !== id));
+  }
+
+  function updateAvansItem(id: number, field: 'employeeId' | 'amount', value: string) {
+    setAvansItems((items) =>
+      items.map((i) => (i.id === id ? { ...i, [field]: value } : i))
+    );
+  }
+
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
   const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
@@ -175,7 +198,7 @@ export default function NewRevenuePage() {
     (parseFloat(form.kaspiRevenue) || 0);
 
   const cashRevenueNum = parseFloat(form.cashRevenue) || 0;
-  const avansNum = parseFloat(form.avans) || 0;
+  const avansTotal = avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
   const doplataNum = parseFloat(form.doplata) || 0;
   const summaryBonuses = expenseItems
     .filter((i) => i.category === 'pharmaBonus')
@@ -183,7 +206,7 @@ export default function NewRevenuePage() {
   const summaryAdvances =
     expenseItems
       .filter((i) => i.category === 'employeeAdvance')
-      .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0) + avansNum;
+      .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0) + avansTotal;
   const summarySurcharges =
     expenseItems
       .filter((i) => i.category === 'employeeSurcharge')
@@ -230,8 +253,9 @@ export default function NewRevenuePage() {
       return;
     }
 
-    const avansAmount = parseFloat(form.avans) || 0;
-    if (avansAmount > 0 && !form.avansEmployeeId) {
+    const validAvansItems = avansItems.filter((i) => parseFloat(i.amount) > 0);
+    const missingAvansEmployee = validAvansItems.find((i) => !i.employeeId);
+    if (missingAvansEmployee) {
       setError('Выберите сотрудника, которому выдан аванс');
       setSubmitting(false);
       return;
@@ -250,13 +274,13 @@ export default function NewRevenuePage() {
       category: i.category,
       comment: i.comment || null,
     }));
-    if (avansAmount > 0 && form.avansEmployeeId) {
-      const avansEmployee = employees.find((e) => e.id === Number(form.avansEmployeeId));
+    for (const item of validAvansItems) {
+      const avansEmployee = employees.find((e) => e.id === Number(item.employeeId));
       allExpenseItems.push({
-        amount: form.avans,
+        amount: item.amount,
         category: 'employeeAdvance',
         comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
-        employeeId: Number(form.avansEmployeeId),
+        employeeId: Number(item.employeeId),
       });
     }
     if (doplataAmount > 0 && form.doplataEmployeeId) {
@@ -299,13 +323,12 @@ export default function NewRevenuePage() {
         employeeId: form.employeeId,
         employeeName: form.employeeName,
         shiftType: form.shiftType,
-        avans: '',
-        avansEmployeeId: '',
         doplata: '',
         doplataEmployeeId: '',
         doplataComment: '',
       });
       setExpenseItems([]);
+      setAvansItems([]);
       setTimeout(() => setSuccess(false), 4000);
     } else {
       const data = await res.json();
@@ -443,49 +466,59 @@ export default function NewRevenuePage() {
           </div>
         </div>
 
-        {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене */}
-        <div className="rounded border border-slate-300 p-3">
-          <label className="label mb-2">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="col-span-2">
-              <select
-                name="avansEmployeeId"
-                value={form.avansEmployeeId}
-                onChange={handleChange}
-                className="input"
-                disabled={employees.length === 0}
-              >
-                <option value="">— кому выдан аванс —</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <input
-                type="number"
-                name="avans"
-                value={form.avans}
-                onChange={handleChange}
-                min="0"
-                step="0.01"
-                placeholder="Сумма аванса"
-                className="input"
-                disabled={!form.avansEmployeeId}
-              />
-            </div>
+        {/* Выручка */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Выручка наличными *</label>
+            <input
+              type="number"
+              name="cashRevenue"
+              value={form.cashRevenue}
+              onChange={handleChange}
+              required
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              className="input"
+            />
           </div>
-          {form.avansEmployeeId && parseFloat(form.avans) > 0 && (
-            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-              Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
-            </p>
-          )}
-          {employees.length > 0 && !form.avansEmployeeId && form.avans && parseFloat(form.avans) > 0 && (
-            <p className="mt-2 text-xs text-amber-600">
-              Выберите сотрудника, которому выдан аванс
-            </p>
-          )}
+          <div>
+            <label className="label">Выручка по терминалу *</label>
+            <input
+              type="number"
+              name="terminalRevenue"
+              value={form.terminalRevenue}
+              onChange={handleChange}
+              required
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              className="input"
+            />
+          </div>
+          <div>
+            <label className="label">
+              Выручка Каспи
+              <span className="ml-1 text-slate-400 font-normal">— входит в общую</span>
+            </label>
+            <input
+              type="number"
+              name="kaspiRevenue"
+              value={form.kaspiRevenue}
+              onChange={handleChange}
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              className="input"
+            />
+          </div>
         </div>
+
+        {totalRevenue > 0 && (
+          <div className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900">
+            Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
+          </div>
+        )}
 
         {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
         <div className="rounded border border-slate-300 p-3">
@@ -542,59 +575,69 @@ export default function NewRevenuePage() {
           )}
         </div>
 
-        {/* Выручка */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="label">Выручка наличными *</label>
-            <input
-              type="number"
-              name="cashRevenue"
-              value={form.cashRevenue}
-              onChange={handleChange}
-              required
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              className="input"
-            />
+        {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене; можно добавить несколько за день */}
+        <div className="rounded border border-slate-300 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+            <button
+              type="button"
+              onClick={addAvansItem}
+              className="text-sm text-slate-700 hover:text-slate-900 font-medium"
+            >
+              + Добавить аванс
+            </button>
           </div>
-          <div>
-            <label className="label">Выручка по терминалу *</label>
-            <input
-              type="number"
-              name="terminalRevenue"
-              value={form.terminalRevenue}
-              onChange={handleChange}
-              required
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              className="input"
-            />
-          </div>
-          <div>
-            <label className="label">
-              Выручка Каспи
-              <span className="ml-1 text-slate-400 font-normal">— входит в общую</span>
-            </label>
-            <input
-              type="number"
-              name="kaspiRevenue"
-              value={form.kaspiRevenue}
-              onChange={handleChange}
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              className="input"
-            />
-          </div>
+          {avansItems.length === 0 ? (
+            <p className="text-sm text-slate-400 italic py-1">
+              Нет авансов — нажмите «+ Добавить аванс»
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {avansItems.map((item) => (
+                <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                  <div className="col-span-2">
+                    <select
+                      value={item.employeeId}
+                      onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
+                      className="input"
+                      disabled={employees.length === 0}
+                    >
+                      <option value="">— кому выдан аванс —</option>
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="number"
+                      value={item.amount}
+                      onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
+                      min="0"
+                      step="0.01"
+                      placeholder="Сумма аванса"
+                      className="input"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAvansItem(item.id)}
+                      className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                      title="Удалить"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {avansTotal > 0 && (
+            <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+              Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
+            </p>
+          )}
         </div>
-
-        {totalRevenue > 0 && (
-          <div className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900">
-            Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
-          </div>
-        )}
 
         {/* Дополнительные расходы */}
         <div>

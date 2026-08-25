@@ -7,7 +7,10 @@ import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
-  (row) => !row.section && (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
+  (row) =>
+    !row.section &&
+    row.key !== 'employeeAdvance' &&
+    (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
 const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
@@ -48,6 +51,7 @@ interface RevenueEntry {
 }
 
 interface EditExpenseItem { id: number; amount: string; category: string; comment: string; employeeId: string }
+interface EditAvansItem { id: number; employeeId: string; amount: string }
 
 interface EditState {
   pharmacyId: string;
@@ -59,8 +63,7 @@ interface EditState {
   employeeId: string;
   employeeName: string;
   shiftType: string;
-  avans: string;
-  avansEmployeeId: string;
+  avansItems: EditAvansItem[];
   doplata: string;
   doplataEmployeeId: string;
   doplataComment: string;
@@ -69,6 +72,7 @@ interface EditState {
 
 let nextItemId = 1;
 function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', category: '', comment: '', employeeId: '' }; }
+function newAvansItem(): EditAvansItem { return { id: nextItemId++, employeeId: '', amount: '' }; }
 
 function fmt(n: number) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -207,10 +211,10 @@ export default function RevenueListPage() {
     setEditingId(entry.id);
     setSaveError('');
 
-    // Существующие аванс/доплата (если есть) редактируются через выделенные поля
+    // Существующие авансы/доплата (если есть) редактируются через выделенные поля
     // «Аванс сотруднику» / «Доплата сотруднику» ниже, а не как обычные строки в
     // «Дополнительных статьях» — иначе можно случайно добавить их туда повторно.
-    const advanceItem = entry.expenseItems.find((i) => i.category === 'employeeAdvance');
+    const advanceItems = entry.expenseItems.filter((i) => i.category === 'employeeAdvance');
     const surchargeItem = entry.expenseItems.find((i) => i.category === 'employeeSurcharge');
     const rawComment = surchargeItem?.comment ?? '';
     const separatorIndex = rawComment.indexOf(' — ');
@@ -225,13 +229,16 @@ export default function RevenueListPage() {
       employeeId: entry.employeeId ? String(entry.employeeId) : '',
       employeeName: entry.employeeName,
       shiftType: entry.shiftType ?? '',
-      avans: advanceItem ? String(advanceItem.amount) : '',
-      avansEmployeeId: advanceItem?.employeeId ? String(advanceItem.employeeId) : '',
+      avansItems: advanceItems.map((i) => ({
+        id: nextItemId++,
+        employeeId: i.employeeId ? String(i.employeeId) : '',
+        amount: String(i.amount),
+      })),
       doplata: surchargeItem ? String(surchargeItem.amount) : '',
       doplataEmployeeId: surchargeItem?.employeeId ? String(surchargeItem.employeeId) : '',
       doplataComment: separatorIndex !== -1 ? rawComment.slice(separatorIndex + 3) : '',
       expenseItems: entry.expenseItems
-        .filter((i) => i !== surchargeItem && i !== advanceItem)
+        .filter((i) => i !== surchargeItem && !advanceItems.includes(i))
         .map((i) => ({
           id: nextItemId++,
           amount: String(i.amount),
@@ -244,7 +251,7 @@ export default function RevenueListPage() {
 
   function cancelEdit() { setEditingId(null); setEditState(null); setSaveError(''); }
 
-  function updateField(field: keyof Omit<EditState, 'expenseItems'>, value: string) {
+  function updateField(field: keyof Omit<EditState, 'expenseItems' | 'avansItems'>, value: string) {
     setEditState((s) => {
       if (!s) return s;
       const updated = { ...s, [field]: value };
@@ -269,6 +276,18 @@ export default function RevenueListPage() {
   function updateExpenseItem(id: number, field: 'amount' | 'category' | 'comment' | 'employeeId', value: string) {
     setEditState((s) =>
       s ? { ...s, expenseItems: s.expenseItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
+    );
+  }
+
+  function addAvansItem() {
+    setEditState((s) => s ? { ...s, avansItems: [...s.avansItems, newAvansItem()] } : s);
+  }
+  function removeAvansItem(id: number) {
+    setEditState((s) => s ? { ...s, avansItems: s.avansItems.filter((i) => i.id !== id) } : s);
+  }
+  function updateAvansItem(id: number, field: 'employeeId' | 'amount', value: string) {
+    setEditState((s) =>
+      s ? { ...s, avansItems: s.avansItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
     );
   }
 
@@ -323,12 +342,6 @@ export default function RevenueListPage() {
       setSaving(false);
       return;
     }
-    const missingAdvanceEmployee = validItems.find((i) => i.category === 'employeeAdvance' && !i.employeeId);
-    if (missingAdvanceEmployee) {
-      setSaveError('Выберите сотрудника, которому выдан аванс');
-      setSaving(false);
-      return;
-    }
     const missingSurchargeEmployee = validItems.find((i) => i.category === 'employeeSurcharge' && !i.employeeId);
     if (missingSurchargeEmployee) {
       setSaveError('Выберите сотрудника, которому положена доплата');
@@ -336,8 +349,9 @@ export default function RevenueListPage() {
       return;
     }
 
-    const avansAmount = parseFloat(editState.avans) || 0;
-    if (avansAmount > 0 && !editState.avansEmployeeId) {
+    const validAvansItems = editState.avansItems.filter((i) => parseFloat(i.amount) > 0);
+    const missingAvansEmployee = validAvansItems.find((i) => !i.employeeId);
+    if (missingAvansEmployee) {
       setSaveError('Выберите сотрудника, которому выдан аванс');
       setSaving(false);
       return;
@@ -364,13 +378,13 @@ export default function RevenueListPage() {
       comment: i.comment || null,
       employeeId: (i.category === 'employeeAdvance' || i.category === 'employeeSurcharge') && i.employeeId ? Number(i.employeeId) : null,
     }));
-    if (avansAmount > 0 && editState.avansEmployeeId) {
-      const avansEmployee = employees.find((e) => e.id === Number(editState.avansEmployeeId));
+    for (const item of validAvansItems) {
+      const avansEmployee = employees.find((e) => e.id === Number(item.employeeId));
       allExpenseItems.push({
-        amount: editState.avans,
+        amount: item.amount,
         category: 'employeeAdvance',
         comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
-        employeeId: Number(editState.avansEmployeeId),
+        employeeId: Number(item.employeeId),
       });
     }
     if (doplataAmount > 0 && editState.doplataEmployeeId) {
@@ -408,6 +422,10 @@ export default function RevenueListPage() {
 
   const totalExpenses = editState
     ? editState.expenseItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
+    : 0;
+
+  const avansTotal = editState
+    ? editState.avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
     : 0;
 
   const totalRevenue =
@@ -658,47 +676,36 @@ export default function RevenueListPage() {
             </div>
           </div>
 
-          {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене */}
-          <div className="rounded border border-slate-300 p-3 mb-4">
-            <label className="label mb-2">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="col-span-2">
-                <select
-                  className="input"
-                  value={editState.avansEmployeeId}
-                  onChange={(e) => updateField('avansEmployeeId', e.target.value)}
-                  disabled={editPharmacyEmployees.length === 0}
-                >
-                  <option value="">— кому выдан аванс —</option>
-                  {editPharmacyEmployees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <input
-                  type="number"
-                  value={editState.avans}
-                  onChange={(e) => updateField('avans', e.target.value)}
-                  min="0"
-                  step="0.01"
-                  placeholder="Сумма аванса"
-                  className="input"
-                  disabled={!editState.avansEmployeeId}
-                />
-              </div>
+          {/* Выручка */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="label">Наличные</label>
+              <input type="number" min="0" step="0.01" className="input"
+                value={editState.cashRevenue}
+                onChange={(e) => updateField('cashRevenue', e.target.value)} />
             </div>
-            {editState.avansEmployeeId && parseFloat(editState.avans) > 0 && (
-              <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-                Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
-              </p>
-            )}
-            {editPharmacyEmployees.length > 0 && !editState.avansEmployeeId && editState.avans && parseFloat(editState.avans) > 0 && (
-              <p className="mt-2 text-xs text-amber-600">
-                Выберите сотрудника, которому выдан аванс
-              </p>
-            )}
+            <div>
+              <label className="label">Терминал</label>
+              <input type="number" min="0" step="0.01" className="input"
+                value={editState.terminalRevenue}
+                onChange={(e) => updateField('terminalRevenue', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">
+                Каспи
+                <span className="ml-1 text-slate-400 font-normal text-xs">— входит в общую</span>
+              </label>
+              <input type="number" min="0" step="0.01" className="input"
+                value={editState.kaspiRevenue}
+                onChange={(e) => updateField('kaspiRevenue', e.target.value)} />
+            </div>
           </div>
+
+          {totalRevenue > 0 && (
+            <div className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900 mb-3">
+              Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
+            </div>
+          )}
 
           {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
           <div className="rounded border border-slate-300 p-3 mb-4">
@@ -752,36 +759,60 @@ export default function RevenueListPage() {
             )}
           </div>
 
-          {/* Выручка */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div>
-              <label className="label">Наличные</label>
-              <input type="number" min="0" step="0.01" className="input"
-                value={editState.cashRevenue}
-                onChange={(e) => updateField('cashRevenue', e.target.value)} />
+          {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене; можно добавить несколько за день */}
+          <div className="rounded border border-slate-300 p-3 mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+              <button type="button" onClick={addAvansItem}
+                className="text-sm text-slate-700 hover:text-slate-900 font-medium">
+                + Добавить аванс
+              </button>
             </div>
-            <div>
-              <label className="label">Терминал</label>
-              <input type="number" min="0" step="0.01" className="input"
-                value={editState.terminalRevenue}
-                onChange={(e) => updateField('terminalRevenue', e.target.value)} />
-            </div>
-            <div>
-              <label className="label">
-                Каспи
-                <span className="ml-1 text-slate-400 font-normal text-xs">— входит в общую</span>
-              </label>
-              <input type="number" min="0" step="0.01" className="input"
-                value={editState.kaspiRevenue}
-                onChange={(e) => updateField('kaspiRevenue', e.target.value)} />
-            </div>
+            {editState.avansItems.length === 0 ? (
+              <p className="text-sm text-slate-400 italic">Нет авансов</p>
+            ) : (
+              <div className="space-y-2">
+                {editState.avansItems.map((item) => (
+                  <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                    <div className="col-span-2">
+                      <select
+                        className="input"
+                        value={item.employeeId}
+                        onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
+                        disabled={editPharmacyEmployees.length === 0}
+                      >
+                        <option value="">— кому выдан аванс —</option>
+                        {editPharmacyEmployees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>{emp.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="number"
+                        value={item.amount}
+                        onChange={(e) => updateAvansItem(item.id, 'amount', e.target.value)}
+                        min="0"
+                        step="0.01"
+                        placeholder="Сумма аванса"
+                        className="input"
+                      />
+                      <button type="button" onClick={() => removeAvansItem(item.id)}
+                        className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                        title="Удалить">
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {avansTotal > 0 && (
+              <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                Будет вычтен из накопленной зарплаты выбранного сотрудника и учтён как расход аптеки и наличные на руках за день.
+              </p>
+            )}
           </div>
-
-          {totalRevenue > 0 && (
-            <div className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900 mb-3">
-              Итого выручка: <strong>{totalRevenue.toLocaleString('ru-RU')}</strong>
-            </div>
-          )}
 
           {/* Дополнительные статьи */}
           <div className="mb-4">
@@ -834,20 +865,6 @@ export default function RevenueListPage() {
                       <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mt-1 ml-5">
                         Эта сумма пойдёт в расходы и будет учтена в зарплате сотрудника за месяц.
                       </p>
-                    )}
-                    {item.category === 'employeeAdvance' && (
-                      <div className="mt-1 ml-5 space-y-1">
-                        <select className="input" value={item.employeeId} required
-                          onChange={(e) => updateExpenseItem(item.id, 'employeeId', e.target.value)}>
-                          <option value="">— кому выдан аванс —</option>
-                          {editPharmacyEmployees.map((emp) => (
-                            <option key={emp.id} value={emp.id}>{emp.name}</option>
-                          ))}
-                        </select>
-                        <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-                          Эта сумма пойдёт в расходы и будет вычтена из накопленной зарплаты сотрудника за месяц.
-                        </p>
-                      </div>
                     )}
                     {item.category === 'employeeSurcharge' && (
                       <div className="mt-1 ml-5 space-y-1">
