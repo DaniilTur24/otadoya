@@ -54,6 +54,7 @@ interface RevenueEntry {
 
 interface EditExpenseItem { id: number; amount: string; category: string; comment: string; employeeId: string }
 interface EditAvansItem { id: number; employeeId: string; amount: string }
+interface EditDoplataItem { id: number; employeeId: string; amount: string; comment: string }
 
 interface EditState {
   pharmacyId: string;
@@ -66,15 +67,14 @@ interface EditState {
   employeeName: string;
   shiftType: string;
   avansItems: EditAvansItem[];
-  doplata: string;
-  doplataEmployeeId: string;
-  doplataComment: string;
+  doplataItems: EditDoplataItem[];
   expenseItems: EditExpenseItem[];
 }
 
 let nextItemId = 1;
 function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', category: '', comment: '', employeeId: '' }; }
 function newAvansItem(): EditAvansItem { return { id: nextItemId++, employeeId: '', amount: '' }; }
+function newDoplataItem(): EditDoplataItem { return { id: nextItemId++, employeeId: '', amount: '', comment: '' }; }
 
 function fmt(n: number) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -218,9 +218,7 @@ export default function RevenueListPage() {
     // «Аванс сотруднику» / «Доплата сотруднику» ниже, а не как обычные строки в
     // «Дополнительных статьях» — иначе можно случайно добавить их туда повторно.
     const advanceItems = entry.expenseItems.filter((i) => i.category === 'employeeAdvance');
-    const surchargeItem = entry.expenseItems.find((i) => i.category === 'employeeSurcharge');
-    const rawComment = surchargeItem?.comment ?? '';
-    const separatorIndex = rawComment.indexOf(' — ');
+    const surchargeItems = entry.expenseItems.filter((i) => i.category === 'employeeSurcharge');
 
     const initialState: EditState = {
       pharmacyId: String(entry.pharmacy.id),
@@ -237,11 +235,18 @@ export default function RevenueListPage() {
         employeeId: i.employeeId ? String(i.employeeId) : '',
         amount: String(i.amount),
       })),
-      doplata: surchargeItem ? String(surchargeItem.amount) : '',
-      doplataEmployeeId: surchargeItem?.employeeId ? String(surchargeItem.employeeId) : '',
-      doplataComment: separatorIndex !== -1 ? rawComment.slice(separatorIndex + 3) : '',
+      doplataItems: surchargeItems.map((i) => {
+        const rawComment = i.comment ?? '';
+        const separatorIndex = rawComment.indexOf(' — ');
+        return {
+          id: nextItemId++,
+          employeeId: i.employeeId ? String(i.employeeId) : '',
+          amount: String(i.amount),
+          comment: separatorIndex !== -1 ? rawComment.slice(separatorIndex + 3) : '',
+        };
+      }),
       expenseItems: entry.expenseItems
-        .filter((i) => i !== surchargeItem && !advanceItems.includes(i))
+        .filter((i) => !surchargeItems.includes(i) && !advanceItems.includes(i))
         .map((i) => ({
           id: nextItemId++,
           amount: String(i.amount),
@@ -272,7 +277,7 @@ export default function RevenueListPage() {
     cancelEdit();
   }
 
-  function updateField(field: keyof Omit<EditState, 'expenseItems' | 'avansItems'>, value: string) {
+  function updateField(field: keyof Omit<EditState, 'expenseItems' | 'avansItems' | 'doplataItems'>, value: string) {
     setEditState((s) => {
       if (!s) return s;
       const updated = { ...s, [field]: value };
@@ -309,6 +314,18 @@ export default function RevenueListPage() {
   function updateAvansItem(id: number, field: 'employeeId' | 'amount', value: string) {
     setEditState((s) =>
       s ? { ...s, avansItems: s.avansItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
+    );
+  }
+
+  function addDoplataItem() {
+    setEditState((s) => s ? { ...s, doplataItems: [...s.doplataItems, newDoplataItem()] } : s);
+  }
+  function removeDoplataItem(id: number) {
+    setEditState((s) => s ? { ...s, doplataItems: s.doplataItems.filter((i) => i.id !== id) } : s);
+  }
+  function updateDoplataItem(id: number, field: 'employeeId' | 'amount' | 'comment', value: string) {
+    setEditState((s) =>
+      s ? { ...s, doplataItems: s.doplataItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
     );
   }
 
@@ -378,10 +395,9 @@ export default function RevenueListPage() {
       return;
     }
 
-    const doplataAmount = parseFloat(editState.doplata) || 0;
-    // Получатель — сотрудник записи, если у этой доплаты ещё нет своего (сохранённого ранее) получателя.
-    const doplataRecipientId = editState.doplataEmployeeId || editState.employeeId;
-    if (doplataAmount > 0 && !doplataRecipientId) {
+    const validDoplataItems = editState.doplataItems.filter((i) => parseFloat(i.amount) > 0);
+    const missingDoplataEmployee = validDoplataItems.find((i) => !i.employeeId);
+    if (missingDoplataEmployee) {
       setSaveError('Выберите сотрудника, которому положена доплата');
       setSaving(false);
       return;
@@ -410,14 +426,14 @@ export default function RevenueListPage() {
         employeeId: Number(item.employeeId),
       });
     }
-    if (doplataAmount > 0 && doplataRecipientId) {
-      const doplataEmployee = employees.find((e) => e.id === Number(doplataRecipientId));
+    for (const item of validDoplataItems) {
+      const doplataEmployee = employees.find((e) => e.id === Number(item.employeeId));
       const label = doplataEmployee ? `Доплата: ${doplataEmployee.name}` : 'Доплата';
       allExpenseItems.push({
-        amount: editState.doplata,
+        amount: item.amount,
         category: 'employeeSurcharge',
-        comment: editState.doplataComment.trim() ? `${label} — ${editState.doplataComment.trim()}` : label,
-        employeeId: Number(doplataRecipientId),
+        comment: item.comment.trim() ? `${label} — ${item.comment.trim()}` : label,
+        employeeId: Number(item.employeeId),
       });
     }
 
@@ -454,6 +470,10 @@ export default function RevenueListPage() {
 
   const avansTotal = editState
     ? editState.avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
+    : 0;
+
+  const doplataTotal = editState
+    ? editState.doplataItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
     : 0;
 
   const totalRevenue =
@@ -866,39 +886,65 @@ export default function RevenueListPage() {
             )}
           </div>
 
-          {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus).
-              Получатель по умолчанию — сотрудник записи (поле «Сотрудник» выше), как и у pharmaBonus.
-              editState.doplataEmployeeId сохраняет исходного получателя, если запись создана до этого
-              изменения и получатель отличался от сотрудника записи — чтобы не перезаписать старые данные. */}
+          {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus);
+              может быть выдана другому сотруднику этой аптеки, не обязательно тому, кто на смене;
+              можно добавить несколько за день. */}
           <div className="rounded border border-slate-300 p-3 mb-4">
-            <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <AmountInput
-                  value={editState.doplata}
-                  onChange={(value) => updateField('doplata', value)}
-                  placeholder="Сумма доплаты"
-                  className="input"
-                />
-              </div>
-              <div>
-                <input
-                  type="text"
-                  value={editState.doplataComment}
-                  onChange={(e) => updateField('doplataComment', e.target.value)}
-                  placeholder="Комментарий (за что доплата)"
-                  className="input"
-                />
-              </div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+              <button type="button" onClick={addDoplataItem}
+                className="text-sm text-slate-700 hover:text-slate-900 font-medium">
+                + Добавить доплату
+              </button>
             </div>
-            {parseFloat(editState.doplata) > 0 && (editState.doplataEmployeeId || editState.employeeId) && (
-              <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-                Прибавится к зарплате сотрудника «{employees.find((e) => e.id === Number(editState.doplataEmployeeId || editState.employeeId))?.name ?? editState.employeeName}» и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
-              </p>
+            {editState.doplataItems.length === 0 ? (
+              <p className="text-sm text-slate-400 italic">Нет доплат</p>
+            ) : (
+              <div className="space-y-2">
+                {editState.doplataItems.map((item) => (
+                  <div key={item.id} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-start">
+                    <div>
+                      <AmountInput
+                        value={item.amount}
+                        onChange={(value) => updateDoplataItem(item.id, 'amount', value)}
+                        placeholder="Сумма доплаты"
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <select
+                        className="input"
+                        value={item.employeeId}
+                        onChange={(e) => updateDoplataItem(item.id, 'employeeId', e.target.value)}
+                        disabled={editPharmacyEmployees.length === 0}
+                      >
+                        <option value="">— кому доплата —</option>
+                        {editPharmacyEmployees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>{emp.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-2 flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={item.comment}
+                        onChange={(e) => updateDoplataItem(item.id, 'comment', e.target.value)}
+                        placeholder="Комментарий (за что доплата)"
+                        className="input flex-1"
+                      />
+                      <button type="button" onClick={() => removeDoplataItem(item.id)}
+                        className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                        title="Удалить">
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
-            {parseFloat(editState.doplata) > 0 && !editState.doplataEmployeeId && !editState.employeeId && (
-              <p className="mt-2 text-xs text-amber-600">
-                Сначала выберите сотрудника (поле «Сотрудник» выше) — доплата начисляется ему
+            {doplataTotal > 0 && (
+              <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
               </p>
             )}
           </div>
