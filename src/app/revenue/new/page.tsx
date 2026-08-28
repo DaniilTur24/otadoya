@@ -6,6 +6,7 @@ import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/l
 import { SHIFT_OPTIONS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
 interface Pharmacy {
   id: number;
@@ -226,6 +227,19 @@ export default function NewRevenuePage() {
     selectedDate.getFullYear() !== now.getFullYear() ||
     selectedDate.getMonth() !== now.getMonth();
 
+  const isDirty = Boolean(
+    form.cashRevenue ||
+    form.terminalRevenue ||
+    form.kaspiRevenue ||
+    form.generalComment ||
+    form.doplata ||
+    form.doplataComment ||
+    expenseItems.length > 0 ||
+    avansItems.length > 0
+  );
+
+  useUnsavedChangesGuard(isDirty && !submitting);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -293,6 +307,11 @@ export default function NewRevenuePage() {
         comment: form.doplataComment.trim() ? `${label} — ${form.doplataComment.trim()}` : label,
         employeeId: Number(form.employeeId),
       });
+    }
+
+    if (!window.confirm('Все данные введены верно? Сохранить?')) {
+      setSubmitting(false);
+      return;
     }
 
     const res = await fetch('/api/revenue', {
@@ -785,7 +804,10 @@ export default function NewRevenuePage() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => router.push('/')}
+            onClick={() => {
+              if (isDirty && !window.confirm('Данные не сохранены. Уйти со страницы?')) return;
+              router.push('/');
+            }}
           >
             Отмена
           </button>
