@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
@@ -128,6 +129,7 @@ export default function RevenueListPage() {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
+  const editSnapshotRef = useRef<string | null>(null);
 
   const [tooltipEntry, setTooltipEntry] = useState<RevenueEntry | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
@@ -220,7 +222,7 @@ export default function RevenueListPage() {
     const rawComment = surchargeItem?.comment ?? '';
     const separatorIndex = rawComment.indexOf(' — ');
 
-    setEditState({
+    const initialState: EditState = {
       pharmacyId: String(entry.pharmacy.id),
       date: entry.date.split('T')[0],
       cashRevenue: String(entry.cashRevenue),
@@ -247,10 +249,28 @@ export default function RevenueListPage() {
           comment: i.comment ?? '',
           employeeId: i.employeeId ? String(i.employeeId) : '',
         })),
-    });
+    };
+    setEditState(initialState);
+    editSnapshotRef.current = JSON.stringify(initialState);
   }
 
-  function cancelEdit() { setEditingId(null); setEditState(null); setSaveError(''); }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditState(null);
+    setSaveError('');
+    editSnapshotRef.current = null;
+  }
+
+  const isEditDirty = Boolean(
+    editState && editSnapshotRef.current !== null && JSON.stringify(editState) !== editSnapshotRef.current
+  );
+
+  useUnsavedChangesGuard(isEditDirty && !saving);
+
+  function requestCancelEdit() {
+    if (isEditDirty && !window.confirm('Данные не сохранены. Уйти со страницы?')) return;
+    cancelEdit();
+  }
 
   function updateField(field: keyof Omit<EditState, 'expenseItems' | 'avansItems'>, value: string) {
     setEditState((s) => {
@@ -399,6 +419,11 @@ export default function RevenueListPage() {
         comment: editState.doplataComment.trim() ? `${label} — ${editState.doplataComment.trim()}` : label,
         employeeId: Number(doplataRecipientId),
       });
+    }
+
+    if (!window.confirm('Все данные введены верно? Сохранить?')) {
+      setSaving(false);
+      return;
     }
 
     const res = await fetch(`/api/revenue/${editingId}`, {
@@ -605,7 +630,7 @@ export default function RevenueListPage() {
         <div className="card p-4 mb-4 border-slate-400 border">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-slate-800">Редактирование записи</h2>
-            <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            <button onClick={requestCancelEdit} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
           </div>
 
           {saveError && (
@@ -889,7 +914,7 @@ export default function RevenueListPage() {
             <button className="btn-primary" onClick={saveEdit} disabled={saving}>
               {saving && <span className="spinner" />}{saving ? 'Сохранение...' : 'Сохранить изменения'}
             </button>
-            <button className="btn-secondary" onClick={cancelEdit}>Отмена</button>
+            <button className="btn-secondary" onClick={requestCancelEdit}>Отмена</button>
           </div>
         </div>
       )}
