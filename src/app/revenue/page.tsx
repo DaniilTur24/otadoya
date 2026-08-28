@@ -359,7 +359,9 @@ export default function RevenueListPage() {
     }
 
     const doplataAmount = parseFloat(editState.doplata) || 0;
-    if (doplataAmount > 0 && !editState.doplataEmployeeId) {
+    // Получатель — сотрудник записи, если у этой доплаты ещё нет своего (сохранённого ранее) получателя.
+    const doplataRecipientId = editState.doplataEmployeeId || editState.employeeId;
+    if (doplataAmount > 0 && !doplataRecipientId) {
       setSaveError('Выберите сотрудника, которому положена доплата');
       setSaving(false);
       return;
@@ -388,14 +390,14 @@ export default function RevenueListPage() {
         employeeId: Number(item.employeeId),
       });
     }
-    if (doplataAmount > 0 && editState.doplataEmployeeId) {
-      const doplataEmployee = employees.find((e) => e.id === Number(editState.doplataEmployeeId));
+    if (doplataAmount > 0 && doplataRecipientId) {
+      const doplataEmployee = employees.find((e) => e.id === Number(doplataRecipientId));
       const label = doplataEmployee ? `Доплата: ${doplataEmployee.name}` : 'Доплата';
       allExpenseItems.push({
         amount: editState.doplata,
         category: 'employeeSurcharge',
         comment: editState.doplataComment.trim() ? `${label} — ${editState.doplataComment.trim()}` : label,
-        employeeId: Number(editState.doplataEmployeeId),
+        employeeId: Number(doplataRecipientId),
       });
     }
 
@@ -462,6 +464,7 @@ export default function RevenueListPage() {
 
           {showModeration && (
             <div className="card overflow-hidden border-amber-200 border">
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-amber-50 border-b border-amber-200">
                   <tr>
@@ -558,6 +561,7 @@ export default function RevenueListPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
@@ -837,10 +841,13 @@ export default function RevenueListPage() {
             )}
           </div>
 
-          {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
+          {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus).
+              Получатель по умолчанию — сотрудник записи (поле «Сотрудник» выше), как и у pharmaBonus.
+              editState.doplataEmployeeId сохраняет исходного получателя, если запись создана до этого
+              изменения и получатель отличался от сотрудника записи — чтобы не перезаписать старые данные. */}
           <div className="rounded border border-slate-300 p-3 mb-4">
             <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <AmountInput
                   value={editState.doplata}
@@ -848,19 +855,6 @@ export default function RevenueListPage() {
                   placeholder="Сумма доплаты"
                   className="input"
                 />
-              </div>
-              <div>
-                <select
-                  className="input"
-                  value={editState.doplataEmployeeId}
-                  onChange={(e) => updateField('doplataEmployeeId', e.target.value)}
-                  disabled={editPharmacyEmployees.length === 0}
-                >
-                  <option value="">— кому доплата —</option>
-                  {editPharmacyEmployees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </select>
               </div>
               <div>
                 <input
@@ -872,14 +866,14 @@ export default function RevenueListPage() {
                 />
               </div>
             </div>
-            {editState.doplataEmployeeId && parseFloat(editState.doplata) > 0 && (
+            {parseFloat(editState.doplata) > 0 && (editState.doplataEmployeeId || editState.employeeId) && (
               <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-                Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
+                Прибавится к зарплате сотрудника «{employees.find((e) => e.id === Number(editState.doplataEmployeeId || editState.employeeId))?.name ?? editState.employeeName}» и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
               </p>
             )}
-            {editPharmacyEmployees.length > 0 && !editState.doplataEmployeeId && editState.doplata && parseFloat(editState.doplata) > 0 && (
+            {parseFloat(editState.doplata) > 0 && !editState.doplataEmployeeId && !editState.employeeId && (
               <p className="mt-2 text-xs text-amber-600">
-                Выберите сотрудника, которому положена доплата
+                Сначала выберите сотрудника (поле «Сотрудник» выше) — доплата начисляется ему
               </p>
             )}
           </div>
@@ -943,7 +937,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
-                  <th className="th"></th>
+                  <th className="th sticky right-0 z-20 border-l border-slate-300"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -956,7 +950,7 @@ export default function RevenueListPage() {
                   return (
                     <React.Fragment key={entry.id}>
                       <tr
-                        className={editingId === entry.id ? 'bg-slate-100' : 'hover:bg-slate-50'}
+                        className={`group ${editingId === entry.id ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
                         onMouseEnter={(e) => {
                           if (entry.expenseItems.some(i => i.category !== 'pharmaBonus') || entry.generalComment) {
                             setTooltipEntry(entry);
@@ -972,34 +966,34 @@ export default function RevenueListPage() {
                             onChange={() => toggleSelect(entry.id)}
                           />
                         </td>
-                        <td className="td">{fmtDate(entry.date)}</td>
-                        <td className="td font-medium">{entry.pharmacy.name}</td>
-                        <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
-                        <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
-                        <td className="td text-right text-green-700">
+                        <td className="td whitespace-nowrap">{fmtDate(entry.date)}</td>
+                        <td className="td font-medium whitespace-nowrap">{entry.pharmacy.name}</td>
+                        <td className="td text-right text-green-700 whitespace-nowrap">{fmt(entry.cashRevenue)}</td>
+                        <td className="td text-right text-green-700 whitespace-nowrap">{fmt(entry.terminalRevenue)}</td>
+                        <td className="td text-right text-green-700 whitespace-nowrap">
                           {entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}
                         </td>
-                        <td className="td text-right text-green-700">
+                        <td className="td text-right text-green-700 whitespace-nowrap">
                           {incomes > 0 ? fmt(incomes) : '—'}
                         </td>
-                        <td className="td text-right text-red-600">
+                        <td className="td text-right text-red-600 whitespace-nowrap">
                           {bonuses > 0 ? fmt(bonuses) : '—'}
                         </td>
-                        <td className="td text-right text-red-600">
+                        <td className="td text-right text-red-600 whitespace-nowrap">
                           {advances > 0 ? fmt(advances) : '—'}
                         </td>
-                        <td className="td text-right text-red-600">
+                        <td className="td text-right text-red-600 whitespace-nowrap">
                           {surcharges > 0 ? fmt(surcharges) : '—'}
                         </td>
-                        <td className="td text-right font-semibold text-green-700">
+                        <td className="td text-right font-semibold text-green-700 whitespace-nowrap">
                           {fmt(entry.totalRevenue)}
                         </td>
-                        <td className="td text-right text-red-600">
+                        <td className="td text-right text-red-600 whitespace-nowrap">
                           {expenses > 0 ? fmt(expenses) : '—'}
                         </td>
                         <td className="td text-slate-500">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span>{entry.employeeName}</span>
+                            <span className="whitespace-nowrap">{entry.employeeName}</span>
                             {entry.excludedFromReport && (
                               <button
                                 className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
@@ -1035,9 +1029,15 @@ export default function RevenueListPage() {
                             </span>
                           )}
                         </td>
-                        <td className="td">
+                        <td
+                          className={`td sticky right-0 z-10 border-l border-slate-300 ${
+                            editingId === entry.id
+                              ? 'bg-slate-100'
+                              : 'bg-white group-hover:bg-slate-50'
+                          }`}
+                        >
                           {editingId === entry.id ? (
-                            <span className="text-xs text-slate-700 font-medium">Редактируется</span>
+                            <span className="text-xs text-slate-700 font-medium whitespace-nowrap">Редактируется</span>
                           ) : (
                             <div className="flex gap-1">
                               <button className="btn-secondary text-xs" onClick={() => startEdit(entry)}>

@@ -80,7 +80,6 @@ export default function NewRevenuePage() {
     employeeName: '',
     shiftType: '',
     doplata: '',
-    doplataEmployeeId: '',
     doplataComment: '',
   });
 
@@ -263,8 +262,8 @@ export default function NewRevenuePage() {
     }
 
     const doplataAmount = parseFloat(form.doplata) || 0;
-    if (doplataAmount > 0 && !form.doplataEmployeeId) {
-      setError('Выберите сотрудника, которому положена доплата');
+    if (doplataAmount > 0 && !form.employeeId) {
+      setError('Сначала выберите сотрудника — доплата начисляется ему');
       setSubmitting(false);
       return;
     }
@@ -284,14 +283,15 @@ export default function NewRevenuePage() {
         employeeId: Number(item.employeeId),
       });
     }
-    if (doplataAmount > 0 && form.doplataEmployeeId) {
-      const doplataEmployee = employees.find((e) => e.id === Number(form.doplataEmployeeId));
-      const label = doplataEmployee ? `Доплата: ${doplataEmployee.name}` : 'Доплата';
+    // Доплата всегда начисляется тому же сотруднику, что указан в записи выручки —
+    // отдельный выбор получателя не нужен (как и для pharmaBonus).
+    if (doplataAmount > 0 && form.employeeId) {
+      const label = `Доплата: ${employeeName}`;
       allExpenseItems.push({
         amount: form.doplata,
         category: 'employeeSurcharge',
         comment: form.doplataComment.trim() ? `${label} — ${form.doplataComment.trim()}` : label,
-        employeeId: Number(form.doplataEmployeeId),
+        employeeId: Number(form.employeeId),
       });
     }
 
@@ -325,7 +325,6 @@ export default function NewRevenuePage() {
         employeeName: form.employeeName,
         shiftType: form.shiftType,
         doplata: '',
-        doplataEmployeeId: '',
         doplataComment: '',
       });
       setExpenseItems([]);
@@ -711,10 +710,12 @@ export default function NewRevenuePage() {
           )}
         </div>
 
-        {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus) */}
+        {/* Доплата — персональная надбавка сотруднику, отдельно от общих бонусов аптеки (pharmaBonus).
+            Получатель всегда совпадает с сотрудником записи (поле «Сотрудник» выше) — как и у pharmaBonus,
+            отдельный выбор получателя не нужен. */}
         <div className="rounded border border-slate-300 p-3">
           <label className="label mb-2">Доплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <AmountInput
                 name="doplata"
@@ -723,20 +724,6 @@ export default function NewRevenuePage() {
                 placeholder="Сумма доплаты"
                 className="input"
               />
-            </div>
-            <div>
-              <select
-                name="doplataEmployeeId"
-                value={form.doplataEmployeeId}
-                onChange={handleChange}
-                className="input"
-                disabled={employees.length === 0}
-              >
-                <option value="">— кому доплата —</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
             </div>
             <div>
               <input
@@ -749,14 +736,14 @@ export default function NewRevenuePage() {
               />
             </div>
           </div>
-          {form.doplataEmployeeId && parseFloat(form.doplata) > 0 && (
+          {parseFloat(form.doplata) > 0 && form.employeeId && (
             <p className="mt-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
-              Прибавится к зарплате выбранного сотрудника и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
+              Прибавится к зарплате сотрудника «{form.employeeName}» и будет учтена как расход аптеки. На наличные на руках за день не влияет. В статистику бонусов не входит.
             </p>
           )}
-          {employees.length > 0 && !form.doplataEmployeeId && form.doplata && parseFloat(form.doplata) > 0 && (
+          {parseFloat(form.doplata) > 0 && !form.employeeId && (
             <p className="mt-2 text-xs text-amber-600">
-              Выберите сотрудника, которому положена доплата
+              Сначала выберите сотрудника (поле «Сотрудник» выше) — доплата начисляется ему
             </p>
           )}
         </div>
