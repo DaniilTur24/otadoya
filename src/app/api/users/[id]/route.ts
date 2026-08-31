@@ -10,6 +10,27 @@ function serialize(u: Record<string, unknown>) {
   return rest;
 }
 
+function serializeLoginlessManager(e: {
+  id: number; name: string; isActive: boolean; baseSalary: unknown; employeeType: string;
+  ladderPremiumEnabled: boolean; managerBonusShareEnabled: boolean; allowance: unknown; allowanceDescription: string;
+  pharmacies: { pharmacy: { id: number; name: string } }[];
+}) {
+  return {
+    id: -e.id,
+    username: '',
+    displayName: e.name,
+    isActive: e.isActive,
+    pharmacies: e.pharmacies.map((p) => p.pharmacy),
+    baseSalary: Number(e.baseSalary),
+    employeeType: e.employeeType,
+    ladderPremiumEnabled: e.ladderPremiumEnabled,
+    managerBonusShareEnabled: e.managerBonusShareEnabled,
+    allowance: Number(e.allowance),
+    allowanceDescription: e.allowanceDescription,
+    accountType: 'employee' as const,
+  };
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -21,6 +42,68 @@ export async function PUT(
   const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription } =
     await request.json();
 
+  if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
+    return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
+  }
+
+  // Менеджер (pharmacy_manager) без логина — id отрицательный, ссылается на Employee.id.
+  // Тип нельзя переключить на заведующего задним числом (появился бы логин "из ниоткуда") —
+  // для такой смены роли нужно удалить и создать заново.
+  if (id < 0) {
+    const employeeId = -id;
+    const existing = await prisma.employee.findFirst({ where: { id: employeeId, employeeType: 'pharmacy_manager', user: null } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Менеджер не найден' }, { status: 404 });
+    }
+    if (employeeType != null && employeeType !== 'pharmacy_manager') {
+      return NextResponse.json({ error: 'Нельзя сменить тип менеджера на заведующего — удалите и создайте заново' }, { status: 400 });
+    }
+
+    if (Array.isArray(pharmacyIds)) {
+      const currentLinks = await prisma.employeePharmacy.findMany({ where: { employeeId }, select: { pharmacyId: true } });
+      const newIds = new Set(pharmacyIds.map(Number));
+      const removedPharmacyIds = currentLinks.map((l) => l.pharmacyId).filter((pid) => !newIds.has(pid));
+      const blocker = await findPharmacyUnlinkBlocker(employeeId, removedPharmacyIds);
+      if (blocker) return NextResponse.json({ error: blocker }, { status: 409 });
+    }
+
+    const employeeData: Record<string, unknown> = {};
+    if (displayName !== undefined) employeeData.name = displayName.trim();
+    if (isActive !== undefined) employeeData.isActive = isActive;
+    if (baseSalary != null) employeeData.baseSalary = String(baseSalary);
+    if (ladderPremiumEnabled !== undefined) employeeData.ladderPremiumEnabled = Boolean(ladderPremiumEnabled);
+    if (managerBonusShareEnabled !== undefined) employeeData.managerBonusShareEnabled = Boolean(managerBonusShareEnabled);
+    if (allowance !== undefined) employeeData.allowance = String(allowance ?? 0);
+    if (allowanceDescription !== undefined) employeeData.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (Object.keys(employeeData).length > 0) {
+        await tx.employee.update({ where: { id: employeeId }, data: employeeData });
+      }
+      if (Array.isArray(pharmacyIds)) {
+        await tx.employeePharmacy.deleteMany({ where: { employeeId } });
+        if (pharmacyIds.length > 0) {
+          await tx.employeePharmacy.createMany({
+            data: pharmacyIds.map((pid: number) => ({ employeeId, pharmacyId: pid })),
+            skipDuplicates: true,
+          });
+        }
+      }
+      return tx.employee.findUnique({
+        where: { id: employeeId },
+        include: { pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } } },
+      });
+    });
+
+    return NextResponse.json(serializeLoginlessManager(updated!));
+  }
+
+  // Заведующего нельзя переключить на менеджера через редактирование — у него уже есть
+  // логин, а менеджер по определению не должен иметь доступа к системе
+  if (employeeType === 'pharmacy_manager') {
+    return NextResponse.json({ error: 'Нельзя сменить тип заведующего на менеджера — удалите и создайте заново' }, { status: 400 });
+  }
+
   const data: Record<string, unknown> = {};
   if (displayName !== undefined) data.displayName = displayName.trim();
   if (isActive !== undefined) data.isActive = isActive;
@@ -29,9 +112,6 @@ export async function PUT(
       return NextResponse.json({ error: 'Пароль минимум 6 символов' }, { status: 400 });
     }
     data.passwordHash = hashPassword(password);
-  }
-  if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
-    return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
   }
 
   if (Array.isArray(pharmacyIds)) {
@@ -94,6 +174,7 @@ export async function PUT(
   return NextResponse.json({
     ...serialize(user as unknown as Record<string, unknown>),
     pharmacies: user!.pharmacies.map((p) => p.pharmacy),
+    accountType: 'user' as const,
   });
 }
 
@@ -105,6 +186,17 @@ export async function DELETE(
   if (auth) return auth;
 
   const id = Number((await params).id);
+
+  // Менеджер (pharmacy_manager) без логина — id отрицательный, ссылается на Employee.id напрямую
+  if (id < 0) {
+    const employeeId = -id;
+    const existing = await prisma.employee.findFirst({ where: { id: employeeId, employeeType: 'pharmacy_manager', user: null } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Менеджер не найден' }, { status: 404 });
+    }
+    await prisma.employee.delete({ where: { id: employeeId } });
+    return NextResponse.json({ ok: true });
+  }
 
   // Удаление аккаунта заведующего/менеджера должно убирать и его привязанную
   // карточку сотрудника (Employee) — иначе она остаётся в системе как "невидимый"

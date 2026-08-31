@@ -22,6 +22,8 @@ interface Manager {
   allowance: number;
   allowanceDescription: string;
   pharmacies: Pharmacy[];
+  // 'user' — есть логин/пароль (заведующая); 'employee' — менеджер без доступа к системе
+  accountType: 'user' | 'employee';
 }
 
 export default function UsersPage() {
@@ -34,6 +36,7 @@ export default function UsersPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingAccountType, setEditingAccountType] = useState<'user' | 'employee' | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const [form, setForm] = useState({
@@ -70,6 +73,7 @@ export default function UsersPage() {
       allowance: '', allowanceDescription: '', pharmacyIds: [],
     });
     setEditingId(null);
+    setEditingAccountType(null);
     setShowForm(false);
     setError('');
   }
@@ -93,6 +97,7 @@ export default function UsersPage() {
       pharmacyIds: m.pharmacies.map((p) => p.id),
     });
     setEditingId(m.id);
+    setEditingAccountType(m.accountType);
     setShowForm(true);
     setError('');
   }
@@ -122,17 +127,21 @@ export default function UsersPage() {
       allowanceDescription: form.allowanceDescription.trim(),
     };
 
+    const needsLogin = form.employeeType !== 'pharmacy_manager';
+
     let res: Response;
     if (editingId !== null) {
-      if (form.password) body.password = form.password;
+      if (needsLogin && form.password) body.password = form.password;
       res = await fetch(`/api/users/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
     } else {
-      body.username = form.username;
-      body.password = form.password;
+      if (needsLogin) {
+        body.username = form.username;
+        body.password = form.password;
+      }
       res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -212,36 +221,38 @@ export default function UsersPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="label">Логин *</label>
-                <input
-                  className="input"
-                  value={form.username}
-                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                  required={editingId === null}
-                  disabled={editingId !== null}
-                  placeholder="username"
-                />
-                {editingId !== null && (
-                  <p className="text-xs text-slate-400 mt-1">Логин изменить нельзя</p>
-                )}
+            {form.employeeType !== 'pharmacy_manager' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Логин *</label>
+                  <input
+                    className="input"
+                    value={form.username}
+                    onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                    required={editingId === null}
+                    disabled={editingId !== null}
+                    placeholder="username"
+                  />
+                  {editingId !== null && (
+                    <p className="text-xs text-slate-400 mt-1">Логин изменить нельзя</p>
+                  )}
+                </div>
+                <div>
+                  <label className="label">
+                    {editingId !== null ? 'Новый пароль (оставьте пустым — не менять)' : 'Пароль *'}
+                  </label>
+                  <input
+                    type="password"
+                    className="input"
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    required={editingId === null}
+                    placeholder="минимум 6 символов"
+                    autoComplete="new-password"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="label">
-                  {editingId !== null ? 'Новый пароль (оставьте пустым — не менять)' : 'Пароль *'}
-                </label>
-                <input
-                  type="password"
-                  className="input"
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  required={editingId === null}
-                  placeholder="минимум 6 символов"
-                  autoComplete="new-password"
-                />
-              </div>
-            </div>
+            )}
 
             <div>
               <label className="label">Имя для отображения *</label>
@@ -262,13 +273,27 @@ export default function UsersPage() {
                   value={form.employeeType}
                   onChange={(e) => setForm((f) => ({ ...f, employeeType: e.target.value }))}
                 >
-                  {MANAGER_TYPE_OPTIONS.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
+                  {MANAGER_TYPE_OPTIONS
+                    .filter((t) => {
+                      if (editingId === null) return true;
+                      // Тип нельзя переключить между «есть логин» и «менеджер без логина» —
+                      // для такой смены роли нужно удалить и создать заново
+                      return editingAccountType === 'employee'
+                        ? t.value === 'pharmacy_manager'
+                        : t.value !== 'pharmacy_manager';
+                    })
+                    .map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
                 </select>
+                {editingId !== null && editingAccountType === 'employee' && (
+                  <p className="text-xs text-slate-400 mt-1">Менеджера нельзя переключить в заведующие — удалите и создайте заново</p>
+                )}
                 <p className="text-xs text-slate-400 mt-1">
                   {form.employeeType === 'manager_trading'
                     ? 'Считается по сменам, как продавец. Доплата и премии — см. чекбоксы ниже'
+                    : form.employeeType === 'pharmacy_manager'
+                    ? 'Пятидневка по табелю посещаемости. Не получает логин в систему — только премии и доплата. Доплата и премии — см. чекбоксы ниже'
                     : 'Пятидневка по табелю посещаемости. Доплата и премии — см. чекбоксы ниже'}
                 </p>
               </div>
@@ -407,7 +432,9 @@ export default function UsersPage() {
                     />
                   </td>
                   <td className="td font-medium">{m.displayName}</td>
-                  <td className="td text-slate-500 font-mono text-sm">{m.username}</td>
+                  <td className="td text-slate-500 font-mono text-sm">
+                    {m.accountType === 'employee' ? <span className="text-slate-300">нет доступа</span> : m.username}
+                  </td>
                   <td className="td text-sm text-slate-600">
                     {MANAGER_TYPE_OPTIONS.find((t) => t.value === m.employeeType)?.label ?? m.employeeType}
                     <div className="text-xs text-slate-400">
