@@ -36,5 +36,7 @@ export async function GET(
 
   if (!summary) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  return NextResponse.json({ ...summary, shifts, advances, surcharges, attendance });
+  const overtimeHours = attendance.reduce((sum, a) => sum + a.overtimeHours, 0);
+
+  return NextResponse.json({ ...summary, shifts, advances, surcharges, attendance, overtimeHours });
 }

@@ -47,16 +47,16 @@ export async function GET(request: NextRequest) {
     orderBy: { date: 'asc' },
   });
 
-  return NextResponse.json(shifts);
+  return NextResponse.json(shifts.map((s) => ({ ...s, overtimeHours: Number(s.overtimeHours) })));
 }
 
-// POST /api/attendance { employeeId, date, pharmacyId? }
+// POST /api/attendance { employeeId, date, pharmacyId?, overtimeHours? }
 // Отмечает одну отработанную смену сотрудника на дату (manager_fixed / cleaner / office).
 export async function POST(request: NextRequest) {
   const auth = await requireAnyRole(request);
   if (auth) return auth;
 
-  const { employeeId, date, pharmacyId } = await request.json();
+  const { employeeId, date, pharmacyId, overtimeHours } = await request.json();
   if (!employeeId || !date) {
     return NextResponse.json({ error: 'employeeId и date обязательны' }, { status: 400 });
   }
@@ -89,9 +89,10 @@ export async function POST(request: NextRequest) {
         employeeId: Number(employeeId),
         date: new Date(date),
         pharmacyId: pharmacyId ? Number(pharmacyId) : null,
+        overtimeHours: overtimeHours ? Number(overtimeHours) : 0,
       },
     });
-    return NextResponse.json(shift, { status: 201 });
+    return NextResponse.json({ ...shift, overtimeHours: Number(shift.overtimeHours) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Смена за эту дату уже отмечена' }, { status: 409 });
   }

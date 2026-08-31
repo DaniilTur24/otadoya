@@ -62,6 +62,7 @@ interface AttendanceEntry {
   date: string;
   pharmacyId: number | null;
   pharmacyName: string | null;
+  overtimeHours: number;
 }
 
 interface SalaryResult {
@@ -102,6 +103,7 @@ interface SalaryResult {
   advances: AdvanceEntry[];
   surcharges: SurchargeEntry[];
   attendance: AttendanceEntry[];
+  overtimeHours: number;
 }
 
 const MONTHS = [
@@ -224,6 +226,9 @@ export default function EmployeeDetailPage() {
   }
 
   const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+  // Продавец с включённым fiveDayViaAttendance отмечается в табеле, а не сменой в записи выручки —
+  // его переработка и явки читаются оттуда же, что и у обычных табельных типов.
+  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
 
   return (
     <div className="max-w-screen-lg space-y-4">
@@ -503,6 +508,7 @@ export default function EmployeeDetailPage() {
             salary.recordsCount > 0 ||
             salary.advances.length > 0 ||
             salary.surcharges.length > 0 ||
+            salary.overtimeHours > 0 ||
             USER_LINKED_TYPES.has(salary.employeeType)
           ) ? (
           <>
@@ -654,8 +660,8 @@ export default function EmployeeDetailPage() {
               );
             })()}
 
-            {/* Детализация смен (продавцы и торгующие заведующие) */}
-            {!ATTENDANCE_BASED_TYPES.has(salary.employeeType) && (
+            {/* Детализация смен (продавцы и торгующие заведующие; не для пятидневников по табелю) */}
+            {!ATTENDANCE_BASED_TYPES.has(salary.employeeType) && !isFiveDaySeller && (
             <div>
               <h3 className="text-sm font-semibold text-slate-700 mb-2">Смены за период</h3>
               <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
@@ -704,29 +710,41 @@ export default function EmployeeDetailPage() {
             </div>
             )}
 
-            {/* Табель посещаемости (manager_fixed / cleaner / office) */}
-            {ATTENDANCE_BASED_TYPES.has(salary.employeeType) && (
+            {/* Табель посещаемости (manager_fixed / cleaner / office / pharmacy_manager, а также
+                продавец с включённой пятидневкой по табелю) */}
+            {(ATTENDANCE_BASED_TYPES.has(salary.employeeType) || isFiveDaySeller) && (
               <div>
-                <h3 className="text-sm font-semibold text-slate-700 mb-2">Табель посещаемости за период</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-slate-700">Табель посещаемости за период</h3>
+                  {salary.overtimeHours > 0 && (
+                    <span className="text-sm text-slate-600">
+                      Переработка: <span className="font-medium text-slate-800">{fmt(salary.overtimeHours)} ч</span>
+                    </span>
+                  )}
+                </div>
                 {salary.attendance.length === 0 ? (
                   <div className="text-sm text-slate-400 py-2">Нет отметок за этот месяц.</div>
                 ) : (
                   <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
                     <div className="grid text-xs text-slate-400 font-medium px-3 py-1.5 bg-slate-50"
-                      style={{ gridTemplateColumns: '6rem 1fr' }}>
+                      style={{ gridTemplateColumns: '6rem 1fr 6rem' }}>
                       <span>Дата</span>
                       <span>Аптека</span>
+                      <span className="text-right">Переработка</span>
                     </div>
                     {salary.attendance.map((a) => (
                       <div
                         key={a.id}
                         className="grid text-sm px-3 py-2 hover:bg-slate-50"
-                        style={{ gridTemplateColumns: '6rem 1fr' }}
+                        style={{ gridTemplateColumns: '6rem 1fr 6rem' }}
                       >
                         <span className="text-slate-600">
                           {new Date(a.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
                         </span>
                         <span className="text-slate-800">{a.pharmacyName ?? '—'}</span>
+                        <span className={`text-right font-medium ${a.overtimeHours > 0 ? 'text-amber-700' : 'text-slate-300'}`}>
+                          {a.overtimeHours > 0 ? `${fmt(a.overtimeHours)} ч` : '—'}
+                        </span>
                       </div>
                     ))}
                   </div>

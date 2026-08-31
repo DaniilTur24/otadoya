@@ -83,5 +83,5 @@ export async function PUT(request: NextRequest) {
     orderBy: { date: 'asc' },
   });
 
-  return NextResponse.json(shifts);
+  return NextResponse.json(shifts.map((s) => ({ ...s, overtimeHours: Number(s.overtimeHours) })));
 }

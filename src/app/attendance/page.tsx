@@ -28,6 +28,15 @@ interface AttendanceRecord {
   employeeId: number;
   pharmacyId: number | null;
   date: string;
+  overtimeHours: number;
+}
+
+interface PopupState {
+  rowIdx: number;
+  day: number;
+  top: number;
+  left: number;
+  hours: string;
 }
 
 const WEEKDAY_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -51,11 +60,22 @@ export default function AttendancePage() {
   const [rowPharmacy, setRowPharmacy] = useState<Record<number, number | ''>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyCells, setBusyCells] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
+  const [popup, setPopup] = useState<PopupState | null>(null);
 
   const [selected, setSelected] = useState<Cursor | null>(null);
   const [anchor, setAnchor] = useState<Cursor | null>(null);
   const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  function setCellBusy(key: string, isBusy: boolean) {
+    setBusyCells((s) => {
+      const next = new Set(s);
+      if (isBusy) next.add(key); else next.delete(key);
+      return next;
+    });
+  }
 
   const numDays = daysInMonth(year, month);
   const days = useMemo(() => Array.from({ length: numDays }, (_, i) => i + 1), [numDays]);
@@ -112,6 +132,14 @@ export default function AttendancePage() {
     return result;
   }
 
+  function overtimeTotal(employeeId: number): number {
+    let total = 0;
+    for (const day of days) {
+      total += recordMap.get(`${employeeId}-${day}`)?.overtimeHours ?? 0;
+    }
+    return total;
+  }
+
   function pharmacyForRow(emp: Employee): number | null {
     if (rowPharmacy[emp.id] !== undefined) return rowPharmacy[emp.id] || null;
     return emp.pharmacies[0]?.id ?? null;
@@ -130,31 +158,93 @@ export default function AttendancePage() {
     };
   }
 
-  async function toggleCell(rowIdx: number, day: number) {
+  function openPopup(rowIdx: number, day: number) {
     const emp = flatEmployees[rowIdx];
     if (!emp) return;
-    setError('');
+    const cellEl = cellRefs.current.get(`${rowIdx}-${day}`);
+    const rect = cellEl?.getBoundingClientRect();
     const existing = recordMap.get(`${emp.id}-${day}`);
-    setBusy(true);
+    setPopup({
+      rowIdx,
+      day,
+      top: rect ? rect.bottom + 6 : 100,
+      left: rect ? rect.left : 100,
+      hours: existing && existing.overtimeHours > 0 ? String(existing.overtimeHours) : '',
+    });
+  }
+
+  // Клик по ячейке больше не тоггает мгновенно — открывает попап, чтобы можно было
+  // сразу указать часы переработки за этот день (или просто подтвердить без часов).
+  async function submitPopup() {
+    if (!popup) return;
+    const emp = flatEmployees[popup.rowIdx];
+    if (!emp) return;
+    const key = `${emp.id}-${popup.day}`;
+    const existing = recordMap.get(key);
+    const raw = popup.hours.trim();
+    const hours = raw === '' ? 0 : Number(raw.replace(',', '.'));
+    if (Number.isNaN(hours) || hours < 0) {
+      setError('Некорректное значение часов');
+      return;
+    }
+    setError('');
+    setPopup(null);
+    setCellBusy(key, true);
     try {
-      if (existing) {
-        await fetch(`/api/attendance/${existing.id}`, { method: 'DELETE' });
-      } else {
-        const res = await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ employeeId: emp.id, date: dateStr(year, month, day), pharmacyId: pharmacyForRow(emp) }),
-        });
-        if (!res.ok) {
-          const d = await res.json();
-          setError(d.error || 'Ошибка сохранения');
-        }
+      const res = existing
+        ? await fetch(`/api/attendance/${existing.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ overtimeHours: hours }),
+          })
+        : await fetch('/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              employeeId: emp.id,
+              date: dateStr(year, month, popup.day),
+              pharmacyId: pharmacyForRow(emp),
+              overtimeHours: hours,
+            }),
+          });
+      if (!res.ok) {
+        const d = await res.json();
+        setError(d.error || 'Ошибка сохранения');
       }
       await refreshData();
     } finally {
-      setBusy(false);
+      setCellBusy(key, false);
     }
   }
+
+  async function removeMark() {
+    if (!popup) return;
+    const emp = flatEmployees[popup.rowIdx];
+    if (!emp) return;
+    const key = `${emp.id}-${popup.day}`;
+    const existing = recordMap.get(key);
+    setPopup(null);
+    if (!existing) return;
+    setError('');
+    setCellBusy(key, true);
+    try {
+      await fetch(`/api/attendance/${existing.id}`, { method: 'DELETE' });
+      await refreshData();
+    } finally {
+      setCellBusy(key, false);
+    }
+  }
+
+  useEffect(() => {
+    if (!popup) return;
+    function handleDocMouseDown(e: MouseEvent) {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        setPopup(null);
+      }
+    }
+    document.addEventListener('mousedown', handleDocMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown);
+  }, [popup]);
 
   function selectCell(rowIdx: number, day: number, extend: boolean) {
     const cur = { rowIdx, day };
@@ -171,7 +261,7 @@ export default function AttendancePage() {
       selectCell(rowIdx, day, true);
     } else {
       selectCell(rowIdx, day, false);
-      toggleCell(rowIdx, day);
+      openPopup(rowIdx, day);
     }
   }
 
@@ -179,28 +269,32 @@ export default function AttendancePage() {
     switch (e.key) {
       case 'ArrowLeft':
         e.preventDefault();
+        setPopup(null);
         selectCell(rowIdx, Math.max(1, day - 1), e.shiftKey);
         break;
       case 'ArrowRight':
         e.preventDefault();
+        setPopup(null);
         selectCell(rowIdx, Math.min(numDays, day + 1), e.shiftKey);
         break;
       case 'ArrowUp':
         e.preventDefault();
+        setPopup(null);
         selectCell(Math.max(0, rowIdx - 1), day, false);
         break;
       case 'ArrowDown':
         e.preventDefault();
+        setPopup(null);
         selectCell(Math.min(flatEmployees.length - 1, rowIdx + 1), day, false);
         break;
       case 'Enter':
       case ' ':
         e.preventDefault();
-        toggleCell(rowIdx, day);
+        openPopup(rowIdx, day);
         break;
       case 'Escape':
         e.preventDefault();
-        setAnchor(selected);
+        if (popup) setPopup(null); else setAnchor(selected);
         break;
     }
   }
@@ -255,8 +349,9 @@ export default function AttendancePage() {
     <div className="max-w-full">
       <h1 className="text-lg font-semibold text-slate-900 mb-1">Табель посещаемости</h1>
       <p className="text-sm text-slate-500 mb-4">
-        Клик по ячейке — отметить/снять день. Стрелки перемещают выделение, Shift+стрелка или Shift+клик
-        в той же строке — выбрать диапазон дней, появятся кнопки массового действия. Enter/Space — тоггл текущей ячейки, Esc — сбросить диапазон.
+        Клик по ячейке открывает окно отметки: подтвердите без часов или укажите переработку за этот день.
+        Стрелки перемещают выделение, Shift+стрелка или Shift+клик в той же строке — выбрать диапазон дней,
+        появятся кнопки массового действия (без учёта часов). Esc — закрыть окно/сбросить диапазон.
       </p>
 
       <div className="card p-3 mb-4 flex flex-wrap items-end gap-4">
@@ -323,13 +418,14 @@ export default function AttendancePage() {
                   );
                 })}
                 <th className="th text-center px-2 py-2">Итого</th>
+                <th className="th text-center px-2 py-2 min-w-[90px]">Переработка (ч)</th>
               </tr>
             </thead>
             <tbody>
               {groups.map((g) => (
                 <Fragment key={g.type}>
                   <tr key={`h-${g.type}`}>
-                    <td colSpan={days.length + 2} className="bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200">
+                    <td colSpan={days.length + 3} className="bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200">
                       {g.label}
                     </td>
                   </tr>
@@ -356,7 +452,11 @@ export default function AttendancePage() {
                           </div>
                         </td>
                         {days.map((day) => {
-                          const marked = recordMap.has(`${emp.id}-${day}`);
+                          const record = recordMap.get(`${emp.id}-${day}`);
+                          const marked = !!record;
+                          const hasOvertime = !!record && record.overtimeHours > 0;
+                          const cellKey = `${emp.id}-${day}`;
+                          const cellBusy = busyCells.has(cellKey);
                           const isSelected = selected?.rowIdx === rowIdx && selected?.day === day;
                           const inRange = hasRange && selected?.rowIdx === rowIdx && anchor && rangeDays.includes(day) && anchor.rowIdx === rowIdx;
                           const weekend = isWeekend(year, month, day);
@@ -365,20 +465,27 @@ export default function AttendancePage() {
                               key={day}
                               ref={registerCellRef(rowIdx, day)}
                               tabIndex={isSelected ? 0 : -1}
-                              onClick={(e) => handleCellClick(rowIdx, day, e)}
-                              onKeyDown={(e) => handleKeyDown(rowIdx, day, e)}
+                              onClick={(e) => !cellBusy && handleCellClick(rowIdx, day, e)}
+                              onKeyDown={(e) => !cellBusy && handleKeyDown(rowIdx, day, e)}
+                              title={hasOvertime ? `Переработка: ${record!.overtimeHours} ч` : undefined}
                               className={[
-                                'text-center px-1.5 py-1.5 cursor-pointer select-none border border-slate-200 outline-none',
-                                marked ? 'bg-green-100 text-green-700' : (weekend ? 'bg-slate-50 text-slate-300' : 'text-slate-300'),
+                                'text-center px-1.5 py-1.5 select-none border border-slate-200 outline-none',
+                                cellBusy ? 'cursor-wait' : 'cursor-pointer',
+                                marked
+                                  ? (hasOvertime ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700')
+                                  : (weekend ? 'bg-slate-50 text-slate-300' : 'text-slate-300'),
                                 isSelected ? 'ring-2 ring-blue-400 ring-inset' : '',
                                 inRange && !isSelected ? 'bg-blue-50' : '',
                               ].join(' ')}
                             >
-                              {marked ? '✓' : '·'}
+                              {cellBusy ? <span className="spinner" /> : (marked ? '✓' : '·')}
                             </td>
                           );
                         })}
                         <td className="td text-center font-medium text-slate-600">{total}</td>
+                        <td className="td text-center font-medium text-slate-600">
+                          {overtimeTotal(emp.id) > 0 ? overtimeTotal(emp.id) : <span className="text-slate-300">—</span>}
+                        </td>
                       </tr>
                     );
                   })}
@@ -388,6 +495,53 @@ export default function AttendancePage() {
           </table>
         </div>
       )}
+
+      {popup && (() => {
+        const emp = flatEmployees[popup.rowIdx];
+        if (!emp) return null;
+        const existing = recordMap.get(`${emp.id}-${popup.day}`);
+        return (
+          <div
+            ref={popupRef}
+            style={{ top: popup.top, left: popup.left }}
+            className="fixed z-30 w-56 card p-3 space-y-2 shadow-lg"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { e.preventDefault(); setPopup(null); }
+              if (e.key === 'Enter') { e.preventDefault(); submitPopup(); }
+            }}
+          >
+            <div className="text-sm font-medium text-slate-800">
+              {emp.name} — {dateStr(year, month, popup.day)}
+            </div>
+            <div>
+              <label className="label">Часы переработки (необязательно)</label>
+              <input
+                type="number"
+                min={0}
+                step="0.5"
+                autoFocus
+                placeholder="0"
+                className="input"
+                value={popup.hours}
+                onChange={(e) => setPopup((p) => (p ? { ...p, hours: e.target.value } : p))}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button type="button" className="btn-primary text-sm flex-1" onClick={submitPopup}>
+                {existing ? 'Сохранить' : 'Подтвердить'}
+              </button>
+              <button type="button" className="btn-secondary text-sm" onClick={() => setPopup(null)}>
+                Отмена
+              </button>
+            </div>
+            {existing && (
+              <button type="button" className="text-xs text-red-600 hover:text-red-700" onClick={removeMark}>
+                Снять отметку
+              </button>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
