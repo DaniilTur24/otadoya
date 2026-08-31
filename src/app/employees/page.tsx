@@ -46,6 +46,7 @@ export default function EmployeesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [pharmacyFilter, setPharmacyFilter] = useState<number | ''>('');
 
   const load = useCallback(() => {
     Promise.all([
@@ -145,8 +146,11 @@ export default function EmployeesPage() {
     load();
   }
 
-  const active = employees.filter((e) => e.isActive);
-  const inactive = employees.filter((e) => !e.isActive);
+  const filteredEmployees = pharmacyFilter
+    ? employees.filter((e) => e.pharmacies.some((p) => p.id === pharmacyFilter))
+    : employees;
+  const active = filteredEmployees.filter((e) => e.isActive);
+  const inactive = filteredEmployees.filter((e) => !e.isActive);
 
   return (
     <div className="max-w-screen-xl">
@@ -284,6 +288,22 @@ export default function EmployeesPage() {
         </form>
       )}
 
+      {!loading && pharmacies.length > 0 && (
+        <div className="mb-3 flex items-center gap-2">
+          <label className="label mb-0">Аптека:</label>
+          <select
+            value={pharmacyFilter}
+            onChange={(e) => setPharmacyFilter(e.target.value ? Number(e.target.value) : '')}
+            className="input w-auto text-sm"
+          >
+            <option value="">Все аптеки</option>
+            {pharmacies.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
           <span className="spinner" /> Загрузка...
@@ -301,7 +321,9 @@ export default function EmployeesPage() {
           <div className="card divide-y divide-slate-100 mb-4">
             {active.length === 0 ? (
               <div className="px-4 py-5 text-sm text-slate-500 text-center">
-                Нет активных сотрудников. Нажмите «+ Добавить».
+                {pharmacyFilter
+                  ? 'Нет активных сотрудников в этой аптеке.'
+                  : 'Нет активных сотрудников. Нажмите «+ Добавить».'}
               </div>
             ) : (
               active.map((emp) => (
