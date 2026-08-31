@@ -70,6 +70,7 @@ export interface AttendanceEntry {
   date: Date;
   pharmacyId: number | null;
   pharmacyName: string | null;
+  overtimeHours: number;
 }
 
 function startOfMonth(year: number, month: number): Date {
@@ -1004,6 +1005,7 @@ export async function getEmployeeMonthlyAttendance(
     date: s.date,
     pharmacyId: s.pharmacyId,
     pharmacyName: s.pharmacy?.name ?? null,
+    overtimeHours: Number(s.overtimeHours),
   }));
 }
 

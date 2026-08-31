@@ -397,6 +397,9 @@ model AttendanceShift {
   // Для уборщиц/заведующих — аптека, где отработана смена; для офиса может быть пустым
   pharmacyId Int?     @map("pharmacy_id")
   date       DateTime
+  // Часы переработки в этот конкретный день, вводятся в попапе табеля при отметке дня.
+  // Пока только сбор данных — без начисления денег/отгулов, это решается позже.
+  overtimeHours Decimal @default(0) @map("overtime_hours")
   createdAt  DateTime @default(now()) @map("created_at")
 
   employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
