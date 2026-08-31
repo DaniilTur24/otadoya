@@ -17,8 +17,8 @@ interface Manager {
   isActive: boolean;
   baseSalary: number;
   employeeType: string;
-  managerPremiumEnabled: boolean;
   ladderPremiumEnabled: boolean;
+  managerBonusShareEnabled: boolean;
   allowance: number;
   allowanceDescription: string;
   pharmacies: Pharmacy[];
@@ -42,8 +42,8 @@ export default function UsersPage() {
     displayName: '',
     baseSalary: '',
     employeeType: 'manager_trading' as string,
-    managerPremiumEnabled: false,
     ladderPremiumEnabled: false,
+    managerBonusShareEnabled: true,
     allowance: '',
     allowanceDescription: '',
     pharmacyIds: [] as number[],
@@ -66,7 +66,7 @@ export default function UsersPage() {
   function resetForm() {
     setForm({
       username: '', password: '', displayName: '', baseSalary: '',
-      employeeType: 'manager_trading', managerPremiumEnabled: false, ladderPremiumEnabled: false,
+      employeeType: 'manager_trading', ladderPremiumEnabled: false, managerBonusShareEnabled: true,
       allowance: '', allowanceDescription: '', pharmacyIds: [],
     });
     setEditingId(null);
@@ -86,8 +86,8 @@ export default function UsersPage() {
       displayName: m.displayName,
       baseSalary: String(m.baseSalary),
       employeeType: m.employeeType,
-      managerPremiumEnabled: m.managerPremiumEnabled,
       ladderPremiumEnabled: m.ladderPremiumEnabled,
+      managerBonusShareEnabled: m.managerBonusShareEnabled,
       allowance: m.allowance ? String(m.allowance) : '',
       allowanceDescription: m.allowanceDescription ?? '',
       pharmacyIds: m.pharmacies.map((p) => p.id),
@@ -116,8 +116,8 @@ export default function UsersPage() {
       pharmacyIds: form.pharmacyIds,
       baseSalary: form.baseSalary || 0,
       employeeType: form.employeeType,
-      managerPremiumEnabled: form.employeeType === 'pharmacy_manager' ? form.managerPremiumEnabled : false,
-      ladderPremiumEnabled: form.employeeType === 'manager_trading' ? form.ladderPremiumEnabled : false,
+      ladderPremiumEnabled: form.ladderPremiumEnabled,
+      managerBonusShareEnabled: form.managerBonusShareEnabled,
       allowance: form.allowance || 0,
       allowanceDescription: form.allowanceDescription.trim(),
     };
@@ -268,10 +268,8 @@ export default function UsersPage() {
                 </select>
                 <p className="text-xs text-slate-400 mt-1">
                   {form.employeeType === 'manager_trading'
-                    ? 'Считается по сменам, как продавец, плюс 10% от бонусов и доплата. Тип премии — см. чекбокс ниже'
-                    : form.employeeType === 'manager_fixed'
-                    ? 'Пятидневка по табелю посещаемости плюс 10% от бонусов, доплата и премия заведующего'
-                    : 'Пятидневка по табелю посещаемости. Премия — опционально (см. ниже)'}
+                    ? 'Считается по сменам, как продавец. Доплата и премии — см. чекбоксы ниже'
+                    : 'Пятидневка по табелю посещаемости. Доплата и премии — см. чекбоксы ниже'}
                 </p>
               </div>
               <div>
@@ -307,19 +305,17 @@ export default function UsersPage() {
               </div>
             </div>
 
-            {form.employeeType === 'pharmacy_manager' && (
+            <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
                   className="rounded"
-                  checked={form.managerPremiumEnabled}
-                  onChange={(e) => setForm((f) => ({ ...f, managerPremiumEnabled: e.target.checked }))}
+                  checked={form.managerBonusShareEnabled}
+                  onChange={(e) => setForm((f) => ({ ...f, managerBonusShareEnabled: e.target.checked }))}
                 />
-                Премия включена (лестница по порогу выручки аптеки, как у заведующих)
+                10% от бонусов аптеки
               </label>
-            )}
 
-            {form.employeeType === 'manager_trading' && (
               <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
@@ -327,9 +323,10 @@ export default function UsersPage() {
                   checked={form.ladderPremiumEnabled}
                   onChange={(e) => setForm((f) => ({ ...f, ladderPremiumEnabled: e.target.checked }))}
                 />
-                Премия по выручке аптеки (лестница с порогом и шагом, вместо личной премии за смену)
+                Лестничная премия по выручке аптеки
+                {form.employeeType === 'manager_trading' && ' (вместо личной премии за смену)'}
               </label>
-            )}
+            </div>
 
             <div>
               <label className="label">Аптеки (выберите одну или несколько)</label>
@@ -415,12 +412,10 @@ export default function UsersPage() {
                     {MANAGER_TYPE_OPTIONS.find((t) => t.value === m.employeeType)?.label ?? m.employeeType}
                     <div className="text-xs text-slate-400">
                       {m.baseSalary.toLocaleString('ru-RU')} ₸
-                      {m.employeeType === 'pharmacy_manager' && (
-                        <span className={m.managerPremiumEnabled ? 'text-green-600' : 'text-slate-400'}>
-                          {' '}· премия {m.managerPremiumEnabled ? 'включена' : 'выключена'}
-                        </span>
+                      {m.managerBonusShareEnabled && (
+                        <span className="text-green-600">{' '}· 10% от бонусов</span>
                       )}
-                      {m.employeeType === 'manager_trading' && m.ladderPremiumEnabled && (
+                      {m.ladderPremiumEnabled && (
                         <span className="text-green-600">{' '}· премия по выручке аптеки</span>
                       )}
                       {m.allowance > 0 && (

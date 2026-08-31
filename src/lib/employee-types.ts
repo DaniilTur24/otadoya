@@ -38,11 +38,13 @@ export const ATTENDANCE_BASED_TYPES: ReadonlySet<string> = new Set([
   'pharmacy_manager',
 ]);
 
-// Типы заведующих, у которых действует 10%-доля от бонусов аптеки,
-// доплата за аптеку и лестничная премия
+// Типы, у которых есть фиксированная доплата и два независимых переключателя —
+// managerBonusShareEnabled (10%-доля от бонусов аптеки) и ladderPremiumEnabled
+// (лестничная премия по выручке аптеки), в любой комбинации
 export const MANAGER_TYPES: ReadonlySet<string> = new Set([
   'manager_trading',
   'manager_fixed',
+  'pharmacy_manager',
 ]);
 
 // Типы, создаваемые на странице /users вместе с аккаунтом-логином: их карточка

@@ -93,7 +93,8 @@ interface SalaryResult {
   allowanceDescription: string;
   managerLadderPremium: number;
   managedRevenueTotal: number;
-  managerPremiumEnabled: boolean;
+  ladderPremiumEnabled: boolean;
+  managerBonusShareEnabled: boolean;
   totalSalary: number;
   revenueTotal: number;
   recordsCount: number;
@@ -508,7 +509,6 @@ export default function EmployeeDetailPage() {
             {(() => {
               const isAttendanceBased = ATTENDANCE_BASED_TYPES.has(salary.employeeType);
               const isManager = MANAGER_TYPES.has(salary.employeeType);
-              const isPharmacyManager = salary.employeeType === 'pharmacy_manager';
               const isCleaner = salary.employeeType === 'cleaner';
               const isOffice = salary.employeeType === 'office';
               const isSeller = salary.employeeType === 'seller';
@@ -578,16 +578,28 @@ export default function EmployeeDetailPage() {
                     {isManager && (
                       <>
                         <span className="text-slate-500">
-                          10% от бонусов аптеки ({fmt(salary.managedBonusTotal)} ₸)
+                          {salary.managerBonusShareEnabled
+                            ? `10% от бонусов аптеки (${fmt(salary.managedBonusTotal)} ₸)`
+                            : '10% от бонусов аптеки'}
                         </span>
-                        <span className="font-medium text-right">{fmt(salary.managerBonusShare)} ₸</span>
+                        {salary.managerBonusShareEnabled ? (
+                          <span className="font-medium text-right">{fmt(salary.managerBonusShare)} ₸</span>
+                        ) : (
+                          <span className="text-right text-slate-400">Выключено</span>
+                        )}
 
                         <span className="text-slate-500">
-                          Премия по выручке аптеки ({fmt(salary.managedRevenueTotal)} ₸)
+                          {salary.ladderPremiumEnabled
+                            ? `Премия по выручке аптеки (${fmt(salary.managedRevenueTotal)} ₸)`
+                            : 'Премия по выручке аптеки'}
                         </span>
-                        <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
-                          {fmt(salary.managerLadderPremium)} ₸
-                        </span>
+                        {salary.ladderPremiumEnabled ? (
+                          <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
+                            {fmt(salary.managerLadderPremium)} ₸
+                          </span>
+                        ) : (
+                          <span className="text-right text-slate-400">Выключено</span>
+                        )}
                       </>
                     )}
 
@@ -598,24 +610,6 @@ export default function EmployeeDetailPage() {
                         </span>
                         <span className="font-medium text-right">{fmt(salary.managerLadderPremium)} ₸</span>
                       </>
-                    )}
-
-                    {isPharmacyManager && (
-                      salary.managerPremiumEnabled ? (
-                        <>
-                          <span className="text-slate-500">
-                            Премия по выручке аптеки ({fmt(salary.managedRevenueTotal)} ₸)
-                          </span>
-                          <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
-                            {fmt(salary.managerLadderPremium)} ₸
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-slate-500">Премия</span>
-                          <span className="text-right text-slate-400">Выключена</span>
-                        </>
-                      )
                     )}
 
                     {salary.allowance > 0 && (

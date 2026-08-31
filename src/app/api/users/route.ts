@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     orderBy: { displayName: 'asc' },
     include: {
       pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } },
-      employee: { select: { baseSalary: true, employeeType: true, managerPremiumEnabled: true, ladderPremiumEnabled: true, allowance: true, allowanceDescription: true } },
+      employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true } },
     },
   });
 
@@ -27,8 +27,8 @@ export async function GET(request: NextRequest) {
       pharmacies: u.pharmacies.map((p) => p.pharmacy),
       baseSalary: u.employee ? Number(u.employee.baseSalary) : 0,
       employeeType: u.employee?.employeeType ?? 'manager_trading',
-      managerPremiumEnabled: u.employee?.managerPremiumEnabled ?? false,
       ladderPremiumEnabled: u.employee?.ladderPremiumEnabled ?? false,
+      managerBonusShareEnabled: u.employee?.managerBonusShareEnabled ?? false,
       allowance: u.employee ? Number(u.employee.allowance) : 0,
       allowanceDescription: u.employee?.allowanceDescription ?? '',
     }))
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, managerPremiumEnabled, ladderPremiumEnabled, allowance, allowanceDescription } =
+  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription } =
     await request.json();
 
   if (!username?.trim() || !password || !displayName?.trim()) {
@@ -68,8 +68,8 @@ export async function POST(request: NextRequest) {
         name: displayName.trim(),
         baseSalary: String(baseSalary ?? 0),
         employeeType: resolvedEmployeeType,
-        managerPremiumEnabled: resolvedEmployeeType === 'pharmacy_manager' ? Boolean(managerPremiumEnabled) : false,
-        ladderPremiumEnabled: resolvedEmployeeType === 'manager_trading' ? Boolean(ladderPremiumEnabled) : false,
+        ladderPremiumEnabled: Boolean(ladderPremiumEnabled),
+        managerBonusShareEnabled: Boolean(managerBonusShareEnabled),
         allowance: String(allowance ?? 0),
         allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
       },

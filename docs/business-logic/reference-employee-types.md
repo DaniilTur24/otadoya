@@ -18,7 +18,7 @@
 ## Константы-группы (`src/lib/employee-types.ts`)
 
 - **`ATTENDANCE_BASED_TYPES`** = `{manager_fixed, cleaner, office, pharmacy_manager}` — зарплата считается по отметкам в табеле (`AttendanceShift`), а не по сменам в записи выручки. Этим типам **нельзя** назначить `shiftType` в `DailyRevenueEntry` (см. `validateShiftEmployeeType` в `src/lib/revenue-validation.ts`) и, наоборот, типам не из этого списка нельзя отметить табель (см. `POST /api/attendance`).
-- **`MANAGER_TYPES`** = `{manager_trading, manager_fixed}` — оба получают 10%-долю от `pharmaBonus` управляемых аптек (`MANAGER_BONUS_SHARE_PERCENT = 0.1`). Лестничная премия по выручке аптеки (`Pharmacy.managerPremium*`) обязательна у `manager_fixed` и опциональна у `manager_trading` (флаг `ladderPremiumEnabled`) — пока она выключена, `manager_trading` получает личную `revenuePremium`, такую же, как у продавца (см. [reference-salary-formulas.md](reference-salary-formulas.md)). `pharmacy_manager` в группу `MANAGER_TYPES` не входит — у него нет 10%-доли, а лестничная премия опциональна (флаг `managerPremiumEnabled`).
+- **`MANAGER_TYPES`** = `{manager_trading, manager_fixed, pharmacy_manager}` — все три получают одинаковый набор из двух независимых переключателей на карточке сотрудника: `managerBonusShareEnabled` (10%-доля от `pharmaBonus` управляемых аптек, `MANAGER_BONUS_SHARE_PERCENT = 0.1`) и `ladderPremiumEnabled` (лестничная премия по выручке аптеки, `Pharmacy.managerPremium*`). Любая комбинация возможна — оба включены, только один, или ни одного; переключатели не зависят от `employeeType`. Для `manager_trading`, пока `ladderPremiumEnabled` выключен, вместо лестницы начисляется личная `revenuePremium`, такая же, как у продавца (см. [reference-salary-formulas.md](reference-salary-formulas.md)) — у `manager_fixed`/`pharmacy_manager` такой личной премии нет вообще (они не привязаны к сменам с кассой).
 - **`USER_LINKED_TYPES`** = `{manager_trading, manager_fixed, pharmacy_manager}` — карточка `Employee` для этих типов создаётся и редактируется только вместе с аккаунтом `User` на `/users`. Прямое редактирование имени/оклада/типа/доплаты на `/employees/[id]` для них заблокировано на уровне API (`PUT /api/employees/[id]` вернёт 400, если затронуто одно из этих полей у `USER_LINKED_TYPES`-сотрудника). Эти же типы **включаются** в `calculateAllEmployeesSalaries()` даже при нулевом количестве записей за месяц — доплата/премия начисляется независимо от личной выработки.
 
 ## Отличия по полям Employee
@@ -27,7 +27,8 @@
 |---|---|
 | `baseSalary` | все, кроме `cleaner` (там 0, используется `shiftRate`) |
 | `shiftRate` | только `cleaner` — ставка за одну отмеченную смену в табеле |
-| `managerPremiumEnabled` | только `pharmacy_manager` — включает/выключает лестничную премию аптеки лично для него |
+| `ladderPremiumEnabled` | `manager_trading`/`manager_fixed`/`pharmacy_manager` — включает/выключает лестничную премию аптеки лично для сотрудника |
+| `managerBonusShareEnabled` | `manager_trading`/`manager_fixed`/`pharmacy_manager` — включает/выключает 10%-долю от бонусов аптеки лично для сотрудника |
 | `allowance` / `allowanceDescription` | любой тип — фиксированная ежемесячная доплата, прибавляется к итогу всегда |
 
 ## Не путать с session role

@@ -36,6 +36,13 @@ export default function WorkingCalendarPage() {
   async function saveMonth(month: number) {
     const days = entries[month];
     if (!days || days < 1 || days > 31) return;
+    if (
+      !window.confirm(
+        `Изменение рабочих дней за ${MONTHS[month - 1]} ${year} пересчитает зарплату за этот месяц для табельных и пятидневных сотрудников. Продолжить?`
+      )
+    ) {
+      return;
+    }
     setSaving(month);
     await fetch('/api/working-calendar', {
       method: 'PUT',

@@ -56,10 +56,10 @@ Key Prisma models and what they store:
 
 | Model | Purpose |
 |---|---|
-| `Pharmacy` | Аптека: coefficient (розн→опт), terminalRent, procedureRent; плюс параметры премии заведующих/менеджеров этой аптеки — managerAllowance (фикс. доплата) и managerPremiumThreshold/Base/StepAmount/StepBonus (лестница от выручки) |
+| `Pharmacy` | Аптека: coefficient (розн→опт), terminalRent, procedureRent; плюс managerPremiumThreshold/Base/StepAmount/StepBonus — общая для аптеки лестница премии, применяется к сотрудникам с `ladderPremiumEnabled` (см. ниже) |
 | `PharmacyAlias` | Ключевые слова для автоопределения аптеки из текста транзакции |
 | `User` | Аккаунт заведующего/менеджера (`role: 'manager'`): username/passwordHash; связан с аптеками через `UserPharmacy`; `employeeId` — связанная карточка `Employee` (см. Auth & RBAC) |
-| `Employee` | Сотрудник с baseSalary, `employeeType` (формула зарплаты, см. ниже), `shiftRate` (только cleaner), `managerPremiumEnabled` (только pharmacy_manager); связан с аптеками через `EmployeePharmacy` (M:N) |
+| `Employee` | Сотрудник с baseSalary, `employeeType` (формула зарплаты, см. ниже), `shiftRate` (только cleaner), `allowance`/`allowanceDescription` (фикс. доплата, любой тип), `ladderPremiumEnabled`/`managerBonusShareEnabled` (manager_trading/manager_fixed/pharmacy_manager); связан с аптеками через `EmployeePharmacy` (M:N) |
 | `DailyRevenueEntry` | Ежедневная выручка (cash + terminal + kaspi) по сменам `day`/`full_day`/`five_day`, статус pending/approved/rejected |
 | `DailyExpenseItem` | Детализация расходов по записи выручки; `category` — ключ из `MONTHLY_EXPENSE_KEYS`. Имеет собственный nullable `employeeId` — получатель, который может отличаться от сотрудника самой записи (используется для `employeeAdvance`, см. ниже) |
 | `AttendanceShift` | Отметка одной отработанной смены в табеле посещаемости (employeeId + date, опционально pharmacyId) — для типов из `ATTENDANCE_BASED_TYPES`, у которых смена не привязана к записи выручки |
@@ -125,13 +125,15 @@ Key Prisma models and what they store:
 | employeeType | Source of "shifts" | Formula |
 |---|---|---|
 | `seller` | `DailyRevenueEntry.shiftType` (`day`/`full_day`) | baseSalary/15 per `day` + baseSalary/10 per `full_day` + `pharmaBonus` items + revenuePremium (1.5% of revenue over a 200k/300k-per-shift threshold) − advances |
-| `manager_trading` | same as seller, shift `day`/`full_day` | same shift-based base pay as seller, but **no** revenuePremium — instead: 10% of the managed pharmacy's `pharmaBonus` total (`MANAGER_BONUS_SHARE_PERCENT`) + per-pharmacy `managerAllowance` + per-pharmacy ladder premium (see below) − advances |
-| `manager_fixed` | `AttendanceShift` (табель) | baseSalary / `WorkingCalendar.workingDays` × attendance count + 10% bonus share + managerAllowance + ladder premium − advances |
+| `manager_trading` | same as seller, shift `day`/`full_day` | same shift-based base pay as seller; if `ladderPremiumEnabled`, personal revenuePremium is replaced by the per-pharmacy ladder premium instead. Plus, if `managerBonusShareEnabled`: 10% of the managed pharmacy's `pharmaBonus` total (`MANAGER_BONUS_SHARE_PERCENT`) − advances |
+| `manager_fixed` | `AttendanceShift` (табель) | baseSalary / `WorkingCalendar.workingDays` × attendance count + (if `managerBonusShareEnabled`) 10% bonus share + (if `ladderPremiumEnabled`) ladder premium − advances |
 | `cleaner` | `AttendanceShift` | `shiftRate` × attendance count − advances (no baseSalary involved) |
 | `office` | `AttendanceShift` | baseSalary / workingDays × attendance count + global office tier premium (`OfficePremiumTier`, from total revenue of **all** pharmacies) − advances |
-| `pharmacy_manager` | `AttendanceShift` | baseSalary / workingDays × attendance count + optional per-pharmacy ladder premium (only if `managerPremiumEnabled`) − advances. No bonus share, no managerAllowance |
+| `pharmacy_manager` | `AttendanceShift` | baseSalary / workingDays × attendance count + (if `managerBonusShareEnabled`) 10% bonus share + (if `ladderPremiumEnabled`) per-pharmacy ladder premium − advances |
 
-"Ladder premium" (`computeLadderPremium`): if revenue ≥ `threshold`, pay `base`, then add one `stepBonus` for each full `stepAmount` of revenue above the threshold. Each pharmacy has its own threshold/base/step on the `Pharmacy` model — used by `manager_trading`, `manager_fixed`, and `pharmacy_manager`.
+`ladderPremiumEnabled` and `managerBonusShareEnabled` are independent per-employee booleans, available identically on `manager_trading`/`manager_fixed`/`pharmacy_manager` (any combination — both, either, or neither). `Employee.allowance`/`allowanceDescription` (a flat monthly top-up) applies to every employeeType, not just managers.
+
+"Ladder premium" (`computeManagerLadderPremium`/`computeLadderPremium`): if revenue ≥ `threshold`, pay `base`, then add one `stepBonus` for each full `stepAmount` of revenue above the threshold. Each pharmacy has its own threshold/base/step on the `Pharmacy` model (`managerPremiumThreshold/Base/StepAmount/StepBonus`) — shared by whichever `manager_trading`/`manager_fixed`/`pharmacy_manager` employees are linked to that pharmacy and have `ladderPremiumEnabled` on.
 
 `office` uses a different mechanism: `findOfficeTierBonus` looks up total revenue of **all** pharmacies against a global, non-cumulative table of arbitrary ranges (`OfficePremiumTier`: `fromAmount`/`toAmount`/`bonusAmount`, matched `fromAmount < revenue <= toAmount`; `toAmount = null` = no upper bound) and pays the single bonus of the matching row — not a threshold+step formula.
 

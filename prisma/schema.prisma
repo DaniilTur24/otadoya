@@ -106,10 +106,13 @@ model Employee {
   employeeType String  @default("seller") @map("employee_type")
   // Ставка за одну смену — используется только для cleaner
   shiftRate    Decimal? @map("shift_rate")
-  // Включена ли лестничная премия аптеки — используется только для pharmacy_manager
-  managerPremiumEnabled Boolean @default(false) @map("manager_premium_enabled")
-  // Для manager_trading: если true — получает лестничную премию аптеки вместо личной премии за выручку смены
+  // Лестничная премия аптеки (Pharmacy.managerPremium*) — независимый переключатель для
+  // manager_trading, manager_fixed и pharmacy_manager. Для manager_trading, пока выключено,
+  // вместо неё начисляется личная премия за выручку смены, как у продавца.
   ladderPremiumEnabled  Boolean @default(false) @map("ladder_premium_enabled")
+  // 10% от суммы pharmaBonus управляемых аптек (MANAGER_BONUS_SHARE_PERCENT) — независимый
+  // переключатель для manager_trading, manager_fixed и pharmacy_manager.
+  managerBonusShareEnabled Boolean @default(true) @map("manager_bonus_share_enabled")
   // Для seller/manager_trading: если true — пятидневные смены отмечаются в табеле посещаемости
   // (AttendanceShift), а не записью выручки — сотрудник не считает кассу, просто отмечает рабочий день
   fiveDayViaAttendance  Boolean @default(false) @map("five_day_via_attendance")
