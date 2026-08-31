@@ -126,6 +126,7 @@ export default function RevenueListPage() {
   const [filterPharmacy, setFilterPharmacy] = useState('');
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
+  const [filterEmployee, setFilterEmployee] = useState('');
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
@@ -347,7 +348,7 @@ export default function RevenueListPage() {
 
   function toggleSelectAll() {
     setSelectedIds((s) =>
-      s.size === entries.length ? new Set() : new Set(entries.map((e) => e.id))
+      s.size === visibleEntries.length ? new Set() : new Set(visibleEntries.map((e) => e.id))
     );
   }
 
@@ -483,6 +484,23 @@ export default function RevenueListPage() {
         (parseFloat(editState.kaspiRevenue) || 0)
       : 0;
 
+  // Список сотрудников для фильтра берём из уже загруженных записей (а не из мастер-списка
+  // employees) — так он автоматически ограничивается аптекой, если выбран filterPharmacy,
+  // поскольку entries уже отфильтрованы по ней на сервере.
+  const employeeFilterOptions = Array.from(
+    new Map(
+      entries
+        .filter((e) => e.employeeId !== null)
+        .map((e) => [e.employeeId as number, e.employeeName])
+    ).entries()
+  )
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+  const visibleEntries = filterEmployee
+    ? entries.filter((e) => String(e.employeeId) === filterEmployee)
+    : entries;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -614,7 +632,7 @@ export default function RevenueListPage() {
 
       {/* Фильтры */}
       <div className="card p-3 mb-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
           <div>
             <label className="label">Дата с</label>
             <input type="date" className="input" value={filterFrom}
@@ -628,7 +646,7 @@ export default function RevenueListPage() {
           <div>
             <label className="label">Аптека</label>
             <select className="input" value={filterPharmacy}
-              onChange={(e) => setFilterPharmacy(e.target.value)}>
+              onChange={(e) => { setFilterPharmacy(e.target.value); setFilterEmployee(''); }}>
               <option value="">Все аптеки</option>
               {pharmacies.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -636,8 +654,19 @@ export default function RevenueListPage() {
             </select>
           </div>
           <div>
+            <label className="label">Сотрудник</label>
+            <select className="input" value={filterEmployee}
+              onChange={(e) => setFilterEmployee(e.target.value)}
+              disabled={employeeFilterOptions.length === 0}>
+              <option value="">Все сотрудники</option>
+              {employeeFilterOptions.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <button className="btn-warning w-full" onClick={() => {
-              setFilterFrom(''); setFilterTo(''); setFilterPharmacy('');
+              setFilterFrom(''); setFilterTo(''); setFilterPharmacy(''); setFilterEmployee('');
             }}>
               Сбросить
             </button>
@@ -970,9 +999,9 @@ export default function RevenueListPage() {
         <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
           <span className="spinner" /> Загрузка...
         </div>
-      ) : entries.length === 0 ? (
+      ) : visibleEntries.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
-          Нет записей за выбранный период
+          {filterEmployee ? 'Нет записей этого сотрудника за выбранный период' : 'Нет записей за выбранный период'}
         </div>
       ) : (
         <div className="card overflow-hidden">
@@ -992,7 +1021,7 @@ export default function RevenueListPage() {
                     <input
                       type="checkbox"
                       className="rounded"
-                      checked={entries.length > 0 && selectedIds.size === entries.length}
+                      checked={visibleEntries.length > 0 && selectedIds.size === visibleEntries.length}
                       onChange={toggleSelectAll}
                     />
                   </th>
@@ -1012,7 +1041,7 @@ export default function RevenueListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {entries.map((entry) => {
+                {visibleEntries.map((entry) => {
                   const bonuses    = pharmaBonusSum(entry.expenseItems);
                   const advances   = advanceSum(entry.expenseItems);
                   const surcharges = surchargeSum(entry.expenseItems);
@@ -1131,13 +1160,13 @@ export default function RevenueListPage() {
 
           {/* Итого */}
           {(() => {
-            const totalRevenue  = entries.reduce((s, e) => s + e.totalRevenue, 0);
-            const totalCash     = entries.reduce((s, e) => s + e.cashRevenue, 0);
-            const totalIncomes  = entries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
-            const totalBonuses  = entries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
-            const totalAdvances = entries.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
-            const totalSurcharges = entries.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
-            const totalExpenses = entries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
+            const totalRevenue  = visibleEntries.reduce((s, e) => s + e.totalRevenue, 0);
+            const totalCash     = visibleEntries.reduce((s, e) => s + e.cashRevenue, 0);
+            const totalIncomes  = visibleEntries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
+            const totalBonuses  = visibleEntries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
+            const totalAdvances = visibleEntries.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
+            const totalSurcharges = visibleEntries.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
+            const totalExpenses = visibleEntries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
             const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
             const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
             return (
