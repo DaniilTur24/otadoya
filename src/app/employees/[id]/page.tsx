@@ -3,7 +3,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
-import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import {
+  EMPLOYEE_TYPE_LABELS,
+  MANAGER_TYPES,
+  USER_LINKED_TYPES,
+  WORK_SCHEDULE_LABELS,
+  WORK_SCHEDULE_OPTIONS,
+  resolveWorkSchedule,
+  usesAttendance,
+  usesRevenueShifts,
+  type WorkSchedule,
+} from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
 import { useSalaryImpact } from '@/hooks/useSalaryImpact';
@@ -25,6 +35,8 @@ interface Employee {
   isActive: boolean;
   pharmacies: Pharmacy[];
   fiveDayViaAttendance: boolean;
+  workSchedule: string | null;
+  fiveDaySalary: number | null;
 }
 
 interface Pharmacy {
@@ -74,6 +86,8 @@ interface SalaryResult {
   month: number;
   year: number;
   baseSalary: number;
+  workSchedule: WorkSchedule;
+  fiveDaySalary: number;
   dayShiftsCount: number;
   fullDayShiftsCount: number;
   fiveDayShiftsCount: number;
@@ -128,6 +142,7 @@ export default function EmployeeDetailPage() {
   const [form, setForm] = useState({
     name: '', employeeType: 'seller', baseSalary: '', shiftRate: '',
     allowance: '', allowanceDescription: '', isActive: true, fiveDayViaAttendance: false,
+    workSchedule: '' as string, fiveDaySalary: '',
   });
   const [assignedPharmacyIds, setAssignedPharmacyIds] = useState<number[]>([]);
   const [editingPharmacies, setEditingPharmacies] = useState(false);
@@ -160,6 +175,10 @@ export default function EmployeeDetailPage() {
           allowanceDescription: e.allowanceDescription ?? '',
           isActive: e.isActive,
           fiveDayViaAttendance: e.fiveDayViaAttendance,
+          // У карточек, созданных до появления графика, поле пустое. Показываем выведенный
+          // график, а не «не выбрано»: иначе его легко пересохранить с другой формулой.
+          workSchedule: e.workSchedule ?? resolveWorkSchedule(e),
+          fiveDaySalary: e.fiveDaySalary != null ? String(e.fiveDaySalary) : '',
         });
         setAssignedPharmacyIds((e.pharmacies ?? []).map((p) => p.id));
       })
@@ -204,7 +223,12 @@ export default function EmployeeDetailPage() {
         allowanceDescription: form.allowanceDescription.trim(),
       }),
       shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
-      fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
+      ...(isUserLinked ? {} : {
+        workSchedule: form.workSchedule || null,
+        // Второй оклад имеет смысл только при смешанном графике — иначе очищаем,
+        // чтобы он не «выстрелил» при последующей смене графика.
+        fiveDaySalary: form.workSchedule === 'mixed' ? form.fiveDaySalary || null : null,
+      }),
       isActive: form.isActive,
     };
   }
@@ -234,11 +258,16 @@ export default function EmployeeDetailPage() {
     if (form.employeeType === 'cleaner' && Number(p.shiftRate ?? 0) !== Number(employee.shiftRate ?? 0)) {
       changed.push(`Ставка за смену: ${money(Number(employee.shiftRate ?? 0))} → ${money(Number(p.shiftRate ?? 0))} ₸`);
     }
-    if (p.fiveDayViaAttendance !== employee.fiveDayViaAttendance) {
+    const originalSchedule = employee.workSchedule ?? resolveWorkSchedule(employee);
+    if (p.workSchedule !== undefined && p.workSchedule && p.workSchedule !== originalSchedule) {
+      const label = (v: string) => WORK_SCHEDULE_LABELS[v as WorkSchedule] ?? v;
       changed.push(
-        p.fiveDayViaAttendance
-          ? 'Пятидневка по табелю: включается (смены будут читаться из табеля, а не из выручки)'
-          : 'Пятидневка по табелю: выключается (отметки табеля перестанут оплачиваться)'
+        `График работы: ${label(originalSchedule)} → ${label(p.workSchedule as string)} (меняется источник отработанных дней)`
+      );
+    }
+    if (p.fiveDaySalary !== undefined && Number(p.fiveDaySalary ?? 0) !== Number(employee.fiveDaySalary ?? 0)) {
+      changed.push(
+        `Оклад за пятидневку: ${money(Number(employee.fiveDaySalary ?? 0))} → ${money(Number(p.fiveDaySalary ?? 0))} ₸`
       );
     }
     if (!p.isActive && employee.isActive) {
@@ -292,9 +321,11 @@ export default function EmployeeDetailPage() {
   }
 
   const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-  // Продавец с включённым fiveDayViaAttendance отмечается в табеле, а не сменой в записи выручки —
-  // его переработка и явки читаются оттуда же, что и у обычных табельных типов.
-  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
+  // Со смешанным графиком у сотрудника есть и смены, и отметки табеля — карточка должна
+  // показывать оба блока сразу, а не выбирать один из них.
+  const employeeSchedule = resolveWorkSchedule(employee);
+  const showsShifts = usesRevenueShifts(employeeSchedule);
+  const showsAttendance = usesAttendance(employeeSchedule);
 
   return (
     <div className="max-w-screen-lg space-y-4">
@@ -373,7 +404,9 @@ export default function EmployeeDetailPage() {
             </div>
           ) : (
             <div>
-              <label className="label">Оклад (₸)</label>
+              <label className="label">
+                {form.workSchedule === 'mixed' ? 'Оклад за смены (₸)' : 'Оклад (₸)'}
+              </label>
               <AmountInput
                 value={form.baseSalary}
                 onChange={(value) => setForm((f) => ({ ...f, baseSalary: value }))}
@@ -384,17 +417,43 @@ export default function EmployeeDetailPage() {
           )}
         </div>
 
-        {form.employeeType === 'seller' && !USER_LINKED_TYPES.has(employee.employeeType) && (
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={form.fiveDayViaAttendance}
-              onChange={(e) => setForm((f) => ({ ...f, fiveDayViaAttendance: e.target.checked }))}
-              className="rounded"
-            />
-            Пятидневка — отмечается в табеле посещаемости
-            <span className="text-slate-400 font-normal">(вместо записи выручки на каждый рабочий день)</span>
-          </label>
+        {/* График заменил прежний чекбокс «пятидневка по табелю»: тот был «или/или», а один
+            и тот же человек может часть месяца работать сменами, часть — по пятидневке. */}
+        {!isUserLinked && form.employeeType !== 'cleaner' && (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">График работы</label>
+              <select
+                value={form.workSchedule}
+                onChange={(e) => setForm((f) => ({ ...f, workSchedule: e.target.value }))}
+                className="input"
+              >
+                {WORK_SCHEDULE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">
+                {form.workSchedule === 'shift'
+                  ? 'Отработанные дни берутся из смен в записях выручки'
+                  : form.workSchedule === 'mixed'
+                  ? 'Часть дней — смены в записях выручки, часть — отметки в табеле'
+                  : 'Отработанные дни берутся из табеля посещаемости'}
+              </p>
+            </div>
+            {form.workSchedule === 'mixed' && (
+              <div>
+                <label className="label">Оклад за пятидневку (₸)</label>
+                <AmountInput
+                  value={form.fiveDaySalary}
+                  onChange={(value) => setForm((f) => ({ ...f, fiveDaySalary: value }))}
+                  className="input"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  Пусто — пятидневка считается от оклада за смены
+                </p>
+              </div>
+            )}
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-4">
@@ -592,7 +651,11 @@ export default function EmployeeDetailPage() {
           ) ? (
           <>
             {(() => {
-              const isAttendanceBased = ATTENDANCE_BASED_TYPES.has(salary.employeeType);
+              // Что показывать в разбивке, определяет график расчёта, а не тип сотрудника:
+              // при смешанном графике нужны сразу обе части — и сменная, и пятидневная.
+              const readsShifts = usesRevenueShifts(salary.workSchedule);
+              const readsAttendance = usesAttendance(salary.workSchedule);
+              const isMixed = salary.workSchedule === 'mixed';
               const isManager = MANAGER_TYPES.has(salary.employeeType);
               const isCleaner = salary.employeeType === 'cleaner';
               const isOffice = salary.employeeType === 'office';
@@ -612,10 +675,19 @@ export default function EmployeeDetailPage() {
                       </>
                     ) : (
                       <>
-                        <span className="text-slate-500">Оклад</span>
+                        <span className="text-slate-500">{isMixed ? 'Оклад за смены' : 'Оклад'}</span>
                         <span className="font-medium text-right">{fmt(salary.baseSalary)} ₸</span>
 
-                        {!isAttendanceBased && (
+                        {/* Второй оклад показывается только когда он реально отличается —
+                            иначе это лишняя строка, повторяющая предыдущую. */}
+                        {salary.fiveDaySalary !== salary.baseSalary && (
+                          <>
+                            <span className="text-slate-500">Оклад за пятидневку</span>
+                            <span className="font-medium text-right">{fmt(salary.fiveDaySalary)} ₸</span>
+                          </>
+                        )}
+
+                        {readsShifts && (
                           <>
                             <span className="text-slate-500">Дневных смен</span>
                             <span className="font-medium text-right">
@@ -630,11 +702,11 @@ export default function EmployeeDetailPage() {
                         )}
 
                         <span className="text-slate-500">
-                          {isAttendanceBased ? 'Смен по табелю' : 'Пятидневных смен'}
+                          {readsAttendance ? 'Смен по табелю' : 'Пятидневных смен'}
                         </span>
                         <span className="font-medium text-right">
                           {salary.fiveDayShiftsCount > 0 && salary.workingCalendarDays ? (
-                            <>{salary.fiveDayShiftsCount} × {fmt(salary.baseSalary / salary.workingCalendarDays)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                            <>{salary.fiveDayShiftsCount} × {fmt(salary.fiveDaySalary / salary.workingCalendarDays)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
                           ) : salary.fiveDayShiftsCount > 0 ? (
                             <span className="text-amber-600">{salary.fiveDayShiftsCount} смен — календарь не заполнен</span>
                           ) : (
@@ -644,7 +716,7 @@ export default function EmployeeDetailPage() {
                       </>
                     )}
 
-                    {!isAttendanceBased && !isCleaner && (
+                    {readsShifts && !isCleaner && (
                       <>
                         <span className="text-slate-500">Бонусы</span>
                         <span className="font-medium text-right">{fmt(salary.totalBonuses)} ₸</span>
@@ -725,7 +797,7 @@ export default function EmployeeDetailPage() {
                     <span className="font-semibold text-slate-800">Итого зарплата</span>
                     <span className={`font-bold text-right text-base ${salary.totalSalary < 0 ? 'text-red-700' : 'text-slate-800'}`}>{fmt(salary.totalSalary)} ₸</span>
 
-                    {!isAttendanceBased && (
+                    {readsShifts && (
                       <>
                         <span className="text-slate-500 text-xs">Записей выручки</span>
                         <span className="text-right text-xs text-slate-500">{salary.recordsCount}</span>
@@ -739,8 +811,8 @@ export default function EmployeeDetailPage() {
               );
             })()}
 
-            {/* Детализация смен (продавцы и торгующие заведующие; не для пятидневников по табелю) */}
-            {!ATTENDANCE_BASED_TYPES.has(salary.employeeType) && !isFiveDaySeller && (
+            {/* Детализация смен. При смешанном графике показывается вместе с табелем ниже. */}
+            {showsShifts && (
             <div>
               <h3 className="text-sm font-semibold text-slate-700 mb-2">Смены за период</h3>
               <div className="divide-y divide-slate-100 border border-slate-100 rounded overflow-hidden">
@@ -789,9 +861,8 @@ export default function EmployeeDetailPage() {
             </div>
             )}
 
-            {/* Табель посещаемости (manager_fixed / cleaner / office / pharmacy_manager, а также
-                продавец с включённой пятидневкой по табелю) */}
-            {(ATTENDANCE_BASED_TYPES.has(salary.employeeType) || isFiveDaySeller) && (
+            {/* Табель посещаемости — у всех, чей график предполагает отметки */}
+            {showsAttendance && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-slate-700">Табель посещаемости за период</h3>

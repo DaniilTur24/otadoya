@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { hashPassword } from '@/lib/password';
-import { USER_LINKED_TYPES } from '@/lib/employee-types';
+import { USER_LINKED_TYPES, WORK_SCHEDULES } from '@/lib/employee-types';
 import { findPharmacyUnlinkBlocker } from '@/lib/employee-pharmacy-validation';
 
 function serialize(u: Record<string, unknown>) {
@@ -13,6 +13,7 @@ function serialize(u: Record<string, unknown>) {
 function serializeLoginlessManager(e: {
   id: number; name: string; isActive: boolean; baseSalary: unknown; employeeType: string;
   ladderPremiumEnabled: boolean; managerBonusShareEnabled: boolean; allowance: unknown; allowanceDescription: string;
+  workSchedule: string | null; fiveDaySalary: unknown;
   pharmacies: { pharmacy: { id: number; name: string } }[];
 }) {
   return {
@@ -27,6 +28,8 @@ function serializeLoginlessManager(e: {
     managerBonusShareEnabled: e.managerBonusShareEnabled,
     allowance: Number(e.allowance),
     allowanceDescription: e.allowanceDescription,
+    workSchedule: e.workSchedule,
+    fiveDaySalary: e.fiveDaySalary != null ? Number(e.fiveDaySalary) : null,
     accountType: 'employee' as const,
   };
 }
@@ -39,11 +42,14 @@ export async function PUT(
   if (auth) return auth;
 
   const id = Number((await params).id);
-  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription } =
+  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription, workSchedule, fiveDaySalary } =
     await request.json();
 
   if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
     return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
+  }
+  if (workSchedule != null && !(workSchedule in WORK_SCHEDULES)) {
+    return NextResponse.json({ error: 'Некорректный график работы' }, { status: 400 });
   }
 
   // Менеджер (pharmacy_manager) без логина — id отрицательный, ссылается на Employee.id.
@@ -75,6 +81,8 @@ export async function PUT(
     if (managerBonusShareEnabled !== undefined) employeeData.managerBonusShareEnabled = Boolean(managerBonusShareEnabled);
     if (allowance !== undefined) employeeData.allowance = String(allowance ?? 0);
     if (allowanceDescription !== undefined) employeeData.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
+    if (workSchedule !== undefined) employeeData.workSchedule = workSchedule || null;
+    if (fiveDaySalary !== undefined) employeeData.fiveDaySalary = fiveDaySalary === '' || fiveDaySalary == null ? null : String(fiveDaySalary);
 
     const updated = await prisma.$transaction(async (tx) => {
       if (Object.keys(employeeData).length > 0) {
@@ -141,6 +149,8 @@ export async function PUT(
       if (managerBonusShareEnabled !== undefined) employeeData.managerBonusShareEnabled = Boolean(managerBonusShareEnabled);
       if (allowance !== undefined) employeeData.allowance = String(allowance ?? 0);
       if (allowanceDescription !== undefined) employeeData.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
+      if (workSchedule !== undefined) employeeData.workSchedule = workSchedule || null;
+      if (fiveDaySalary !== undefined) employeeData.fiveDaySalary = fiveDaySalary === '' || fiveDaySalary == null ? null : String(fiveDaySalary);
       if (Object.keys(employeeData).length > 0) {
         await tx.employee.update({ where: { id: updated.employeeId }, data: employeeData });
       }

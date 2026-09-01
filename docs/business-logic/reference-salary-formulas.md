@@ -65,10 +65,10 @@ totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayS
 
 ## manager_fixed — заведующая без торговли
 
-Окладная часть — только пятидневка по табелю (`AttendanceShift`), сменных day/full_day у этого типа нет (API блокирует назначение `shiftType` для `ATTENDANCE_BASED_TYPES`).
+Окладная часть — только пятидневка по табелю (`AttendanceShift`), сменных day/full_day у этого типа по умолчанию нет: график выводится как `five_day`, и API блокирует назначение `shiftType`. Если у конкретного человека явно выбран график `mixed`, к этой формуле добавляется сменная часть — см. «График работы и два оклада» ниже.
 
 ```
-salaryFromFiveDayShifts = baseSalary / workingCalendarDays × attendanceShiftsCount
+salaryFromFiveDayShifts = fiveDayBase / workingCalendarDays × attendanceShiftsCount
 
 managerBonusShare    = managerBonusShareEnabled ? 0.10 × Σ(pharmaBonus управляемых аптек за месяц) : 0
 managerLadderPremium = ladderPremiumEnabled ? computeManagerLadderPremium(revenue управляемых аптек, Pharmacy.managerPremium*) : 0
@@ -148,3 +148,27 @@ revenuePremiumFullDayShifts (для этой аптеки) = max(0, (avgFullDayR
 ## Калькулятор для всех сотрудников разом
 
 `calculateAllEmployeesSalaries(month, year, pharmacyId?)` — перебирает всех активных сотрудников. Продавцов/уборщиц с нулевым числом записей за месяц (`recordsCount === 0`) пропускает. `USER_LINKED_TYPES` (заведующие/менеджеры) включает всегда, даже с нулевой выработкой — у них доплата/премия начисляется независимо от личных смен.
+
+
+## График работы и два оклада
+
+Откуда берутся отработанные дни, определяет не тип сотрудника, а `Employee.workSchedule` (`shift` / `five_day` / `mixed`). Это одна и та же функция расчёта для `seller`, `manager_trading`, `manager_fixed` и `pharmacy_manager` — раньше их было три почти дословно одинаковые, и различал их именно источник дней.
+
+```
+schedule = resolveWorkSchedule(employee)          // NULL → выводится из типа и fiveDayViaAttendance
+fiveDayBase = employee.fiveDaySalary ?? baseSalary
+
+если usesRevenueShifts(schedule):                 // shift, mixed
+    salaryFromDayShifts     = baseSalary / 15 × dayShiftsCount
+    salaryFromFullDayShifts = baseSalary / 10 × fullDayShiftsCount
+    totalBonuses            = Σ(pharmaBonus по записям выручки этого сотрудника)
+
+если usesAttendance(schedule):                    // five_day, mixed
+    salaryFromFiveDayShifts = fiveDayBase / workingCalendarDays × attendanceShiftsCount
+```
+
+При `mixed` начисляются обе части сразу, каждая по своему окладу. `fiveDaySalary` = NULL означает «отдельного оклада за пятидневку нет» — тогда обе части считаются от `baseSalary`, как считалось до появления поля.
+
+Один календарный день не может попасть в обе части: сервер отклоняет с 409 и смену в записи выручки на дату с отметкой табеля, и отметку табеля на дату со сменой (`validateNoAttendanceOnDate`, `findShiftOnDate`/`findShiftsOnDates`).
+
+`cleaner` и `office` в эту схему не входят — у них свои правила (ставка за смену и премия по таблице диапазонов от выручки всех аптек соответственно).

@@ -111,3 +111,41 @@ describe('findStoredSalary', () => {
     expect(findStoredSalary(employees, 404, null)).toBeNull();
   });
 });
+
+/**
+ * Снимки версии 2 сделаны до появления графика и второго оклада. Если читать их как есть,
+ * карточка за закрытый месяц получит workSchedule = undefined и спрячет разом и смены,
+ * и табель — поэтому недостающие поля выводятся при чтении.
+ */
+describe('parseSnapshot — снимки, сделанные до появления графика', () => {
+  it('выводит график и второй оклад для записей без этих полей', () => {
+    const legacy = JSON.stringify({
+      version: 2,
+      pharmacies: {},
+      employees: [
+        { employeeId: 1, employeeType: 'manager_fixed', baseSalary: 190000, pharmacyId: null },
+        { employeeId: 2, employeeType: 'seller', baseSalary: 150000, pharmacyId: 3 },
+      ],
+    });
+
+    const { employees } = parseSnapshot(legacy);
+    expect(employees[0].workSchedule).toBe('five_day');
+    expect(employees[0].fiveDaySalary).toBe(190000);
+    expect(employees[1].workSchedule).toBe('shift');
+    expect(employees[1].fiveDaySalary).toBe(150000);
+  });
+
+  it('не трогает записи, где график уже сохранён', () => {
+    const current = JSON.stringify({
+      version: 3,
+      pharmacies: {},
+      employees: [
+        { employeeId: 1, employeeType: 'seller', baseSalary: 190000, workSchedule: 'mixed', fiveDaySalary: 260000, pharmacyId: null },
+      ],
+    });
+
+    const { employees } = parseSnapshot(current);
+    expect(employees[0].workSchedule).toBe('mixed');
+    expect(employees[0].fiveDaySalary).toBe(260000);
+  });
+});

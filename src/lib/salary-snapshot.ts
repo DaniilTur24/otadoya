@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { calculateEmployeeMonthlySalary, type MonthlySalaryResult } from '@/lib/salary-calculator';
+import { resolveWorkSchedule } from '@/lib/employee-types';
 
 /**
  * Зарплата нигде не хранится — она пересчитывается из ТЕКУЩИХ настроек (оклад, рабочий
@@ -27,8 +28,27 @@ export interface MonthSnapshot {
   employees: StoredSalary[];
 }
 
-/** Версия формата снимка. 1 (или отсутствие поля) — только аптеки, без зарплат. */
-const SNAPSHOT_VERSION = 2;
+/**
+ * Версия формата снимка.
+ *  1 (или отсутствие поля) — только аптеки, без зарплат
+ *  2 — добавлена секция зарплат сотрудников
+ *  3 — у зарплат появились workSchedule и fiveDaySalary (график и второй оклад)
+ */
+const SNAPSHOT_VERSION = 3;
+
+/**
+ * Дописывает поля, которых не было в снимках версии 2. Без этого карточка за уже закрытый
+ * месяц получила бы workSchedule = undefined и спрятала бы разом и смены, и табель.
+ * Значения выводятся так же, как для карточек без явного графика.
+ */
+function withDerivedSchedule(stored: StoredSalary): StoredSalary {
+  if (stored.workSchedule && stored.fiveDaySalary !== undefined) return stored;
+  return {
+    ...stored,
+    workSchedule: stored.workSchedule ?? resolveWorkSchedule({ employeeType: stored.employeeType }),
+    fiveDaySalary: stored.fiveDaySalary ?? stored.baseSalary,
+  };
+}
 
 /**
  * Считает зарплату всех активных сотрудников на момент закрытия месяца.
@@ -77,7 +97,10 @@ export function parseSnapshot(json: string): MonthSnapshot {
   const parsed = JSON.parse(json) as unknown;
   if (parsed && typeof parsed === 'object' && typeof (parsed as MonthSnapshot & { version?: unknown }).version === 'number') {
     const snapshot = parsed as MonthSnapshot;
-    return { pharmacies: snapshot.pharmacies ?? {}, employees: snapshot.employees ?? [] };
+    return {
+      pharmacies: snapshot.pharmacies ?? {},
+      employees: (snapshot.employees ?? []).map(withDerivedSchedule),
+    };
   }
   return { pharmacies: (parsed ?? {}) as Record<string, Record<string, number>>, employees: [] };
 }

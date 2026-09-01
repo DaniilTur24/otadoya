@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { resolveWorkSchedule, usesRevenueShifts } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
@@ -24,7 +24,7 @@ const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
 ).map((row) => ({ key: row.key, label: row.label }));
 
 interface Pharmacy { id: number; name: string }
-interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean; pharmacies: Pharmacy[] }
+interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean; workSchedule?: string | null; pharmacies: Pharmacy[] }
 
 interface ExpenseItem {
   id: number;
@@ -139,9 +139,13 @@ export default function RevenueListPage() {
 
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
-  const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
+  // В списке сотрудника смены — все, чей график вообще предполагает смены, включая смешанный.
+  const shiftEligibleEmployees = employees.filter((e) => usesRevenueShifts(resolveWorkSchedule(e)));
   const editSelectedEmployee = editState ? employees.find((e) => e.id === Number(editState.employeeId)) : undefined;
-  const isEditFiveDayEmployee = Boolean(editSelectedEmployee?.fiveDayViaAttendance);
+  // Селектор смены закрыт только для чистой пятидневки. Смешанный график её выбирать может —
+  // от двойной оплаты одного дня защищает сервер (см. validateNoAttendanceOnDate).
+  const isEditFiveDayEmployee = Boolean(editSelectedEmployee) && !usesRevenueShifts(resolveWorkSchedule(editSelectedEmployee!));
+  const isEditMixedEmployee = Boolean(editSelectedEmployee) && resolveWorkSchedule(editSelectedEmployee!) === 'mixed';
   // Аванс/доплату можно назначить только сотруднику, привязанному к аптеке этой записи
   const editPharmacyEmployees = editState
     ? employees.filter((e) => e.pharmacies.some((p) => p.id === Number(editState.pharmacyId)))
@@ -285,8 +289,9 @@ export default function RevenueListPage() {
       if (field === 'employeeId') {
         const emp = employees.find((e) => e.id === Number(value));
         updated.employeeName = emp ? emp.name : s.employeeName;
-        // У пятидневщика зарплата считается по табелю — смену в записи выручки ему не назначаем
-        if (emp?.fiveDayViaAttendance) {
+        // У чистой пятидневки зарплата считается только по табелю — смену здесь не назначаем.
+        // Смешанному графику смена, наоборот, нужна: часть дней он работает именно сменами.
+        if (emp && !usesRevenueShifts(resolveWorkSchedule(emp))) {
           updated.shiftType = '';
         }
       }
@@ -749,8 +754,12 @@ export default function RevenueListPage() {
                 <p className="mt-1 text-xs text-slate-400">
                   У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смена здесь не назначается
                 </p>
-              ) : !editState.shiftType && (
+              ) : !editState.shiftType ? (
                 <p className="mt-1 text-xs text-amber-600">Без типа смены зарплата не рассчитается</p>
+              ) : isEditMixedEmployee && (
+                <p className="mt-1 text-xs text-slate-400">
+                  У этого сотрудника смешанный график — этот день будет оплачен как смена, а не по пятидневке
+                </p>
               )}
             </div>
           </div>

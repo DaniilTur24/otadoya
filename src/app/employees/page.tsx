@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { EMPLOYEE_TYPE_LABELS, USER_LINKED_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, USER_LINKED_TYPES, WORK_SCHEDULE_OPTIONS } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 
 // Заведующих (manager_trading / manager_fixed) создают на /users — туда же
@@ -26,6 +26,8 @@ interface Employee {
   isActive: boolean;
   pharmacies: Pharmacy[];
   fiveDayViaAttendance: boolean;
+  workSchedule: string | null;
+  fiveDaySalary: number | null;
 }
 
 export default function EmployeesPage() {
@@ -42,6 +44,8 @@ export default function EmployeesPage() {
     allowanceDescription: '',
     pharmacyIds: [] as number[],
     fiveDayViaAttendance: false,
+    workSchedule: 'shift' as string,
+    fiveDaySalary: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -100,6 +104,9 @@ export default function EmployeesPage() {
         allowance: form.allowance || 0,
         allowanceDescription: form.allowanceDescription.trim(),
         fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
+        workSchedule: form.employeeType === 'cleaner' ? null : form.workSchedule,
+        // Второй оклад имеет смысл только при смешанном графике
+        fiveDaySalary: form.workSchedule === 'mixed' ? form.fiveDaySalary || null : null,
       }),
     });
     if (res.ok) {
@@ -111,7 +118,7 @@ export default function EmployeesPage() {
           body: JSON.stringify({ pharmacyIds: form.pharmacyIds }),
         });
       }
-      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', allowance: '', allowanceDescription: '', pharmacyIds: [], fiveDayViaAttendance: false });
+      setForm({ name: '', employeeType: 'seller', baseSalary: '', shiftRate: '', allowance: '', allowanceDescription: '', pharmacyIds: [], fiveDayViaAttendance: false, workSchedule: 'shift', fiveDaySalary: '' });
       setShowForm(false);
       load();
     } else {
@@ -222,17 +229,41 @@ export default function EmployeesPage() {
               </div>
             )}
           </div>
-          {form.employeeType === 'seller' && (
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.fiveDayViaAttendance}
-                onChange={(e) => setForm((f) => ({ ...f, fiveDayViaAttendance: e.target.checked }))}
-                className="rounded"
-              />
-              Пятидневка — отмечается в табеле посещаемости
-              <span className="text-slate-400 font-normal">(вместо записи выручки на каждый рабочий день)</span>
-            </label>
+          {/* График заменил прежний чекбокс «пятидневка по табелю»: тот был «или/или»,
+              а один и тот же человек может часть месяца работать сменами, часть — по пятидневке. */}
+          {form.employeeType !== 'cleaner' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">График работы</label>
+                <select
+                  value={form.workSchedule}
+                  onChange={(e) => setForm((f) => ({ ...f, workSchedule: e.target.value }))}
+                  className="input"
+                >
+                  {WORK_SCHEDULE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">
+                  {form.workSchedule === 'shift'
+                    ? 'Отработанные дни берутся из смен в записях выручки'
+                    : form.workSchedule === 'mixed'
+                    ? 'Часть дней — смены в записях выручки, часть — отметки в табеле'
+                    : 'Отработанные дни берутся из табеля посещаемости'}
+                </p>
+              </div>
+              {form.workSchedule === 'mixed' && (
+                <div>
+                  <label className="label">Оклад за пятидневку (₸)</label>
+                  <AmountInput
+                    value={form.fiveDaySalary}
+                    onChange={(value) => setForm((f) => ({ ...f, fiveDaySalary: value }))}
+                    placeholder="как оклад за смены"
+                    className="input"
+                  />
+                </div>
+              )}
+            </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

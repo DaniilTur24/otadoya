@@ -15,6 +15,7 @@ vi.mock('@/lib/prisma', () => ({
     employee: { findUnique: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
     attendanceShift: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
+    dailyRevenueEntry: { findMany: vi.fn() },
     user: { findUnique: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
     $transaction: vi.fn(),
@@ -29,6 +30,7 @@ const findManyShifts = prisma.attendanceShift.findMany as unknown as ReturnType<
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findManyRevenueEntries = prisma.dailyRevenueEntry.findMany as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown, opts: { role?: string; userId?: number } = {}): NextRequest {
@@ -49,6 +51,7 @@ beforeEach(() => {
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
+  findManyRevenueEntries.mockReset().mockResolvedValue([]);
   transaction.mockReset().mockResolvedValue([]);
 });
 
@@ -126,6 +129,47 @@ describe('PUT /api/attendance/bulk', () => {
         { employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-10'] },
         { role: 'manager', userId: 5 }
       )
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * Массовая реконсиляция приходит одним запросом на весь месяц, поэтому конфликтный день
+ * нужно ловить по всему переданному набору дат сразу — иначе он проскочил бы и день
+ * оплатился бы дважды: и сменой в записи выручки, и отметкой табеля.
+ */
+describe('PUT /api/attendance/bulk — запрет двойной оплаты одного дня', () => {
+  it('отклоняет набор, если хотя бы на одну дату есть смена в записи выручки', async () => {
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date(2026, 5, 3) }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, year: 2026, month: 6, dates: ['2026-06-02', '2026-06-03'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/уже есть смена/);
+    expect(res.body.error).toContain('03.06.2026');
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('пропускает набор, если смены попадают на другие дни месяца', async () => {
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date(2026, 5, 20) }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, year: 2026, month: 6, dates: ['2026-06-02', '2026-06-03'] })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(transaction).toHaveBeenCalled();
+  });
+
+  it('снятие всех отметок не блокируется существующими сменами', async () => {
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date(2026, 5, 3) }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, year: 2026, month: 6, dates: [] })
     ) as unknown as { status: number };
 
     expect(res.status).toBe(200);

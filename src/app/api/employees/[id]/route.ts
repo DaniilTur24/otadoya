@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
-import { EMPLOYEE_TYPES, USER_LINKED_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPES, USER_LINKED_TYPES, WORK_SCHEDULES } from '@/lib/employee-types';
 
 function serialize(emp: Record<string, unknown>) {
   return {
@@ -9,6 +9,7 @@ function serialize(emp: Record<string, unknown>) {
     baseSalary: Number(emp.baseSalary),
     shiftRate: emp.shiftRate != null ? Number(emp.shiftRate) : null,
     allowance: Number(emp.allowance ?? 0),
+    fiveDaySalary: emp.fiveDaySalary != null ? Number(emp.fiveDaySalary) : null,
   };
 }
 
@@ -38,17 +39,20 @@ export async function PUT(
   if (auth) return auth;
 
   const employeeId = Number((await params).id);
-  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription, fiveDayViaAttendance } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription, fiveDayViaAttendance, workSchedule, fiveDaySalary } = await request.json();
 
   if (employeeType != null && !(employeeType in EMPLOYEE_TYPES)) {
     return NextResponse.json({ error: 'Некорректный тип сотрудника' }, { status: 400 });
+  }
+  if (workSchedule != null && !(workSchedule in WORK_SCHEDULES)) {
+    return NextResponse.json({ error: 'Некорректный график работы' }, { status: 400 });
   }
 
   // Заведующие/менеджеры (USER_LINKED_TYPES) привязаны к аккаунту User — имя/оклад/тип/доплата
   // редактируются только на /users, иначе карточка Employee расходится с привязанным аккаунтом.
   const current = await prisma.employee.findUnique({ where: { id: employeeId }, select: { employeeType: true } });
   if (current && USER_LINKED_TYPES.has(current.employeeType)) {
-    const blockedFields = { name, baseSalary, employeeType, allowance, allowanceDescription };
+    const blockedFields = { name, baseSalary, employeeType, allowance, allowanceDescription, workSchedule, fiveDaySalary };
     const touched = Object.entries(blockedFields).filter(([, v]) => v !== undefined);
     if (touched.length > 0) {
       return NextResponse.json(
@@ -67,6 +71,12 @@ export async function PUT(
   if (allowance !== undefined) data.allowance = String(allowance ?? 0);
   if (allowanceDescription !== undefined) data.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
   if (fiveDayViaAttendance !== undefined) data.fiveDayViaAttendance = Boolean(fiveDayViaAttendance);
+  // Пустой график/второй оклад сохраняются как NULL, а не как 'shift'/0: NULL означает
+  // «не выбрано явно», и расчёт остаётся ровно таким, каким был до появления полей.
+  if (workSchedule !== undefined) data.workSchedule = workSchedule || null;
+  if (fiveDaySalary !== undefined) {
+    data.fiveDaySalary = fiveDaySalary === '' || fiveDaySalary == null ? null : String(fiveDaySalary);
+  }
 
   const employee = await prisma.employee.update({
     where: { id: employeeId },

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { resolveWorkSchedule, usesAttendance } from '@/lib/employee-types';
 import { isYearMonthClosed } from '@/lib/closed-month';
+import { findShiftsOnDates } from '@/lib/attendance-validation';
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -36,10 +37,9 @@ export async function PUT(request: NextRequest) {
   const employee = await prisma.employee.findUnique({ where: { id: Number(employeeId) } });
   if (!employee) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
-  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType) && !isFiveDaySeller) {
+  if (!usesAttendance(resolveWorkSchedule(employee))) {
     return NextResponse.json(
-      { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
+      { error: 'Этому сотруднику нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }
     );
   }
@@ -62,6 +62,16 @@ export async function PUT(request: NextRequest) {
   if (invalidDate) {
     return NextResponse.json({ error: `Дата ${invalidDate} вне выбранного месяца` }, { status: 400 });
   }
+
+  // Ни один из проставляемых дней не должен уже быть оплачен сменой в записи выручки —
+  // при смешанном графике оба канала открыты, и день иначе оплатился бы дважды.
+  const conflictError = await findShiftsOnDates(
+    Number(employeeId),
+    (dates as string[]).map((d) => new Date(d)),
+    monthStart,
+    monthEnd,
+  );
+  if (conflictError) return NextResponse.json({ error: conflictError }, { status: 409 });
 
   const desired = new Set(dates as string[]);
   const pid = pharmacyId ? Number(pharmacyId) : null;

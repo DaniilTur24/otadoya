@@ -17,6 +17,7 @@ vi.mock('@/lib/prisma', () => ({
     closedMonth: { findUnique: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
     dailyRevenueEntry: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    attendanceShift: { findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -31,6 +32,7 @@ const findManyEmployeePharmacy = prisma.employeePharmacy.findMany as unknown as 
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueRevenueEntry = prisma.dailyRevenueEntry.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findFirstRevenueEntry = prisma.dailyRevenueEntry.findFirst as unknown as ReturnType<typeof vi.fn>;
+const findFirstAttendanceShift = prisma.attendanceShift.findFirst as unknown as ReturnType<typeof vi.fn>;
 const updateRevenueEntry = prisma.dailyRevenueEntry.update as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -62,6 +64,7 @@ beforeEach(() => {
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
   findUniqueRevenueEntry.mockReset();
   findFirstRevenueEntry.mockReset().mockResolvedValue(null);
+  findFirstAttendanceShift.mockReset().mockResolvedValue(null);
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   updateRevenueEntry.mockReset().mockResolvedValue({ id: 1, expenseItems: [] });
