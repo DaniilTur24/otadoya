@@ -5,6 +5,8 @@ import { useRouter, useParams } from 'next/navigation';
 import { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
+import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
+import { useSalaryImpact } from '@/hooks/useSalaryImpact';
 
 const EDITABLE_TYPES = [
   { value: 'seller', label: 'На кассе' },
@@ -129,6 +131,9 @@ export default function EmployeeDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  // Непустой список = открыт диалог с предупреждением о пересчёте задним числом
+  const [pendingFields, setPendingFields] = useState<string[]>([]);
+  const impact = useSalaryImpact();
 
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -182,34 +187,91 @@ export default function EmployeeDetailPage() {
     return () => controller.abort();
   }, [loadSalary]);
 
-  async function handleSave(e: React.FormEvent) {
+  // Тип, оклад и доплата заведующих/менеджеров редактируются на /users, чтобы не разойтись с аккаунтом
+  const isUserLinked = USER_LINKED_TYPES.has(employee?.employeeType ?? '');
+
+  function buildPayload() {
+    return {
+      name: form.name.trim(),
+      ...(isUserLinked ? {} : {
+        employeeType: form.employeeType,
+        baseSalary: form.baseSalary || 0,
+        allowance: form.allowance || 0,
+        allowanceDescription: form.allowanceDescription.trim(),
+      }),
+      shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
+      fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
+      isActive: form.isActive,
+    };
+  }
+
+  /**
+   * Какие из изменённых полей пересчитают зарплату за уже отработанные месяцы.
+   * Имя и описание доплаты сюда не входят — они на расчёт не влияют, и предупреждать
+   * о них значило бы приучить жать «Сохранить» не читая.
+   */
+  function changedSalaryFields(): string[] {
+    if (!employee) return [];
+    const money = (n: number) => n.toLocaleString('ru-RU');
+    const p = buildPayload() as Record<string, unknown>;
+    const changed: string[] = [];
+
+    if (p.employeeType !== undefined && p.employeeType !== employee.employeeType) {
+      const from = EMPLOYEE_TYPE_LABELS[employee.employeeType] ?? employee.employeeType;
+      const to = EMPLOYEE_TYPE_LABELS[p.employeeType as string] ?? String(p.employeeType);
+      changed.push(`Тип сотрудника: ${from} → ${to} (меняется сама формула расчёта)`);
+    }
+    if (p.baseSalary !== undefined && Number(p.baseSalary) !== Number(employee.baseSalary)) {
+      changed.push(`Оклад: ${money(Number(employee.baseSalary))} → ${money(Number(p.baseSalary))} ₸`);
+    }
+    if (p.allowance !== undefined && Number(p.allowance) !== Number(employee.allowance ?? 0)) {
+      changed.push(`Фиксированная доплата: ${money(Number(employee.allowance ?? 0))} → ${money(Number(p.allowance))} ₸`);
+    }
+    if (form.employeeType === 'cleaner' && Number(p.shiftRate ?? 0) !== Number(employee.shiftRate ?? 0)) {
+      changed.push(`Ставка за смену: ${money(Number(employee.shiftRate ?? 0))} → ${money(Number(p.shiftRate ?? 0))} ₸`);
+    }
+    if (p.fiveDayViaAttendance !== employee.fiveDayViaAttendance) {
+      changed.push(
+        p.fiveDayViaAttendance
+          ? 'Пятидневка по табелю: включается (смены будут читаться из табеля, а не из выручки)'
+          : 'Пятидневка по табелю: выключается (отметки табеля перестанут оплачиваться)'
+      );
+    }
+    if (!p.isActive && employee.isActive) {
+      changed.push('Сотрудник деактивируется — его зарплата исчезнет из отчётов за все незакрытые месяцы');
+    }
+    return changed;
+  }
+
+  function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    const changed = changedSalaryFields();
+    if (changed.length > 0) {
+      setPendingFields(changed);
+      impact.load(`/api/employees/${id}/salary-impact`);
+      return;
+    }
+    doSave();
+  }
+
+  async function doSave() {
+    setPendingFields([]);
+    impact.reset();
     setSaving(true);
     setSaveError('');
     setSaveSuccess(false);
-    const isUserLinked = USER_LINKED_TYPES.has(employee?.employeeType ?? '');
     const res = await fetch(`/api/employees/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: form.name.trim(),
-        // Тип, оклад и доплата заведующих/менеджеров редактируются на /users, чтобы не разойтись с аккаунтом
-        ...(isUserLinked ? {} : {
-          employeeType: form.employeeType,
-          baseSalary: form.baseSalary || 0,
-          allowance: form.allowance || 0,
-          allowanceDescription: form.allowanceDescription.trim(),
-        }),
-        shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
-        fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
-        isActive: form.isActive,
-      }),
+      body: JSON.stringify(buildPayload()),
     });
     if (res.ok) {
       const updated: Employee = await res.json();
       setEmployee(updated);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+      // Перечитываем зарплату: изменённый оклад/тип меняет цифры выбранного месяца прямо сейчас
+      loadSalary(new AbortController().signal);
     } else {
       const data = await res.json();
       setSaveError(data.error || 'Ошибка при сохранении');
@@ -820,6 +882,20 @@ export default function EmployeeDetailPage() {
           </div>
         )}
       </div>
+
+      <SalaryImpactDialog
+        open={pendingFields.length > 0}
+        title="Изменение пересчитает зарплату задним числом"
+        description={
+          `Зарплата ${employee.name} нигде не хранится — она считается заново из текущих настроек. ` +
+          'Поэтому изменение затронет не только будущие месяцы, но и все уже отработанные.'
+        }
+        changedFields={pendingFields}
+        months={impact.data?.months ?? null}
+        loading={impact.loading}
+        onConfirm={doSave}
+        onCancel={() => { setPendingFields([]); impact.reset(); }}
+      />
     </div>
   );
 }

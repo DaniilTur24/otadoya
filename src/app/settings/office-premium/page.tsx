@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AmountInput } from '@/components/AmountInput';
+import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
 
 interface Tier {
   id: number;
@@ -17,6 +18,16 @@ function emptyTier(): Tier {
   return { id: nextId--, fromAmount: '', toAmount: '', bonusAmount: '' };
 }
 
+/** Сравнимый слепок таблицы без id — id у новых строк временные и меняются при каждом добавлении */
+function serializeTiers(tiers: Tier[]): string {
+  return JSON.stringify(
+    tiers
+      .filter((t) => t.fromAmount !== '' && t.bonusAmount !== '')
+      .map((t) => [t.fromAmount, t.toAmount, t.bonusAmount])
+      .sort()
+  );
+}
+
 export default function OfficePremiumSettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -24,21 +35,24 @@ export default function OfficePremiumSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [tiers, setTiers] = useState<Tier[]>([]);
+  // Слепок таблицы на момент загрузки — по нему определяем, изменились ли ставки премии
+  const [originalTiers, setOriginalTiers] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     const data: { id: number; fromAmount: number; toAmount: number | null; bonusAmount: number }[] =
       await fetch('/api/office-premium-settings').then((r) => r.json());
-    setTiers(
-      data.length > 0
-        ? data.map((t) => ({
-            id: t.id,
-            fromAmount: String(t.fromAmount),
-            toAmount: t.toAmount != null ? String(t.toAmount) : '',
-            bonusAmount: String(t.bonusAmount),
-          }))
-        : [emptyTier()]
-    );
+    const loaded = data.length > 0
+      ? data.map((t) => ({
+          id: t.id,
+          fromAmount: String(t.fromAmount),
+          toAmount: t.toAmount != null ? String(t.toAmount) : '',
+          bonusAmount: String(t.bonusAmount),
+        }))
+      : [emptyTier()];
+    setTiers(loaded);
+    setOriginalTiers(serializeTiers(loaded));
     setLoading(false);
   }, []);
 
@@ -57,8 +71,20 @@ export default function OfficePremiumSettingsPage() {
     setTiers((ts) => ts.filter((t) => t.id !== id));
   }
 
-  async function save(e: React.FormEvent) {
+  function save(e: React.FormEvent) {
     e.preventDefault();
+    setError('');
+    // Таблица применяется ко ВСЕМ офисным сотрудникам и ко всем месяцам сразу —
+    // премия за прошлые месяцы пересчитается по новым ставкам.
+    if (serializeTiers(tiers) !== originalTiers) {
+      setConfirming(true);
+      return;
+    }
+    doSave();
+  }
+
+  async function doSave() {
+    setConfirming(false);
     setError('');
 
     const payload = tiers
@@ -172,6 +198,26 @@ export default function OfficePremiumSettingsPage() {
           </button>
         </div>
       </form>
+
+      <SalaryImpactDialog
+        open={confirming}
+        title="Изменение пересчитает премию всех офисных сотрудников"
+        description={
+          'Эта таблица — глобальная: она применяется ко всем сотрудникам с типом «Офис» и ко всем ' +
+          'месяцам сразу. Премия за уже отработанные месяцы будет пересчитана по новым ставкам.'
+        }
+        changedFields={['Таблица премий от общей выручки всех аптек']}
+        months={null}
+        loading={false}
+        extra={
+          <div className="rounded border border-amber-300 bg-amber-50 p-2.5 text-sm text-amber-900">
+            Затронет все незакрытые месяцы, где была выручка, — конкретный список здесь не
+            показывается, потому что таблица общая для всех аптек и всех периодов.
+          </div>
+        }
+        onConfirm={doSave}
+        onCancel={() => setConfirming(false)}
+      />
     </div>
   );
 }

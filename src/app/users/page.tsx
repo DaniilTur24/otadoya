@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AmountInput } from '@/components/AmountInput';
+import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
+import { useSalaryImpact } from '@/hooks/useSalaryImpact';
 
 const MANAGER_TYPE_OPTIONS = [
   { value: 'manager_trading', label: 'Заведующая (торгует)' },
@@ -12,6 +14,8 @@ const MANAGER_TYPE_OPTIONS = [
 interface Pharmacy { id: number; name: string }
 interface Manager {
   id: number;
+  /** id карточки Employee — по ней считается зарплата (может быть null у старых аккаунтов) */
+  employeeId: number | null;
   username: string;
   displayName: string;
   isActive: boolean;
@@ -38,6 +42,9 @@ export default function UsersPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingAccountType, setEditingAccountType] = useState<'user' | 'employee' | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // Непустой список = открыт диалог с предупреждением о пересчёте задним числом
+  const [pendingFields, setPendingFields] = useState<string[]>([]);
+  const impact = useSalaryImpact();
 
   const [form, setForm] = useState({
     username: '',
@@ -111,8 +118,61 @@ export default function UsersPage() {
     }));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  /**
+   * Какие из изменённых полей пересчитают зарплату за уже отработанные месяцы.
+   * При создании нового аккаунта список всегда пуст — у него нет прошлого.
+   */
+  function changedSalaryFields(): string[] {
+    if (editingId === null) return [];
+    const original = managers.find((m) => m.id === editingId);
+    if (!original) return [];
+
+    const money = (n: number) => n.toLocaleString('ru-RU');
+    const changed: string[] = [];
+
+    if (form.employeeType !== original.employeeType) {
+      const label = (v: string) => MANAGER_TYPE_OPTIONS.find((t) => t.value === v)?.label ?? v;
+      changed.push(`Роль: ${label(original.employeeType)} → ${label(form.employeeType)} (меняется формула расчёта)`);
+    }
+    if (Number(form.baseSalary || 0) !== Number(original.baseSalary)) {
+      changed.push(`Оклад: ${money(Number(original.baseSalary))} → ${money(Number(form.baseSalary || 0))} ₸`);
+    }
+    if (Number(form.allowance || 0) !== Number(original.allowance ?? 0)) {
+      changed.push(`Фиксированная доплата: ${money(Number(original.allowance ?? 0))} → ${money(Number(form.allowance || 0))} ₸`);
+    }
+    if (form.managerBonusShareEnabled !== original.managerBonusShareEnabled) {
+      changed.push(
+        form.managerBonusShareEnabled
+          ? '10% от бонусов аптеки: включается'
+          : '10% от бонусов аптеки: выключается'
+      );
+    }
+    if (form.ladderPremiumEnabled !== original.ladderPremiumEnabled) {
+      changed.push(
+        form.ladderPremiumEnabled
+          ? 'Лестничная премия по выручке аптеки: включается'
+          : 'Лестничная премия по выручке аптеки: выключается'
+      );
+    }
+    return changed;
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const changed = changedSalaryFields();
+    if (changed.length > 0) {
+      const original = managers.find((m) => m.id === editingId);
+      setPendingFields(changed);
+      // У старых аккаунтов без карточки Employee считать нечего — диалог покажется без списка месяцев
+      if (original?.employeeId) impact.load(`/api/employees/${original.employeeId}/salary-impact`);
+      return;
+    }
+    doSubmit();
+  }
+
+  async function doSubmit() {
+    setPendingFields([]);
+    impact.reset();
     setError('');
     setSaving(true);
 
@@ -482,6 +542,20 @@ export default function UsersPage() {
           </table>
         </div>
       )}
+
+      <SalaryImpactDialog
+        open={pendingFields.length > 0}
+        title="Изменение пересчитает зарплату задним числом"
+        description={
+          `Зарплата ${form.displayName || 'сотрудника'} нигде не хранится — она считается заново из ` +
+          'текущих настроек. Поэтому изменение затронет не только будущие месяцы, но и все уже отработанные.'
+        }
+        changedFields={pendingFields}
+        months={impact.data?.months ?? null}
+        loading={impact.loading}
+        onConfirm={doSubmit}
+        onCancel={() => { setPendingFields([]); impact.reset(); }}
+      />
     </div>
   );
 }
