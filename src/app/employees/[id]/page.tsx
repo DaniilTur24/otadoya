@@ -106,6 +106,10 @@ interface SalaryResult {
   surcharges: SurchargeEntry[];
   attendance: AttendanceEntry[];
   overtimeHours: number;
+  /** Месяц закрыт */
+  isClosed: boolean;
+  /** Суммы взяты из снимка, сделанного при закрытии месяца, а не пересчитаны заново */
+  isFrozen: boolean;
 }
 
 const MONTHS = [
@@ -522,6 +526,19 @@ export default function EmployeeDetailPage() {
       {/* Расчёт зарплаты */}
       <div className="card p-4 space-y-3">
         <h2 className="font-semibold text-slate-800">Расчёт зарплаты за месяц</h2>
+
+        {salary?.isFrozen && (
+          <div className="rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            🔒 Месяц закрыт — суммы зафиксированы на момент закрытия и больше не пересчитываются.
+            Изменение оклада или производственного календаря их не затронет.
+          </div>
+        )}
+        {salary?.isClosed && !salary.isFrozen && (
+          <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Месяц закрыт, но этого сотрудника нет в снимке — суммы считаются заново по текущим
+            настройкам и могут отличаться от того, что было при закрытии.
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-3">
           <div>

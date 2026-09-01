@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/api-auth';
+import { isYearMonthClosed } from '@/lib/closed-month';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,16 @@ export async function PUT(request: NextRequest) {
   }
   if (!Number.isInteger(workingDays) || workingDays < 1 || workingDays > 31) {
     return NextResponse.json({ error: 'Рабочих дней должно быть от 1 до 31' }, { status: 400 });
+  }
+
+  // Число рабочих дней — делитель оклада за пятидневку, то есть историческая величина
+  // конкретного месяца, а не текущая настройка. Менять её в закрытом месяце значит
+  // переписывать уже зафиксированный период.
+  if (await isYearMonthClosed(year, month)) {
+    return NextResponse.json(
+      { error: 'Месяц закрыт — рабочие дни зафиксированы. Сначала откройте месяц в разделе «Закрытие месяца»' },
+      { status: 423 }
+    );
   }
 
   const entry = await prisma.workingCalendar.upsert({

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 import {
   calculateEmployeeMonthlySalary,
   getEmployeeMonthlyShifts,
@@ -6,6 +7,7 @@ import {
   getEmployeeMonthlySurcharges,
   getEmployeeMonthlyAttendance,
 } from '@/lib/salary-calculator';
+import { parseSnapshot, findStoredSalary } from '@/lib/salary-snapshot';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
@@ -26,17 +28,47 @@ export async function GET(
 
   const employeeId = Number((await params).id);
 
-  const [summary, shifts, advances, surcharges, attendance] = await Promise.all([
+  // Списки смен/отметок/авансов читаются вживую и для закрытого месяца тоже: это реальные
+  // строки в БД, а запись в закрытый месяц запрещена, поэтому они уже неизменны. Замораживать
+  // нужно только вычисляемые суммы — они зависят от текущих настроек (оклад, календарь, премии).
+  const [liveSummary, shifts, advances, surcharges, attendance, closedMonth] = await Promise.all([
     calculateEmployeeMonthlySalary(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyShifts(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyAdvances(employeeId, month, year, pharmacyId),
     getEmployeeMonthlySurcharges(employeeId, month, year, pharmacyId),
     getEmployeeMonthlyAttendance(employeeId, month, year, pharmacyId),
+    prisma.closedMonth.findUnique({ where: { year_month: { year, month } } }),
   ]);
 
-  if (!summary) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
+  if (!liveSummary) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
   const overtimeHours = attendance.reduce((sum, a) => sum + a.overtimeHours, 0);
 
-  return NextResponse.json({ ...summary, shifts, advances, surcharges, attendance, overtimeHours });
+  // Месяц закрыт — отдаём зафиксированные при закрытии суммы. Если сотрудника в снимке нет
+  // (создан уже после закрытия, или снимок сделан до появления зарплатной секции), считаем
+  // вживую и честно помечаем это, а не выдаём живой расчёт за замороженный.
+  let summary = liveSummary;
+  let isFrozen = false;
+  if (closedMonth) {
+    const stored = findStoredSalary(
+      parseSnapshot(closedMonth.snapshotJson).employees,
+      employeeId,
+      pharmacyId ?? null,
+    );
+    if (stored) {
+      summary = stored;
+      isFrozen = true;
+    }
+  }
+
+  return NextResponse.json({
+    ...summary,
+    shifts,
+    advances,
+    surcharges,
+    attendance,
+    overtimeHours,
+    isClosed: !!closedMonth,
+    isFrozen,
+  });
 }
