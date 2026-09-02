@@ -49,6 +49,7 @@ interface RevenueEntry {
   employeeName: string;
   shiftType: string | null;
   status: string;
+  submittedById: number | null;
   excludedFromReport: boolean;
 }
 
@@ -110,12 +111,37 @@ const ROW_LABEL: Record<string, string> = Object.fromEntries(
   MONTHLY_REPORT_ROWS.filter((r) => !r.section).map((r) => [r.key, r.label])
 );
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'На проверке',
+  approved: 'Подтверждена',
+  rejected: 'Отклонена',
+};
+const STATUS_CLASSES: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-800',
+  approved: 'bg-green-100 text-green-800',
+  rejected: 'bg-red-100 text-red-800',
+};
+
+function summarizeEntries(list: RevenueEntry[]) {
+  const totalRevenue    = list.reduce((s, e) => s + e.totalRevenue, 0);
+  const totalCash       = list.reduce((s, e) => s + e.cashRevenue, 0);
+  const totalIncomes    = list.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
+  const totalBonuses    = list.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
+  const totalAdvances   = list.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
+  const totalSurcharges = list.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
+  const totalExpenses   = list.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
+  const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
+  const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
+  return { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet };
+}
+
 export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
   const [role, setRole] = useState<string | null>(null);
+  const [userId, setUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -157,6 +183,7 @@ export default function RevenueListPage() {
     const roleRes = await fetch('/api/auth/me').then((r) => r.json());
     const currentRole: string = roleRes.role ?? '';
     setRole(currentRole);
+    setUserId(typeof roleRes.userId === 'number' ? roleRes.userId : null);
 
     const isModeratorRole = currentRole === 'admin' || currentRole === 'bookkeeper';
 
@@ -348,7 +375,7 @@ export default function RevenueListPage() {
 
   function toggleSelectAll() {
     setSelectedIds((s) =>
-      s.size === visibleEntries.length ? new Set() : new Set(visibleEntries.map((e) => e.id))
+      s.size === manageableEntries.length ? new Set() : new Set(manageableEntries.map((e) => e.id))
     );
   }
 
@@ -501,6 +528,34 @@ export default function RevenueListPage() {
     ? entries.filter((e) => String(e.employeeId) === filterEmployee)
     : entries;
 
+  // Заведующий может изменять/удалять только свою же запись, пока она на проверке —
+  // после подтверждения/отклонения бухгалтером кнопки скрываются (см. canModifyEntry на сервере).
+  function canManageEntry(entry: RevenueEntry) {
+    if (role === 'admin' || role === 'bookkeeper') return true;
+    if (role === 'manager') return entry.status === 'pending' && entry.submittedById === userId;
+    return false;
+  }
+
+  const manageableEntries = visibleEntries.filter(canManageEntry);
+
+  // Мини-отчёт по аптекам (admin/bookkeeper) — сколько выручки в общем и сколько наличных
+  // должно быть на руках, по тем же записям, что сейчас видны в таблице ниже.
+  const pharmacySummaries = (() => {
+    const map = new Map<number, { pharmacyName: string; entries: RevenueEntry[] }>();
+    for (const e of visibleEntries) {
+      const existing = map.get(e.pharmacy.id);
+      if (existing) existing.entries.push(e);
+      else map.set(e.pharmacy.id, { pharmacyName: e.pharmacy.name, entries: [e] });
+    }
+    return Array.from(map.entries())
+      .map(([pharmacyId, { pharmacyName, entries: list }]) => ({
+        pharmacyId,
+        pharmacyName,
+        summary: summarizeEntries(list),
+      }))
+      .sort((a, b) => a.pharmacyName.localeCompare(b.pharmacyName, 'ru'));
+  })();
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -510,6 +565,57 @@ export default function RevenueListPage() {
       <p className="text-slate-500 text-sm mb-4">
         Все введённые бухгалтером записи. Нажмите «Изменить» для редактирования.
       </p>
+
+      {/* Мини-отчёт по аптекам — только для admin/bookkeeper */}
+      {(role === 'admin' || role === 'bookkeeper') && (
+        <div className="card p-3 mb-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-2">Мини-отчёт по аптекам</h2>
+          {pharmacySummaries.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">Нет данных за выбранный период</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-500 text-xs">
+                    <th className="text-left font-medium py-1 pr-4">Аптека</th>
+                    <th className="text-right font-medium py-1 pr-4">Всего</th>
+                    <th className="text-right font-medium py-1">Наличными на руках</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pharmacySummaries.map((row) => (
+                    <tr key={row.pharmacyId}>
+                      <td className="py-1.5 pr-4 font-medium text-slate-800 whitespace-nowrap">{row.pharmacyName}</td>
+                      <td className="py-1.5 pr-4 text-right">
+                        <strong className={row.summary.total >= 0 ? 'text-green-700' : 'text-red-700'}>
+                          {fmt(row.summary.total)}
+                        </strong>
+                      </td>
+                      <td className="py-1.5 text-right">
+                        <strong className={row.summary.cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>
+                          {fmt(row.summary.cashNet)}
+                        </strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {pharmacySummaries.length > 1 && (() => {
+                  const overall = summarizeEntries(visibleEntries);
+                  return (
+                    <tfoot>
+                      <tr className="border-t border-slate-300">
+                        <td className="py-1.5 pr-4 font-semibold text-slate-800">Итого</td>
+                        <td className="py-1.5 pr-4 text-right font-semibold text-green-700">{fmt(overall.total)}</td>
+                        <td className="py-1.5 text-right font-semibold text-green-700">{fmt(overall.cashNet)}</td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Панель модерации — только для admin/bookkeeper */}
       {(role === 'admin' || role === 'bookkeeper') && pendingEntries.length > 0 && (
@@ -1021,7 +1127,7 @@ export default function RevenueListPage() {
                     <input
                       type="checkbox"
                       className="rounded"
-                      checked={visibleEntries.length > 0 && selectedIds.size === visibleEntries.length}
+                      checked={manageableEntries.length > 0 && selectedIds.size === manageableEntries.length}
                       onChange={toggleSelectAll}
                     />
                   </th>
@@ -1037,6 +1143,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
+                  <th className="th">Статус</th>
                   <th className="th sticky right-0 z-20 border-l border-slate-300"></th>
                 </tr>
               </thead>
@@ -1059,12 +1166,14 @@ export default function RevenueListPage() {
                         }}
                         onMouseLeave={() => setTooltipEntry(null)}>
                         <td className="td">
-                          <input
-                            type="checkbox"
-                            className="rounded"
-                            checked={selectedIds.has(entry.id)}
-                            onChange={() => toggleSelect(entry.id)}
-                          />
+                          {canManageEntry(entry) && (
+                            <input
+                              type="checkbox"
+                              className="rounded"
+                              checked={selectedIds.has(entry.id)}
+                              onChange={() => toggleSelect(entry.id)}
+                            />
+                          )}
                         </td>
                         <td className="td whitespace-nowrap">{fmtDate(entry.date)}</td>
                         <td className="td font-medium whitespace-nowrap">{entry.pharmacy.name}</td>
@@ -1129,6 +1238,13 @@ export default function RevenueListPage() {
                             </span>
                           )}
                         </td>
+                        <td className="td">
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+                            STATUS_CLASSES[entry.status] ?? 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {STATUS_LABELS[entry.status] ?? entry.status}
+                          </span>
+                        </td>
                         <td
                           className={`td sticky right-0 z-10 border-l border-slate-300 ${
                             editingId === entry.id
@@ -1138,7 +1254,7 @@ export default function RevenueListPage() {
                         >
                           {editingId === entry.id ? (
                             <span className="text-xs text-slate-700 font-medium whitespace-nowrap">Редактируется</span>
-                          ) : (
+                          ) : canManageEntry(entry) ? (
                             <div className="flex gap-1">
                               <button className="btn-secondary text-xs" onClick={() => startEdit(entry)}>
                                 Изменить
@@ -1147,6 +1263,8 @@ export default function RevenueListPage() {
                                 Удалить
                               </button>
                             </div>
+                          ) : (
+                            <span className="text-xs text-slate-300 whitespace-nowrap">—</span>
                           )}
                         </td>
                       </tr>
@@ -1160,15 +1278,8 @@ export default function RevenueListPage() {
 
           {/* Итого */}
           {(() => {
-            const totalRevenue  = visibleEntries.reduce((s, e) => s + e.totalRevenue, 0);
-            const totalCash     = visibleEntries.reduce((s, e) => s + e.cashRevenue, 0);
-            const totalIncomes  = visibleEntries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
-            const totalBonuses  = visibleEntries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
-            const totalAdvances = visibleEntries.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
-            const totalSurcharges = visibleEntries.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
-            const totalExpenses = visibleEntries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
-            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
-            const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
+            const { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet } =
+              summarizeEntries(visibleEntries);
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
                 <span className="text-slate-500">Итого по выбранным записям:</span>
