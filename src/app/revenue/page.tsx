@@ -1084,7 +1084,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
                   <th className="th">Статус</th>
-                  <th className="th sticky right-0 z-20 border-l border-slate-300"></th>
+                  <th className="th border-l border-slate-300"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1186,10 +1186,8 @@ export default function RevenueListPage() {
                           </span>
                         </td>
                         <td
-                          className={`td sticky right-0 z-10 border-l border-slate-300 ${
-                            editingId === entry.id
-                              ? 'bg-slate-100'
-                              : 'bg-white group-hover:bg-slate-50'
+                          className={`td border-l border-slate-300 ${
+                            editingId === entry.id ? 'bg-slate-100' : ''
                           }`}
                         >
                           {editingId === entry.id ? (
