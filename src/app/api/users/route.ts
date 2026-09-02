@@ -19,6 +19,9 @@ function serializeLoginlessManager(e: {
 }) {
   return {
     id: -e.id,
+    // Карточка Employee, по которой считается зарплата — нужна интерфейсу, чтобы
+    // спросить «какие месяцы пересчитает это изменение» (/api/employees/:id/salary-impact)
+    employeeId: e.id,
     username: '',
     displayName: e.name,
     isActive: e.isActive,
@@ -52,6 +55,7 @@ export async function GET(request: NextRequest) {
 
   const withLogin = users.map((u) => ({
     id: u.id,
+    employeeId: u.employeeId,
     username: u.username,
     displayName: u.displayName,
     isActive: u.isActive,

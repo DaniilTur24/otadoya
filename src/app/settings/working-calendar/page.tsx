@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
 
 const MONTHS = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -13,13 +14,26 @@ interface CalendarEntry {
   workingDays: number;
 }
 
+interface ImpactMonth {
+  year: number;
+  month: number;
+  shifts: number;
+  attendance: number;
+  isClosed: boolean;
+}
+
 export default function WorkingCalendarPage() {
   const router = useRouter();
   const [year, setYear] = useState(new Date().getFullYear());
   const [entries, setEntries] = useState<Record<number, number>>({});
+  // Значения на момент загрузки — по ним определяем, изменилось ли число рабочих дней
+  const [originalEntries, setOriginalEntries] = useState<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<number | null>(null);
   const [savedMonths, setSavedMonths] = useState<Set<number>>(new Set());
+  const [pendingMonth, setPendingMonth] = useState<number | null>(null);
+  const [impactMonths, setImpactMonths] = useState<ImpactMonth[] | null>(null);
+  const [impactLoading, setImpactLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -28,21 +42,52 @@ export default function WorkingCalendarPage() {
     const map: Record<number, number> = {};
     for (const e of data) map[e.month] = e.workingDays;
     setEntries(map);
+    setOriginalEntries(map);
     setLoading(false);
   }, [year]);
 
   useEffect(() => { load(); }, [load]);
 
-  async function saveMonth(month: number) {
+  /**
+   * Сколько отметок табеля уже стоит в этом месяце — именно они делятся на число рабочих
+   * дней, поэтому их количество показывает реальный масштаб пересчёта.
+   */
+  async function loadImpact(month: number) {
+    setImpactLoading(true);
+    setImpactMonths(null);
+    try {
+      const [shifts, closed] = await Promise.all([
+        fetch(`/api/attendance?year=${year}&month=${month}`).then((r) => (r.ok ? r.json() : [])),
+        fetch(`/api/months/close?year=${year}&month=${month}`)
+          .then((r) => (r.ok ? r.json() : { isClosed: false }))
+          .catch(() => ({ isClosed: false })),
+      ]);
+      setImpactMonths([
+        { year, month, shifts: 0, attendance: Array.isArray(shifts) ? shifts.length : 0, isClosed: closed.isClosed === true },
+      ]);
+    } finally {
+      setImpactLoading(false);
+    }
+  }
+
+  function saveMonth(month: number) {
     const days = entries[month];
     if (!days || days < 1 || days > 31) return;
-    if (
-      !window.confirm(
-        `Изменение рабочих дней за ${MONTHS[month - 1]} ${year} пересчитает зарплату за этот месяц для табельных и пятидневных сотрудников. Продолжить?`
-      )
-    ) {
+    // Первое заполнение пустого месяца ничего не пересчитывает — до этого зарплата
+    // за пятидневку вообще не начислялась (делителя не было).
+    if (originalEntries[month] !== undefined && originalEntries[month] !== days) {
+      setPendingMonth(month);
+      loadImpact(month);
       return;
     }
+    doSaveMonth(month);
+  }
+
+  async function doSaveMonth(month: number) {
+    const days = entries[month];
+    if (!days || days < 1 || days > 31) return;
+    setPendingMonth(null);
+    setImpactMonths(null);
     setSaving(month);
     await fetch('/api/working-calendar', {
       method: 'PUT',
@@ -50,6 +95,7 @@ export default function WorkingCalendarPage() {
       body: JSON.stringify({ year, month, workingDays: days }),
     });
     setSaving(null);
+    setOriginalEntries((prev) => ({ ...prev, [month]: days }));
     setSavedMonths((s) => new Set(s).add(month));
     setTimeout(() => setSavedMonths((s) => { const n = new Set(s); n.delete(month); return n; }), 2000);
   }
@@ -127,6 +173,25 @@ export default function WorkingCalendarPage() {
           })}
         </div>
       )}
+
+      <SalaryImpactDialog
+        open={pendingMonth !== null}
+        title="Изменение рабочих дней пересчитает зарплату за этот месяц"
+        description={
+          'Оклад за пятидневку делится на число рабочих дней месяца. Изменив его, вы измените ' +
+          'сумму за каждый отработанный день у всех табельных и пятидневных сотрудников.'
+        }
+        changedFields={
+          pendingMonth !== null
+            ? [`Рабочих дней в ${MONTHS[pendingMonth - 1].toLowerCase()} ${year}: ` +
+               `${originalEntries[pendingMonth]} → ${entries[pendingMonth]}`]
+            : []
+        }
+        months={impactMonths}
+        loading={impactLoading}
+        onConfirm={() => pendingMonth !== null && doSaveMonth(pendingMonth)}
+        onCancel={() => { setPendingMonth(null); setImpactMonths(null); }}
+      />
     </div>
   );
 }

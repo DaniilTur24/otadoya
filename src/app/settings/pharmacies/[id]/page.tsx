@@ -4,6 +4,16 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AmountInput } from '@/components/AmountInput';
+import { SalaryImpactDialog, type ImpactMonth } from '@/components/SalaryImpactDialog';
+import { useSalaryImpact } from '@/hooks/useSalaryImpact';
+
+interface ImpactEmployee { id: number; name: string; employeeType: string }
+interface PharmacyImpact {
+  months: ImpactMonth[];
+  totalRecords: number;
+  ladderEmployees: ImpactEmployee[];
+  shiftEmployees: ImpactEmployee[];
+}
 
 interface Pharmacy {
   id: number;
@@ -27,6 +37,9 @@ export default function PharmacyEditPage() {
   const [saved, setSaved]         = useState(false);
   const [error, setError]         = useState('');
   const [original, setOriginal]   = useState<Pharmacy | null>(null);
+  // Непустой список = открыт диалог с предупреждением о пересчёте задним числом
+  const [pendingFields, setPendingFields] = useState<string[]>([]);
+  const impact = useSalaryImpact<PharmacyImpact>();
 
   const [form, setForm] = useState({
     name: '',
@@ -63,9 +76,55 @@ export default function PharmacyEditPage() {
     setSaved(false);
   }
 
-  async function save(e: React.FormEvent) {
+  /**
+   * Пороги премии и переключатель средней выручки применяются к любому месяцу, который
+   * система считает, — включая уже отработанные. Предупреждаем только если эти поля
+   * реально изменились: правка названия или ключевых слов на зарплату не влияет.
+   */
+  function changedSalaryFields(): string[] {
+    if (!original) return [];
+    const money = (v: string) => (v === '' ? '—' : Number(v).toLocaleString('ru-RU'));
+    const asStr = (n: number | null) => (n != null ? String(n) : '');
+    const changed: string[] = [];
+
+    const ladderFields: { key: keyof typeof form; original: number | null; label: string }[] = [
+      { key: 'managerPremiumThreshold',  original: original.managerPremiumThreshold,  label: 'Порог премии' },
+      { key: 'managerPremiumBase',       original: original.managerPremiumBase,       label: 'Базовая премия' },
+      { key: 'managerPremiumStepAmount', original: original.managerPremiumStepAmount, label: 'Шаг выручки' },
+      { key: 'managerPremiumStepBonus',  original: original.managerPremiumStepBonus,  label: 'Премия за шаг' },
+    ];
+    for (const f of ladderFields) {
+      const next = String(form[f.key] ?? '');
+      if (next !== asStr(f.original)) {
+        changed.push(`${f.label}: ${money(asStr(f.original))} → ${money(next)} ₸`);
+      }
+    }
+
+    if (form.poolAverageRevenuePremium !== original.poolAverageRevenuePremium) {
+      changed.push(
+        form.poolAverageRevenuePremium
+          ? 'Премия от средней выручки аптеки: включается (вместо личной выручки каждой смены)'
+          : 'Премия от средней выручки аптеки: выключается (вернётся расчёт по личной выручке)'
+      );
+    }
+    return changed;
+  }
+
+  function save(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) { setError('Название обязательно'); return; }
+    const changed = changedSalaryFields();
+    if (changed.length > 0) {
+      setPendingFields(changed);
+      impact.load(`/api/pharmacies/${id}/salary-impact`);
+      return;
+    }
+    doSave();
+  }
+
+  async function doSave() {
+    setPendingFields([]);
+    impact.reset();
     setSaving(true);
     setError('');
 
@@ -249,6 +308,39 @@ export default function PharmacyEditPage() {
           </button>
         </div>
       </form>
+
+      <SalaryImpactDialog
+        open={pendingFields.length > 0}
+        title="Изменение пересчитает зарплату сотрудников аптеки"
+        description={
+          `Премии аптеки «${original?.name ?? ''}» считаются заново при каждом открытии отчёта, ` +
+          'из текущих настроек. Новые значения применятся и к уже отработанным месяцам.'
+        }
+        changedFields={pendingFields}
+        months={impact.data?.months ?? null}
+        loading={impact.loading}
+        extra={(() => {
+          const affected = form.poolAverageRevenuePremium !== original?.poolAverageRevenuePremium
+            ? [...(impact.data?.ladderEmployees ?? []), ...(impact.data?.shiftEmployees ?? [])]
+            : (impact.data?.ladderEmployees ?? []);
+          const unique = [...new Map(affected.map((e) => [e.id, e])).values()];
+          if (unique.length === 0) return null;
+          return (
+            <div className="rounded border border-slate-200 bg-slate-50 p-2.5">
+              <div className="label mb-1.5">Кого затронет ({unique.length})</div>
+              <div className="flex flex-wrap gap-1.5">
+                {unique.map((e) => (
+                  <span key={e.id} className="text-xs bg-white border border-slate-300 rounded px-1.5 py-0.5 text-slate-700">
+                    {e.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+        onConfirm={doSave}
+        onCancel={() => { setPendingFields([]); impact.reset(); }}
+      />
     </div>
   );
 }

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
+import { isMonthClosed } from '@/lib/closed-month';
+
+const CLOSED_MONTH_ERROR =
+  'Месяц закрыт — изменить табель нельзя. Сначала откройте месяц в разделе «Закрытие месяца»';
 
 // PATCH /api/attendance/[id] { overtimeHours } — правит часы переработки уже отмеченного дня
 export async function PATCH(
@@ -20,6 +24,10 @@ export async function PATCH(
     if (!shift.pharmacyId || !allowedIds?.includes(shift.pharmacyId)) {
       return NextResponse.json({ error: 'Доступ запрещён' }, { status: 403 });
     }
+  }
+
+  if (await isMonthClosed(shift.date)) {
+    return NextResponse.json({ error: CLOSED_MONTH_ERROR }, { status: 423 });
   }
 
   const { overtimeHours } = await request.json();
@@ -53,6 +61,10 @@ export async function DELETE(
     if (!shift.pharmacyId || !allowedIds?.includes(shift.pharmacyId)) {
       return NextResponse.json({ error: 'Доступ запрещён' }, { status: 403 });
     }
+  }
+
+  if (await isMonthClosed(shift.date)) {
+    return NextResponse.json({ error: CLOSED_MONTH_ERROR }, { status: 423 });
   }
 
   await prisma.attendanceShift.delete({ where: { id } });

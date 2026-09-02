@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
 import { validateShiftEmployeeType, validateUniqueShift, validateNonNegativeAmounts } from '@/lib/revenue-validation';
+import { isMonthClosed } from '@/lib/closed-month';
 
 async function canModifyEntry(
   request: Request,
@@ -15,13 +16,6 @@ async function canModifyEntry(
     return entry.submittedById === userId && entry.status === 'pending';
   }
   return false;
-}
-
-async function isMonthClosed(date: Date): Promise<boolean> {
-  const year  = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const closed = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
-  return !!closed;
 }
 
 function serialize(entry: Record<string, unknown>) {

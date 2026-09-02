@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { isMonthClosed } from '@/lib/closed-month';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,16 @@ export async function POST(request: NextRequest) {
   const { employeeId, date, pharmacyId, overtimeHours } = await request.json();
   if (!employeeId || !date) {
     return NextResponse.json({ error: 'employeeId и date обязательны' }, { status: 400 });
+  }
+
+  // Отметка табеля — это отработанный день, из которого считается зарплата. В закрытом
+  // месяце суммы уже зафиксированы, поэтому новая отметка туда попасть не должна:
+  // она разошлась бы со снимком (та же защита, что и у записи выручки).
+  if (await isMonthClosed(new Date(date))) {
+    return NextResponse.json(
+      { error: 'Месяц закрыт — отметить смену нельзя. Сначала откройте месяц в разделе «Закрытие месяца»' },
+      { status: 423 }
+    );
   }
 
   const role = getRequestRole(request);

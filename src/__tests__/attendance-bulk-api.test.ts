@@ -16,6 +16,7 @@ vi.mock('@/lib/prisma', () => ({
     userPharmacy: { findMany: vi.fn() },
     attendanceShift: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
     user: { findUnique: vi.fn() },
+    closedMonth: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -27,6 +28,7 @@ const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<t
 const findManyShifts = prisma.attendanceShift.findMany as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown, opts: { role?: string; userId?: number } = {}): NextRequest {
@@ -46,7 +48,24 @@ beforeEach(() => {
   findManyShifts.mockReset().mockResolvedValue([]);
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
+  findUniqueClosedMonth.mockReset().mockResolvedValue(null);
   transaction.mockReset().mockResolvedValue([]);
+});
+
+// Массовая реконсиляция переписывает весь месяц целиком, включая удаление отметок —
+// в закрытом месяце это разошлось бы с зафиксированной зарплатой.
+describe('PUT /api/attendance/bulk — запрет записи в закрытый месяц', () => {
+  it('отклоняет массовое обновление закрытого месяца с 423', async () => {
+    findUniqueClosedMonth.mockResolvedValue({ id: 1, year: 2026, month: 6 });
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, year: 2026, month: 6, dates: ['2026-06-01'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(423);
+    expect(res.body.error).toMatch(/Месяц закрыт/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
 });
 
 describe('PUT /api/attendance/bulk', () => {

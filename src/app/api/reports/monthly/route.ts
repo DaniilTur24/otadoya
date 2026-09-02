@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeMonthlyData } from '@/lib/monthly-report-builder';
+import { parseSnapshot } from '@/lib/salary-snapshot';
 import { requireAdmin } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
@@ -15,9 +16,11 @@ export async function GET(request: NextRequest) {
 
   const closed = await prisma.closedMonth.findUnique({ where: { year_month: { year, month } } });
   if (closed) {
-    const snapshot = JSON.parse(closed.snapshotJson) as Record<string, Record<string, number>>;
+    // Снимок теперь хранит и разбивку по сотрудникам (см. salary-snapshot.ts); отчёту нужна
+    // только часть по аптекам, а parseSnapshot умеет читать и старый формат без обёртки.
+    const { pharmacies: snapshotData } = parseSnapshot(closed.snapshotJson);
     const pharmacies = await prisma.pharmacy.findMany({ orderBy: { name: 'asc' } });
-    return NextResponse.json({ pharmacies, isClosed: true, closedAt: closed.closedAt, snapshotData: snapshot, overrideMap: {} });
+    return NextResponse.json({ pharmacies, isClosed: true, closedAt: closed.closedAt, snapshotData, overrideMap: {} });
   }
 
   const { pharmacies, systemData, overrideMap } = await computeMonthlyData(year, month);

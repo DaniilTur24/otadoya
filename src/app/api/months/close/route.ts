@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { computeMonthlyData, buildMonthlySnapshot } from '@/lib/monthly-report-builder';
+import { buildEmployeeSalarySnapshot, serializeSnapshot } from '@/lib/salary-snapshot';
 import { requireAdmin, requireAnyRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
@@ -55,9 +56,12 @@ export async function POST(request: NextRequest) {
 
     const { pharmacies, systemData, overrideMap } = await computeMonthlyData(year, month);
     const snapshot = buildMonthlySnapshot(pharmacies, systemData, overrideMap);
+    // Разбивка по сотрудникам замораживается вместе с отчётом — иначе повышение оклада или
+    // правка производственного календаря изменили бы карточку за уже закрытый месяц.
+    const employeeSalaries = await buildEmployeeSalarySnapshot(year, month);
 
     const record = await prisma.closedMonth.create({
-      data: { year, month, snapshotJson: JSON.stringify(snapshot) },
+      data: { year, month, snapshotJson: serializeSnapshot(snapshot, employeeSalaries) },
     });
 
     return NextResponse.json({ ok: true, closedAt: record.closedAt });

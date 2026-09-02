@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
 import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { isYearMonthClosed } from '@/lib/closed-month';
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -21,6 +22,15 @@ export async function PUT(request: NextRequest) {
 
   if (!employeeId || !year || !month || !Array.isArray(dates)) {
     return NextResponse.json({ error: 'employeeId, year, month и dates обязательны' }, { status: 400 });
+  }
+
+  // Реконсиляция затрагивает весь месяц сразу (в том числе удаляет отметки) — в закрытом
+  // месяце это переписало бы уже зафиксированную зарплату.
+  if (await isYearMonthClosed(Number(year), Number(month))) {
+    return NextResponse.json(
+      { error: 'Месяц закрыт — изменить табель нельзя. Сначала откройте месяц в разделе «Закрытие месяца»' },
+      { status: 423 }
+    );
   }
 
   const employee = await prisma.employee.findUnique({ where: { id: Number(employeeId) } });
