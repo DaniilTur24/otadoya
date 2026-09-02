@@ -1,15 +1,7 @@
 import { prisma } from '@/lib/prisma';
 export { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 export { EMPLOYEE_TYPE_LABELS } from '@/lib/employee-types';
-import {
-  MANAGER_BONUS_SHARE_PERCENT,
-  MANAGER_TYPES,
-  USER_LINKED_TYPES,
-  resolveWorkSchedule,
-  usesAttendance,
-  usesRevenueShifts,
-  type WorkSchedule,
-} from '@/lib/employee-types';
+import { MANAGER_BONUS_SHARE_PERCENT, USER_LINKED_TYPES } from '@/lib/employee-types';
 
 export interface MonthlySalaryResult {
   employeeId: number;
@@ -18,10 +10,6 @@ export interface MonthlySalaryResult {
   month: number;
   year: number;
   baseSalary: number;
-  /** График работы, по которому шёл расчёт (выведенный, если явно не выбран) */
-  workSchedule: WorkSchedule;
-  /** Оклад, применённый к пятидневным дням — равен baseSalary, если второй оклад не задан */
-  fiveDaySalary: number;
   dayShiftsCount: number;
   fullDayShiftsCount: number;
   fiveDayShiftsCount: number;
@@ -361,10 +349,6 @@ async function computeSurcharges(
 }
 
 const EMPTY_RESULT_BASE = {
-  // Умолчание подходит для cleaner/office — оба отмечаются только в табеле. Расчёт по
-  // графику (calculateScheduleBasedSalary) перекрывает оба поля своими значениями.
-  workSchedule: 'five_day' as WorkSchedule,
-  fiveDaySalary: 0,
   dayShiftsCount: 0,
   fullDayShiftsCount: 0,
   fiveDayShiftsCount: 0,
@@ -392,44 +376,30 @@ const EMPTY_RESULT_BASE = {
 };
 
 /**
- * Единый расчёт для всех, чья зарплата складывается из отработанных дней: продавца (seller) и
- * всех трёх «управленческих» типов (manager_trading / manager_fixed / pharmacy_manager).
+ * Зарплата продавца (seller) и заведующей, которая торгует (manager_trading).
  *
- * Раньше это были три почти дословно одинаковые функции, и различал их только источник
- * отработанных дней. Но источник — свойство графика человека, а не его должности: один и тот же
- * человек может в одни дни выходить на суточную/дневную смену, а в другие — по пятидневке.
- * Поэтому источник берётся из Employee.workSchedule (см. resolveWorkSchedule):
- *
- *   shift    — только смены в записях выручки:
- *              salaryFromFullDayShifts = baseSalary / 10 * fullDayShiftsCount
- *              salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
- *   five_day — только отметки табеля:
- *              salaryFromFiveDayShifts = fiveDayBase / workingDays * attendanceShiftsCount
- *   mixed    — обе части сразу, каждая по своей формуле и по своему окладу.
- *
- * Оклад за пятидневку (fiveDayBase) берётся из Employee.fiveDaySalary; если он не задан —
- * из baseSalary, то есть как считалось до появления второго оклада.
+ * Окладная часть в обоих случаях считается по сменам, привязанным к записям выручки:
+ *   salaryFromFullDayShifts = baseSalary / 10 * fullDayShiftsCount
+ *   salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
  *
  * Премия по выручке (revenuePremium: 200k/300k порог, 1.5% от избытка за смену, floor в 0 на
- * каждый тип смены независимо — недобор не вычитается из оклада) считается по умолчанию от личной
- * выручки сотрудника за его смены. Если у аптеки включено Pharmacy.poolAverageRevenuePremium —
- * вместо личной выручки берётся средняя выручка аптеки за смену того же типа за месяц
- * (см. computePooledShiftAverages). Если у заведующей включена лестничная премия аптеки
- * (ladderPremiumEnabled) — эта премия не начисляется вовсе, вместо неё managerLadderPremium.
- * При managerBonusShareEnabled добавляется 10% от бонусов управляемых аптек (managerBonusShare).
+ * каждый тип смены независимо — недобор не вычитается из оклада) одинакова для обоих типов и
+ * считается по умолчанию от личной выручки сотрудника за его смены. Если у аптеки включено
+ * Pharmacy.poolAverageRevenuePremium — вместо личной выручки берётся средняя выручка аптеки за
+ * смену того же типа за месяц (см. computePooledShiftAverages). Если у заведующей включена
+ * лестничная премия аптеки (ladderPremiumEnabled) — эта премия не начисляется вовсе, вместо неё
+ * managerLadderPremium (как у заведующей без торговли, calculateFixedManagerSalary). У заведующей,
+ * которая торгует, дополнительно прибавляется 10% от бонусов управляемой аптеки (managerBonusShare).
  * Фиксированная доплата (Employee.allowance) добавляется для любого типа сотрудника.
  */
-async function calculateScheduleBasedSalary(
+async function calculateTradingEmployeeSalary(
   employee: {
     id: number;
     name: string;
     baseSalary: unknown;
-    fiveDaySalary?: unknown;
     pharmacies: { pharmacyId: number }[];
     allowance: unknown;
     allowanceDescription: string;
-    employeeType?: string;
-    workSchedule?: string | null;
     ladderPremiumEnabled?: boolean;
     managerBonusShareEnabled?: boolean;
     fiveDayViaAttendance?: boolean;
@@ -454,27 +424,18 @@ async function calculateScheduleBasedSalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const schedule = resolveWorkSchedule({ ...employee, employeeType });
-  const readsShifts = usesRevenueShifts(schedule);
-  const readsAttendance = usesAttendance(schedule);
+  const fiveDayViaAttendance = Boolean(employee.fiveDayViaAttendance);
 
-  const [entries, pharmaBonusAgg, totalAdvances, totalSurcharges, calendarEntry, bonusShareStats, ladderStats, attendanceCount] =
+  const [entries, pharmaBonusAgg, totalAdvances, totalSurcharges, calendarEntry, bonusShareStats, ladderStats, attendanceFiveDayCount] =
     await Promise.all([
-      // При чисто табельном графике записи выручки не читаются вовсе — как и раньше у
-      // manager_fixed/pharmacy_manager: смен там быть не может, а бонусы аптеки таким
-      // сотрудникам лично не начисляются.
-      readsShifts
-        ? prisma.dailyRevenueEntry.findMany({
-            where: entryFilter,
-            select: { pharmacyId: true, shiftType: true, cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
-          })
-        : Promise.resolve([] as { pharmacyId: number; shiftType: string | null; cashRevenue: unknown; terminalRevenue: unknown; kaspiRevenue: unknown }[]),
-      readsShifts
-        ? prisma.dailyExpenseItem.aggregate({
-            _sum: { amount: true },
-            where: { category: 'pharmaBonus', entry: entryFilter },
-          })
-        : Promise.resolve({ _sum: { amount: null } }),
+      prisma.dailyRevenueEntry.findMany({
+        where: entryFilter,
+        select: { pharmacyId: true, shiftType: true, cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
+      }),
+      prisma.dailyExpenseItem.aggregate({
+        _sum: { amount: true },
+        where: { category: 'pharmaBonus', entry: entryFilter },
+      }),
       computeAdvances(employee.id, month, year, pharmacyId),
       computeSurcharges(employee.id, month, year, pharmacyId),
       prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
@@ -484,7 +445,7 @@ async function calculateScheduleBasedSalary(
       useLadder
         ? computeManagerLadderPremium(managedPharmacyIds, month, year)
         : Promise.resolve({ premium: 0, revenueTotal: 0 }),
-      readsAttendance
+      fiveDayViaAttendance
         ? getAttendanceShiftsCount(employee.id, month, year, pharmacyId)
         : Promise.resolve(0),
     ]);
@@ -524,24 +485,17 @@ async function calculateScheduleBasedSalary(
       grp.fullDayRevenue += revenueForPremium;
     }
     // 'five_day' в записи выручки — устаревший способ, зарплату он больше не даёт вообще:
-    // пятидневка сотрудника считается только через табель, см. ниже.
+    // пятидневка сотрудника считается только через табель (fiveDayViaAttendance), см. ниже.
     revenueTotal += revenue;
   }
 
-  const fiveDayShiftsCount = attendanceCount;
-
-  // Оклад за пятидневные дни — отдельный от сменного. Если второй оклад не задан, берётся
-  // основной: так считалось до появления поля, и у всех старых карточек оно пустое.
-  const fiveDayBase =
-    employee.fiveDaySalary !== null && employee.fiveDaySalary !== undefined
-      ? Number(employee.fiveDaySalary)
-      : baseSalary;
+  const fiveDayShiftsCount = fiveDayViaAttendance ? attendanceFiveDayCount : 0;
 
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
   const salaryFromFullDayShifts = baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0;
   const salaryFromDayShifts = baseSalary > 0 ? (baseSalary / 15) * dayShiftsCount : 0;
   const salaryFromFiveDayShifts =
-    fiveDayBase > 0 && workingCalendarDays ? (fiveDayBase / workingCalendarDays) * fiveDayShiftsCount : 0;
+    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount : 0;
   const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
 
   // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
@@ -594,8 +548,6 @@ async function calculateScheduleBasedSalary(
     year,
     baseSalary,
     ...EMPTY_RESULT_BASE,
-    workSchedule: schedule,
-    fiveDaySalary: fiveDayBase,
     dayShiftsCount,
     fullDayShiftsCount,
     fiveDayShiftsCount,
@@ -609,7 +561,6 @@ async function calculateScheduleBasedSalary(
     totalBonuses,
     totalAdvances,
     totalSurcharges,
-    attendanceShiftsCount: attendanceCount,
     managerBonusShare,
     managedBonusTotal,
     allowance,
@@ -621,6 +572,82 @@ async function calculateScheduleBasedSalary(
     totalSalary,
     revenueTotal,
     recordsCount: entries.length + fiveDayShiftsCount,
+  };
+}
+
+/** Заведующая без торговли: пятидневка по табелю посещаемости + опционально 10% бонусов + доплата + опционально лестница. */
+async function calculateFixedManagerSalary(
+  employee: {
+    id: number;
+    name: string;
+    baseSalary: unknown;
+    pharmacies: { pharmacyId: number }[];
+    allowance: unknown;
+    allowanceDescription: string;
+    ladderPremiumEnabled: boolean;
+    managerBonusShareEnabled: boolean;
+  },
+  month: number,
+  year: number,
+  pharmacyId: number | undefined,
+): Promise<MonthlySalaryResult> {
+  const managedPharmacyIds = resolveManagedPharmacyIds(employee, pharmacyId);
+  const useLadder = Boolean(employee.ladderPremiumEnabled);
+  const useBonusShare = Boolean(employee.managerBonusShareEnabled);
+
+  const [attendanceShiftsCount, calendarEntry, totalAdvances, totalSurcharges, managerStats, bonusShareStats] =
+    await Promise.all([
+      getAttendanceShiftsCount(employee.id, month, year, pharmacyId),
+      prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
+      computeAdvances(employee.id, month, year, pharmacyId),
+      computeSurcharges(employee.id, month, year, pharmacyId),
+      useLadder
+        ? computeManagerLadderPremium(managedPharmacyIds, month, year)
+        : Promise.resolve({ premium: 0, revenueTotal: 0 }),
+      useBonusShare
+        ? computeManagerBonusShare(managedPharmacyIds, month, year)
+        : Promise.resolve({ share: 0, total: 0 }),
+    ]);
+  const managerBonusShare = bonusShareStats.share;
+  const allowance = Number(employee.allowance ?? 0);
+
+  const baseSalary = Number(employee.baseSalary);
+  const workingCalendarDays = calendarEntry?.workingDays ?? null;
+  const salaryFromFiveDayShifts =
+    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
+
+  const totalSalary =
+    salaryFromFiveDayShifts +
+    managerBonusShare +
+    allowance +
+    managerStats.premium +
+    totalSurcharges -
+    totalAdvances;
+
+  return {
+    employeeId: employee.id,
+    employeeName: employee.name,
+    employeeType: 'manager_fixed',
+    month,
+    year,
+    baseSalary,
+    ...EMPTY_RESULT_BASE,
+    fiveDayShiftsCount: attendanceShiftsCount,
+    salaryFromFiveDayShifts,
+    workingCalendarDays,
+    attendanceShiftsCount,
+    totalAdvances,
+    totalSurcharges,
+    managerBonusShare,
+    managedBonusTotal: bonusShareStats.total,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
+    managerLadderPremium: managerStats.premium,
+    managedRevenueTotal: managerStats.revenueTotal,
+    ladderPremiumEnabled: useLadder,
+    managerBonusShareEnabled: useBonusShare,
+    totalSalary,
+    recordsCount: attendanceShiftsCount,
   };
 }
 
@@ -699,7 +726,6 @@ async function calculateOfficeSalary(
     year,
     baseSalary,
     ...EMPTY_RESULT_BASE,
-    fiveDaySalary: baseSalary,
     fiveDayShiftsCount: attendanceShiftsCount,
     salaryFromFiveDayShifts,
     workingCalendarDays,
@@ -716,19 +742,97 @@ async function calculateOfficeSalary(
 }
 
 /**
- * Рассчитывает зарплату сотрудника за указанный месяц.
+ * Менеджер: пятидневка по табелю посещаемости (как manager_fixed/office) + опциональная
+ * лестничная премия по аптеке(ам) (ladderPremiumEnabled) + опциональная доля 10% от бонусов
+ * (managerBonusShareEnabled) + фиксированная доплата. Оба переключателя независимы друг от
+ * друга и от employeeType — те же переключатели есть у manager_trading/manager_fixed.
+ */
+async function calculatePharmacyManagerSalary(
+  employee: {
+    id: number;
+    name: string;
+    baseSalary: unknown;
+    pharmacies: { pharmacyId: number }[];
+    ladderPremiumEnabled: boolean;
+    managerBonusShareEnabled: boolean;
+    allowance: unknown;
+    allowanceDescription: string;
+  },
+  month: number,
+  year: number,
+  pharmacyId: number | undefined,
+): Promise<MonthlySalaryResult> {
+  const managedPharmacyIds = resolveManagedPharmacyIds(employee, pharmacyId);
+  const useLadder = Boolean(employee.ladderPremiumEnabled);
+  const useBonusShare = Boolean(employee.managerBonusShareEnabled);
+
+  const [attendanceShiftsCount, calendarEntry, totalAdvances, totalSurcharges, managerStats, bonusShareStats] = await Promise.all([
+    getAttendanceShiftsCount(employee.id, month, year, pharmacyId),
+    prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } }),
+    computeAdvances(employee.id, month, year, pharmacyId),
+    computeSurcharges(employee.id, month, year, pharmacyId),
+    useLadder
+      ? computeManagerLadderPremium(managedPharmacyIds, month, year)
+      : Promise.resolve({ premium: 0, revenueTotal: 0 }),
+    useBonusShare
+      ? computeManagerBonusShare(managedPharmacyIds, month, year)
+      : Promise.resolve({ share: 0, total: 0 }),
+  ]);
+  const managerBonusShare = bonusShareStats.share;
+
+  const baseSalary = Number(employee.baseSalary);
+  const workingCalendarDays = calendarEntry?.workingDays ?? null;
+  const salaryFromFiveDayShifts =
+    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
+  const allowance = Number(employee.allowance ?? 0);
+
+  const totalSalary =
+    salaryFromFiveDayShifts + managerStats.premium + managerBonusShare + allowance + totalSurcharges - totalAdvances;
+
+  return {
+    employeeId: employee.id,
+    employeeName: employee.name,
+    employeeType: 'pharmacy_manager',
+    month,
+    year,
+    baseSalary,
+    ...EMPTY_RESULT_BASE,
+    fiveDayShiftsCount: attendanceShiftsCount,
+    salaryFromFiveDayShifts,
+    workingCalendarDays,
+    attendanceShiftsCount,
+    totalAdvances,
+    totalSurcharges,
+    managerBonusShare,
+    managedBonusTotal: bonusShareStats.total,
+    allowance,
+    allowanceDescription: employee.allowanceDescription ?? '',
+    ladderPremiumEnabled: useLadder,
+    managerBonusShareEnabled: useBonusShare,
+    managerLadderPremium: managerStats.premium,
+    managedRevenueTotal: managerStats.revenueTotal,
+    totalSalary,
+    recordsCount: attendanceShiftsCount,
+  };
+}
+
+/**
+ * Рассчитывает зарплату сотрудника за указанный месяц. Формула зависит от Employee.employeeType:
+ *  - seller          — смены (день/сутки) + бонусы + revenuePremium (200k/300k, 1.5%) − авансы
+ *  - manager_trading — то же, что seller (включая revenuePremium) + опционально 10% бонусов аптеки
+ *                      (managerBonusShareEnabled). Если ladderPremiumEnabled=true — вместо личной
+ *                      revenuePremium получает лестничную премию аптеки.
+ *  - manager_fixed   — пятидневка по табелю посещаемости + опционально 10% бонусов
+ *                      (managerBonusShareEnabled) + опционально лестничная премия (ladderPremiumEnabled)
+ *  - cleaner         — ставка за смену × количество смен в табеле − авансы
+ *  - office          — пятидневка по табелю посещаемости + лестничная премия от выручки всех аптек
+ *  - pharmacy_manager — пятидневка по табелю посещаемости + опционально лестничная премия аптеки
+ *                       (ladderPremiumEnabled) + опционально 10% бонусов (managerBonusShareEnabled)
  *
- * Два типа считаются по собственным правилам:
- *  - cleaner — ставка за смену × количество смен в табеле − авансы (оклад не участвует)
- *  - office  — пятидневка по табелю + премия по таблице диапазонов от выручки ВСЕХ аптек
+ * ladderPremiumEnabled и managerBonusShareEnabled — независимые переключатели, доступные
+ * одинаково у manager_trading, manager_fixed и pharmacy_manager (любая комбинация из четырёх).
  *
- * Остальные (seller / manager_trading / manager_fixed / pharmacy_manager) считаются одной
- * общей формулой (calculateScheduleBasedSalary). Откуда берутся отработанные дни — определяет
- * не тип сотрудника, а его график (Employee.workSchedule): смены в записях выручки, отметки
- * табеля или и то, и другое сразу. У manager_* дополнительно действуют два независимых
- * переключателя — ladderPremiumEnabled (лестничная премия аптеки вместо личной премии за
- * выручку смены) и managerBonusShareEnabled (10% от бонусов управляемых аптек), в любой
- * комбинации. Фиксированная доплата (Employee.allowance) добавляется к итогу для любого типа.
+ * Фиксированная доплата (Employee.allowance) добавляется к итогу для любого типа сотрудника.
  *
  * Учитывает только записи/начисления со статусом 'approved'. Если передан pharmacyId — фильтрует по аптеке
  * (для office фильтр по аптеке не применяется, премия всегда считается от всех аптек).
@@ -765,26 +869,75 @@ export async function calculateEmployeeMonthlySalary(
   if (employeeType === 'office') {
     return calculateOfficeSalary(employee, month, year);
   }
-
-  return calculateScheduleBasedSalary(
+  if (employeeType === 'manager_fixed') {
+    return calculateFixedManagerSalary(
+      employee as unknown as {
+        id: number;
+        name: string;
+        baseSalary: unknown;
+        pharmacies: { pharmacyId: number }[];
+        allowance: unknown;
+        allowanceDescription: string;
+        ladderPremiumEnabled: boolean;
+        managerBonusShareEnabled: boolean;
+      },
+      month,
+      year,
+      pharmacyId,
+    );
+  }
+  if (employeeType === 'pharmacy_manager') {
+    return calculatePharmacyManagerSalary(
+      employee as unknown as {
+        id: number;
+        name: string;
+        baseSalary: unknown;
+        pharmacies: { pharmacyId: number }[];
+        ladderPremiumEnabled: boolean;
+        managerBonusShareEnabled: boolean;
+        allowance: unknown;
+        allowanceDescription: string;
+      },
+      month,
+      year,
+      pharmacyId,
+    );
+  }
+  if (employeeType === 'manager_trading') {
+    return calculateTradingEmployeeSalary(
+      employee as unknown as {
+        id: number;
+        name: string;
+        baseSalary: unknown;
+        pharmacies: { pharmacyId: number }[];
+        allowance: unknown;
+        allowanceDescription: string;
+        ladderPremiumEnabled: boolean;
+        managerBonusShareEnabled: boolean;
+        fiveDayViaAttendance: boolean;
+      },
+      employeeType,
+      month,
+      year,
+      pharmacyId,
+      true,
+    );
+  }
+  return calculateTradingEmployeeSalary(
     employee as unknown as {
       id: number;
       name: string;
       baseSalary: unknown;
-      fiveDaySalary: unknown;
       pharmacies: { pharmacyId: number }[];
       allowance: unknown;
       allowanceDescription: string;
-      workSchedule: string | null;
-      ladderPremiumEnabled: boolean;
-      managerBonusShareEnabled: boolean;
       fiveDayViaAttendance: boolean;
     },
-    employeeType,
+    'seller',
     month,
     year,
     pharmacyId,
-    MANAGER_TYPES.has(employeeType),
+    false,
   );
 }
 

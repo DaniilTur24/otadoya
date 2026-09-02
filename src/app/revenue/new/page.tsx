@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS } from '@/lib/shift-types';
-import { resolveWorkSchedule, usesRevenueShifts } from '@/lib/employee-types';
+import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
@@ -18,7 +18,6 @@ interface Employee {
   name: string;
   employeeType: string;
   fiveDayViaAttendance?: boolean;
-  workSchedule?: string | null;
 }
 
 interface ExpenseItem {
@@ -156,9 +155,8 @@ export default function NewRevenuePage() {
       if (name === 'employeeId') {
         const emp = employees.find((em) => em.id === Number(value));
         updated.employeeName = emp ? emp.name : '';
-        // У чистой пятидневки зарплата считается только по табелю — смену здесь не назначаем.
-        // Смешанному графику смена, наоборот, нужна: часть дней он работает именно сменами.
-        if (emp && !usesRevenueShifts(resolveWorkSchedule(emp))) {
+        // У пятидневщика зарплата считается по табелю — смену в записи выручки ему не назначаем
+        if (emp?.fiveDayViaAttendance) {
           updated.shiftType = '';
         }
       }
@@ -210,13 +208,9 @@ export default function NewRevenuePage() {
 
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
-  // В списке сотрудника смены — все, чей график вообще предполагает смены, включая смешанный.
-  const shiftEligibleEmployees = employees.filter((e) => usesRevenueShifts(resolveWorkSchedule(e)));
+  const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
   const selectedEmployee = employees.find((e) => e.id === Number(form.employeeId));
-  // Селектор смены закрыт только для чистой пятидневки. Смешанный график её выбирать может —
-  // от двойной оплаты одного дня защищает сервер (см. validateNoAttendanceOnDate).
-  const isFiveDayEmployee = Boolean(selectedEmployee) && !usesRevenueShifts(resolveWorkSchedule(selectedEmployee!));
-  const isMixedEmployee = Boolean(selectedEmployee) && resolveWorkSchedule(selectedEmployee!) === 'mixed';
+  const isFiveDayEmployee = Boolean(selectedEmployee?.fiveDayViaAttendance);
 
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),
@@ -505,13 +499,9 @@ export default function NewRevenuePage() {
               <p className="mt-1 text-xs text-slate-400">
                 У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смена здесь не назначается
               </p>
-            ) : !form.shiftType ? (
+            ) : !form.shiftType && (
               <p className="mt-1 text-xs text-amber-600">
                 Без типа смены зарплата не рассчитается
-              </p>
-            ) : isMixedEmployee && (
-              <p className="mt-1 text-xs text-slate-400">
-                У этого сотрудника смешанный график — этот день будет оплачен как смена, а не по пятидневке
               </p>
             )}
           </div>

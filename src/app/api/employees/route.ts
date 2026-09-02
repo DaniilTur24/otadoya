@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, requireAnyRole, getManagerPharmacyIds } from '@/lib/api-auth';
-import { EMPLOYEE_TYPES, WORK_SCHEDULES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPES } from '@/lib/employee-types';
 
 function serialize(emp: Record<string, unknown>) {
   return {
@@ -9,7 +9,6 @@ function serialize(emp: Record<string, unknown>) {
     baseSalary: Number(emp.baseSalary),
     shiftRate: emp.shiftRate != null ? Number(emp.shiftRate) : null,
     allowance: Number(emp.allowance ?? 0),
-    fiveDaySalary: emp.fiveDaySalary != null ? Number(emp.fiveDaySalary) : null,
   };
 }
 
@@ -64,16 +63,13 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdmin(request);
   if (auth) return auth;
 
-  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription, fiveDayViaAttendance, workSchedule, fiveDaySalary } = await request.json();
+  const { name, baseSalary, isActive, employeeType, shiftRate, allowance, allowanceDescription, fiveDayViaAttendance } = await request.json();
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Имя сотрудника обязательно' }, { status: 400 });
   }
   if (employeeType != null && !(employeeType in EMPLOYEE_TYPES)) {
     return NextResponse.json({ error: 'Некорректный тип сотрудника' }, { status: 400 });
-  }
-  if (workSchedule != null && !(workSchedule in WORK_SCHEDULES)) {
-    return NextResponse.json({ error: 'Некорректный график работы' }, { status: 400 });
   }
 
   const employee = await prisma.employee.create({
@@ -86,8 +82,6 @@ export async function POST(request: NextRequest) {
       allowance: String(allowance ?? 0),
       allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
       fiveDayViaAttendance: Boolean(fiveDayViaAttendance),
-      workSchedule: workSchedule || null,
-      fiveDaySalary: fiveDaySalary === '' || fiveDaySalary == null ? null : String(fiveDaySalary),
     },
   });
 

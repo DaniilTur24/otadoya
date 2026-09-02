@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
-import { resolveWorkSchedule, usesAttendance } from '@/lib/employee-types';
+import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 import { isMonthClosed } from '@/lib/closed-month';
-import { findShiftOnDate } from '@/lib/attendance-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,19 +83,16 @@ export async function POST(request: NextRequest) {
   const employee = await prisma.employee.findUnique({ where: { id: Number(employeeId) } });
   if (!employee) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  // При чисто сменном графике зарплата не читает AttendanceShift вовсе — отметка здесь была бы
-  // мёртвой и вводящей в заблуждение. Табель доступен пятидневному и смешанному графику.
-  if (!usesAttendance(resolveWorkSchedule(employee))) {
+  // Сменные типы (seller/manager_trading) учитываются через смену в записи выручки, а не через
+  // табель — их зарплата не читает AttendanceShift, отметка здесь была бы мёртвой и вводящей в заблуждение.
+  // Исключение — продавец с включённым fiveDayViaAttendance: его пятидневка отмечается именно здесь.
+  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
+  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType) && !isFiveDaySeller) {
     return NextResponse.json(
-      { error: 'Этому сотруднику нельзя отметить табель — он учитывается через смену в записи выручки' },
+      { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }
     );
   }
-
-  // Обратная сторона той же защиты, что и в записи выручки: у смешанного графика открыты оба
-  // канала, и один и тот же день иначе можно было бы оплатить и сменой, и отметкой табеля.
-  const conflictError = await findShiftOnDate(Number(employeeId), new Date(date));
-  if (conflictError) return NextResponse.json({ error: conflictError }, { status: 409 });
 
   try {
     const shift = await prisma.attendanceShift.create({

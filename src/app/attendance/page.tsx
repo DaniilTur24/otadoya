@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { EMPLOYEE_TYPE_LABELS, resolveWorkSchedule, usesAttendance } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -16,13 +16,12 @@ interface Employee {
   isActive: boolean;
   pharmacies: Pharmacy[];
   fiveDayViaAttendance?: boolean;
-  workSchedule?: string | null;
 }
 
-// В табеле показываются все, чей график вообще предполагает отметки, — и чистая
-// пятидневка, и смешанный график (у него часть дней сменные, часть табельные).
+// Продавец с включённым fiveDayViaAttendance отмечается в табеле как пятидневник,
+// хотя формально его тип 'seller' — не входит в ATTENDANCE_BASED_TYPES.
 function isAttendanceEligible(e: Employee): boolean {
-  return usesAttendance(resolveWorkSchedule(e));
+  return ATTENDANCE_BASED_TYPES.has(e.employeeType) || (e.employeeType === 'seller' && !!e.fiveDayViaAttendance);
 }
 interface AttendanceRecord {
   id: number;
@@ -104,13 +103,13 @@ export default function AttendancePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Группировка идёт по должности, а не по графику: со смешанным графиком в табеле
-  // оказываются и продавцы, и торгующие заведующие, и прежний заголовок
-  // «Продавцы (пятидневка)» стал бы неверным — пятидневка у них лишь часть месяца.
-  const groups: { type: string; label: string; items: Employee[] }[] = [
-    'manager_fixed', 'pharmacy_manager', 'manager_trading', 'cleaner', 'office', 'seller',
-  ]
+  const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office']
     .map((type) => ({ type, label: EMPLOYEE_TYPE_LABELS[type], items: employees.filter((e) => e.employeeType === type) }))
+    .concat([{
+      type: 'seller_five_day',
+      label: 'Продавцы (пятидневка)',
+      items: employees.filter((e) => e.employeeType === 'seller' && e.fiveDayViaAttendance),
+    }])
     .filter((g) => g.items.length > 0);
 
   const flatEmployees = useMemo(() => groups.flatMap((g) => g.items), [groups]);
@@ -439,16 +438,6 @@ export default function AttendancePage() {
                         <td className="td sticky left-0 bg-white px-3 py-1.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             <span className="text-slate-800">{emp.name}</span>
-                            {resolveWorkSchedule(emp) === 'mixed' && (
-                              // Смешанный график: часть дней месяца у этого человека —
-                              // смены в записях выручки, и в табеле их быть не должно.
-                              <span
-                                className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-                                title="Смешанный график: в другие дни этот сотрудник работает по сменам, которые отмечаются в записях выручки"
-                              >
-                                смешанный
-                              </span>
-                            )}
                             {needsPharmacy && (
                               <select
                                 className="input w-32 text-xs py-0.5"

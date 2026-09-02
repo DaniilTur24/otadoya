@@ -4,12 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { AmountInput } from '@/components/AmountInput';
 import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
 import { useSalaryImpact } from '@/hooks/useSalaryImpact';
-import {
-  WORK_SCHEDULE_LABELS,
-  WORK_SCHEDULE_OPTIONS,
-  resolveWorkSchedule,
-  type WorkSchedule,
-} from '@/lib/employee-types';
 
 const MANAGER_TYPE_OPTIONS = [
   { value: 'manager_trading', label: 'Заведующая (торгует)' },
@@ -29,8 +23,6 @@ interface Manager {
   employeeType: string;
   ladderPremiumEnabled: boolean;
   managerBonusShareEnabled: boolean;
-  workSchedule: string | null;
-  fiveDaySalary: number | null;
   allowance: number;
   allowanceDescription: string;
   pharmacies: Pharmacy[];
@@ -62,9 +54,6 @@ export default function UsersPage() {
     employeeType: 'manager_trading' as string,
     ladderPremiumEnabled: false,
     managerBonusShareEnabled: true,
-    // Пустая строка = график не выбран явно; сервер сохранит NULL и расчёт останется прежним
-    workSchedule: '' as string,
-    fiveDaySalary: '',
     allowance: '',
     allowanceDescription: '',
     pharmacyIds: [] as number[],
@@ -88,7 +77,6 @@ export default function UsersPage() {
     setForm({
       username: '', password: '', displayName: '', baseSalary: '',
       employeeType: 'manager_trading', ladderPremiumEnabled: false, managerBonusShareEnabled: true,
-      workSchedule: '', fiveDaySalary: '',
       allowance: '', allowanceDescription: '', pharmacyIds: [],
     });
     setEditingId(null);
@@ -111,11 +99,6 @@ export default function UsersPage() {
       employeeType: m.employeeType,
       ladderPremiumEnabled: m.ladderPremiumEnabled,
       managerBonusShareEnabled: m.managerBonusShareEnabled,
-      // У карточек, созданных до появления графика, workSchedule пустой. Показываем
-      // выведенный график, а не пустое поле: иначе админ увидел бы «не выбрано» и мог
-      // пересохранить карточку с другой формулой, сам того не заметив.
-      workSchedule: m.workSchedule ?? resolveWorkSchedule({ employeeType: m.employeeType }),
-      fiveDaySalary: m.fiveDaySalary != null ? String(m.fiveDaySalary) : '',
       allowance: m.allowance ? String(m.allowance) : '',
       allowanceDescription: m.allowanceDescription ?? '',
       pharmacyIds: m.pharmacies.map((p) => p.id),
@@ -164,14 +147,6 @@ export default function UsersPage() {
           : '10% от бонусов аптеки: выключается'
       );
     }
-    const originalSchedule = original.workSchedule ?? resolveWorkSchedule({ employeeType: original.employeeType });
-    if (form.workSchedule && form.workSchedule !== originalSchedule) {
-      const label = (v: string) => WORK_SCHEDULE_LABELS[v as WorkSchedule] ?? v;
-      changed.push(`График работы: ${label(originalSchedule)} → ${label(form.workSchedule)} (меняется источник отработанных дней)`);
-    }
-    if (Number(form.fiveDaySalary || 0) !== Number(original.fiveDaySalary ?? 0)) {
-      changed.push(`Оклад за пятидневку: ${money(Number(original.fiveDaySalary ?? 0))} → ${money(Number(form.fiveDaySalary || 0))} ₸`);
-    }
     if (form.ladderPremiumEnabled !== original.ladderPremiumEnabled) {
       changed.push(
         form.ladderPremiumEnabled
@@ -210,10 +185,6 @@ export default function UsersPage() {
       managerBonusShareEnabled: form.managerBonusShareEnabled,
       allowance: form.allowance || 0,
       allowanceDescription: form.allowanceDescription.trim(),
-      workSchedule: form.workSchedule || null,
-      // Второй оклад имеет смысл только при смешанном графике — в остальных случаях
-      // очищаем его, чтобы он не «выстрелил» при последующей смене графика.
-      fiveDaySalary: form.workSchedule === 'mixed' ? form.fiveDaySalary || null : null,
     };
 
     const needsLogin = form.employeeType !== 'pharmacy_manager';
@@ -360,19 +331,7 @@ export default function UsersPage() {
                 <select
                   className="input"
                   value={form.employeeType}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      employeeType: e.target.value,
-                      // График подставляется под роль только при создании. При редактировании
-                      // он уже отражает то, как человек реально работает, и молча менять его
-                      // от смены роли нельзя — это переписало бы формулу за прошлые месяцы.
-                      workSchedule:
-                        editingId === null
-                          ? resolveWorkSchedule({ employeeType: e.target.value })
-                          : f.workSchedule,
-                    }))
-                  }
+                  onChange={(e) => setForm((f) => ({ ...f, employeeType: e.target.value }))}
                 >
                   {MANAGER_TYPE_OPTIONS
                     .filter((t) => {
@@ -391,37 +350,15 @@ export default function UsersPage() {
                   <p className="text-xs text-slate-400 mt-1">Менеджера нельзя переключить в заведующие — удалите и создайте заново</p>
                 )}
                 <p className="text-xs text-slate-400 mt-1">
-                  {form.employeeType === 'pharmacy_manager'
-                    ? 'Не получает логин в систему. Доплата и премии — см. чекбоксы ниже'
-                    : 'Получает логин в систему. Доплата и премии — см. чекбоксы ниже'}
+                  {form.employeeType === 'manager_trading'
+                    ? 'Считается по сменам, как продавец. Доплата и премии — см. чекбоксы ниже'
+                    : form.employeeType === 'pharmacy_manager'
+                    ? 'Пятидневка по табелю посещаемости. Не получает логин в систему — только премии и доплата. Доплата и премии — см. чекбоксы ниже'
+                    : 'Пятидневка по табелю посещаемости. Доплата и премии — см. чекбоксы ниже'}
                 </p>
               </div>
               <div>
-                <label className="label">График работы *</label>
-                <select
-                  className="input"
-                  value={form.workSchedule}
-                  onChange={(e) => setForm((f) => ({ ...f, workSchedule: e.target.value }))}
-                >
-                  {WORK_SCHEDULE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400 mt-1">
-                  {form.workSchedule === 'shift'
-                    ? 'Отработанные дни берутся из смен в записях выручки'
-                    : form.workSchedule === 'mixed'
-                    ? 'Часть дней — смены в записях выручки, часть — отметки в табеле. За каждую часть свой оклад'
-                    : 'Отработанные дни берутся из табеля посещаемости'}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="label">
-                  {form.workSchedule === 'mixed' ? 'Оклад за смены (₸) *' : 'Оклад (₸) *'}
-                </label>
+                <label className="label">Оклад (₸) *</label>
                 <AmountInput
                   className="input"
                   value={form.baseSalary}
@@ -429,24 +366,7 @@ export default function UsersPage() {
                   placeholder="150000"
                   required
                 />
-                {form.workSchedule === 'mixed' && (
-                  <p className="text-xs text-slate-400 mt-1">Делится на 15 за дневную смену и на 10 за суточную</p>
-                )}
               </div>
-              {/* Второй оклад нужен только смешанному графику: у остальных пятидневка
-                  и так считается от основного оклада. */}
-              {form.workSchedule === 'mixed' && (
-                <div>
-                  <label className="label">Оклад за пятидневку (₸)</label>
-                  <AmountInput
-                    className="input"
-                    value={form.fiveDaySalary}
-                    onChange={(value) => setForm((f) => ({ ...f, fiveDaySalary: value }))}
-                    placeholder="оставьте пустым — как оклад за смены"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">Делится на число рабочих дней месяца</p>
-                </div>
-              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

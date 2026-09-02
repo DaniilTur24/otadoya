@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { hashPassword } from '@/lib/password';
-import { USER_LINKED_TYPES, WORK_SCHEDULES } from '@/lib/employee-types';
+import { USER_LINKED_TYPES } from '@/lib/employee-types';
 
 function serialize(u: Record<string, unknown>) {
   const { passwordHash: _, ...rest } = u as { passwordHash: unknown } & Record<string, unknown>;
@@ -15,7 +15,6 @@ function serialize(u: Record<string, unknown>) {
 function serializeLoginlessManager(e: {
   id: number; name: string; isActive: boolean; baseSalary: unknown; employeeType: string;
   ladderPremiumEnabled: boolean; managerBonusShareEnabled: boolean; allowance: unknown; allowanceDescription: string;
-  workSchedule: string | null; fiveDaySalary: unknown;
   pharmacies: { pharmacy: { id: number; name: string } }[];
 }) {
   return {
@@ -33,8 +32,6 @@ function serializeLoginlessManager(e: {
     managerBonusShareEnabled: e.managerBonusShareEnabled,
     allowance: Number(e.allowance),
     allowanceDescription: e.allowanceDescription,
-    workSchedule: e.workSchedule,
-    fiveDaySalary: e.fiveDaySalary != null ? Number(e.fiveDaySalary) : null,
     accountType: 'employee' as const,
   };
 }
@@ -47,7 +44,7 @@ export async function GET(request: NextRequest) {
     prisma.user.findMany({
       include: {
         pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } },
-        employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true, workSchedule: true, fiveDaySalary: true } },
+        employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true } },
       },
     }),
     prisma.employee.findMany({
@@ -69,8 +66,6 @@ export async function GET(request: NextRequest) {
     managerBonusShareEnabled: u.employee?.managerBonusShareEnabled ?? false,
     allowance: u.employee ? Number(u.employee.allowance) : 0,
     allowanceDescription: u.employee?.allowanceDescription ?? '',
-    workSchedule: u.employee?.workSchedule ?? null,
-    fiveDaySalary: u.employee?.fiveDaySalary != null ? Number(u.employee.fiveDaySalary) : null,
     accountType: 'user' as const,
   }));
 
@@ -87,7 +82,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription, workSchedule, fiveDaySalary } =
+  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription } =
     await request.json();
 
   if (!displayName?.trim()) {
@@ -96,9 +91,6 @@ export async function POST(request: NextRequest) {
   const resolvedEmployeeType = employeeType ?? 'manager_trading';
   if (!USER_LINKED_TYPES.has(resolvedEmployeeType)) {
     return NextResponse.json({ error: 'Некорректный тип заведующего/менеджера' }, { status: 400 });
-  }
-  if (workSchedule != null && !(workSchedule in WORK_SCHEDULES)) {
-    return NextResponse.json({ error: 'Некорректный график работы' }, { status: 400 });
   }
 
   // Менеджер (pharmacy_manager) не получает доступ к системе — создаём только карточку
@@ -114,8 +106,6 @@ export async function POST(request: NextRequest) {
           managerBonusShareEnabled: Boolean(managerBonusShareEnabled),
           allowance: String(allowance ?? 0),
           allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
-          workSchedule: workSchedule || null,
-          fiveDaySalary: fiveDaySalary === '' || fiveDaySalary == null ? null : String(fiveDaySalary),
         },
       });
 
@@ -158,8 +148,6 @@ export async function POST(request: NextRequest) {
         managerBonusShareEnabled: Boolean(managerBonusShareEnabled),
         allowance: String(allowance ?? 0),
         allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
-        workSchedule: workSchedule || null,
-        fiveDaySalary: fiveDaySalary === '' || fiveDaySalary == null ? null : String(fiveDaySalary),
       },
     });
 

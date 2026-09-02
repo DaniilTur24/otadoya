@@ -114,18 +114,8 @@ model Employee {
   // переключатель для manager_trading, manager_fixed и pharmacy_manager.
   managerBonusShareEnabled Boolean @default(true) @map("manager_bonus_share_enabled")
   // Для seller/manager_trading: если true — пятидневные смены отмечаются в табеле посещаемости
-  // (AttendanceShift), а не записью выручки — сотрудник не считает кассу, просто отмечает рабочий день.
-  // Устаревшее поле: с появлением workSchedule читается только как признак для вывода графика
-  // у записей, созданных раньше (см. resolveWorkSchedule в src/lib/employee-types.ts).
+  // (AttendanceShift), а не записью выручки — сотрудник не считает кассу, просто отмечает рабочий день
   fiveDayViaAttendance  Boolean @default(false) @map("five_day_via_attendance")
-  // График работы: shift — только смены в записях выручки, five_day — только табель,
-  // mixed — и то, и другое (человек в одни дни выходит на сутки/день, в другие по пятидневке).
-  // NULL — график не выбран явно, выводится из employeeType/fiveDayViaAttendance, то есть
-  // поведение остаётся ровно таким, каким было до появления поля.
-  workSchedule  String?  @map("work_schedule")
-  // Второй оклад — за дни, отработанные по пятидневке (график mixed). NULL — отдельного
-  // оклада нет, пятидневка считается от baseSalary, как раньше.
-  fiveDaySalary Decimal? @map("five_day_salary")
   // Фиксированная ежемесячная доплата сотруднику (любого типа) + описание, за что она начисляется
   allowance            Decimal @default(0) @map("allowance")
   allowanceDescription String  @default("") @map("allowance_description")
