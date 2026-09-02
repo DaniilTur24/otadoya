@@ -49,6 +49,7 @@ interface RevenueEntry {
   employeeName: string;
   shiftType: string | null;
   status: string;
+  submittedById: number | null;
   excludedFromReport: boolean;
 }
 
@@ -110,12 +111,37 @@ const ROW_LABEL: Record<string, string> = Object.fromEntries(
   MONTHLY_REPORT_ROWS.filter((r) => !r.section).map((r) => [r.key, r.label])
 );
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'На проверке',
+  approved: 'Подтверждена',
+  rejected: 'Отклонена',
+};
+const STATUS_CLASSES: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-800',
+  approved: 'bg-green-100 text-green-800',
+  rejected: 'bg-red-100 text-red-800',
+};
+
+function summarizeEntries(list: RevenueEntry[]) {
+  const totalRevenue    = list.reduce((s, e) => s + e.totalRevenue, 0);
+  const totalCash       = list.reduce((s, e) => s + e.cashRevenue, 0);
+  const totalIncomes    = list.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
+  const totalBonuses    = list.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
+  const totalAdvances   = list.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
+  const totalSurcharges = list.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
+  const totalExpenses   = list.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
+  const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
+  const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
+  return { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet };
+}
+
 export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
   const [role, setRole] = useState<string | null>(null);
+  const [userId, setUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -157,6 +183,7 @@ export default function RevenueListPage() {
     const roleRes = await fetch('/api/auth/me').then((r) => r.json());
     const currentRole: string = roleRes.role ?? '';
     setRole(currentRole);
+    setUserId(typeof roleRes.userId === 'number' ? roleRes.userId : null);
 
     const isModeratorRole = currentRole === 'admin' || currentRole === 'bookkeeper';
 
@@ -348,7 +375,7 @@ export default function RevenueListPage() {
 
   function toggleSelectAll() {
     setSelectedIds((s) =>
-      s.size === visibleEntries.length ? new Set() : new Set(visibleEntries.map((e) => e.id))
+      s.size === manageableEntries.length ? new Set() : new Set(manageableEntries.map((e) => e.id))
     );
   }
 
@@ -501,6 +528,16 @@ export default function RevenueListPage() {
     ? entries.filter((e) => String(e.employeeId) === filterEmployee)
     : entries;
 
+  // Заведующий может изменять/удалять только свою же запись, пока она на проверке —
+  // после подтверждения/отклонения бухгалтером кнопки скрываются (см. canModifyEntry на сервере).
+  function canManageEntry(entry: RevenueEntry) {
+    if (role === 'admin' || role === 'bookkeeper') return true;
+    if (role === 'manager') return entry.status === 'pending' && entry.submittedById === userId;
+    return false;
+  }
+
+  const manageableEntries = visibleEntries.filter(canManageEntry);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -538,12 +575,15 @@ export default function RevenueListPage() {
                     <th className="th bg-amber-50 text-right">Терминал</th>
                     <th className="th bg-amber-50 text-right">Каспи</th>
                     <th className="th bg-amber-50 text-right">Расходы</th>
+                    <th className="th bg-amber-50 text-right">Итого</th>
+                    <th className="th bg-amber-50 text-right">Нал. на руках</th>
                     <th className="th bg-amber-50"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-amber-100">
                   {pendingEntries.map((entry) => {
                     const expenses = expenseItemsSum(entry.expenseItems);
+                    const { total, cashNet } = summarizeEntries([entry]);
                     const isExpanded = moderating === entry.id;
                     return (
                       <React.Fragment key={entry.id}>
@@ -555,6 +595,12 @@ export default function RevenueListPage() {
                           <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
                           <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
                           <td className="td text-right text-red-600">{expenses > 0 ? fmt(expenses) : '—'}</td>
+                          <td className="td text-right font-semibold">
+                            <span className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</span>
+                          </td>
+                          <td className="td text-right font-semibold">
+                            <span className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(cashNet)}</span>
+                          </td>
                           <td className="td">
                             {isExpanded ? (
                               <button
@@ -575,7 +621,7 @@ export default function RevenueListPage() {
                         </tr>
                         {isExpanded && (
                           <tr key={`${entry.id}-expand`} className="bg-white">
-                            <td colSpan={8} className="px-4 py-3">
+                            <td colSpan={10} className="px-4 py-3">
                               {entry.expenseItems.length > 0 && (
                                 <div className="mb-3 text-sm">
                                   <p className="font-medium text-slate-700 mb-1">Расходы:</p>
@@ -1021,7 +1067,7 @@ export default function RevenueListPage() {
                     <input
                       type="checkbox"
                       className="rounded"
-                      checked={visibleEntries.length > 0 && selectedIds.size === visibleEntries.length}
+                      checked={manageableEntries.length > 0 && selectedIds.size === manageableEntries.length}
                       onChange={toggleSelectAll}
                     />
                   </th>
@@ -1037,6 +1083,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
+                  <th className="th">Статус</th>
                   <th className="th sticky right-0 z-20 border-l border-slate-300"></th>
                 </tr>
               </thead>
@@ -1059,12 +1106,14 @@ export default function RevenueListPage() {
                         }}
                         onMouseLeave={() => setTooltipEntry(null)}>
                         <td className="td">
-                          <input
-                            type="checkbox"
-                            className="rounded"
-                            checked={selectedIds.has(entry.id)}
-                            onChange={() => toggleSelect(entry.id)}
-                          />
+                          {canManageEntry(entry) && (
+                            <input
+                              type="checkbox"
+                              className="rounded"
+                              checked={selectedIds.has(entry.id)}
+                              onChange={() => toggleSelect(entry.id)}
+                            />
+                          )}
                         </td>
                         <td className="td whitespace-nowrap">{fmtDate(entry.date)}</td>
                         <td className="td font-medium whitespace-nowrap">{entry.pharmacy.name}</td>
@@ -1129,6 +1178,13 @@ export default function RevenueListPage() {
                             </span>
                           )}
                         </td>
+                        <td className="td">
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+                            STATUS_CLASSES[entry.status] ?? 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {STATUS_LABELS[entry.status] ?? entry.status}
+                          </span>
+                        </td>
                         <td
                           className={`td sticky right-0 z-10 border-l border-slate-300 ${
                             editingId === entry.id
@@ -1138,7 +1194,7 @@ export default function RevenueListPage() {
                         >
                           {editingId === entry.id ? (
                             <span className="text-xs text-slate-700 font-medium whitespace-nowrap">Редактируется</span>
-                          ) : (
+                          ) : canManageEntry(entry) ? (
                             <div className="flex gap-1">
                               <button className="btn-secondary text-xs" onClick={() => startEdit(entry)}>
                                 Изменить
@@ -1147,6 +1203,8 @@ export default function RevenueListPage() {
                                 Удалить
                               </button>
                             </div>
+                          ) : (
+                            <span className="text-xs text-slate-300 whitespace-nowrap">—</span>
                           )}
                         </td>
                       </tr>
@@ -1160,15 +1218,8 @@ export default function RevenueListPage() {
 
           {/* Итого */}
           {(() => {
-            const totalRevenue  = visibleEntries.reduce((s, e) => s + e.totalRevenue, 0);
-            const totalCash     = visibleEntries.reduce((s, e) => s + e.cashRevenue, 0);
-            const totalIncomes  = visibleEntries.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
-            const totalBonuses  = visibleEntries.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
-            const totalAdvances = visibleEntries.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
-            const totalSurcharges = visibleEntries.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
-            const totalExpenses = visibleEntries.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
-            const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
-            const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
+            const { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet } =
+              summarizeEntries(visibleEntries);
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
                 <span className="text-slate-500">Итого по выбранным записям:</span>
