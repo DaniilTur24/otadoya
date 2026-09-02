@@ -538,24 +538,6 @@ export default function RevenueListPage() {
 
   const manageableEntries = visibleEntries.filter(canManageEntry);
 
-  // Мини-отчёт по аптекам (admin/bookkeeper) — сколько выручки в общем и сколько наличных
-  // должно быть на руках, по тем же записям, что сейчас видны в таблице ниже.
-  const pharmacySummaries = (() => {
-    const map = new Map<number, { pharmacyName: string; entries: RevenueEntry[] }>();
-    for (const e of visibleEntries) {
-      const existing = map.get(e.pharmacy.id);
-      if (existing) existing.entries.push(e);
-      else map.set(e.pharmacy.id, { pharmacyName: e.pharmacy.name, entries: [e] });
-    }
-    return Array.from(map.entries())
-      .map(([pharmacyId, { pharmacyName, entries: list }]) => ({
-        pharmacyId,
-        pharmacyName,
-        summary: summarizeEntries(list),
-      }))
-      .sort((a, b) => a.pharmacyName.localeCompare(b.pharmacyName, 'ru'));
-  })();
-
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -565,57 +547,6 @@ export default function RevenueListPage() {
       <p className="text-slate-500 text-sm mb-4">
         Все введённые бухгалтером записи. Нажмите «Изменить» для редактирования.
       </p>
-
-      {/* Мини-отчёт по аптекам — только для admin/bookkeeper */}
-      {(role === 'admin' || role === 'bookkeeper') && (
-        <div className="card p-3 mb-5">
-          <h2 className="text-sm font-semibold text-slate-700 mb-2">Мини-отчёт по аптекам</h2>
-          {pharmacySummaries.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">Нет данных за выбранный период</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-slate-500 text-xs">
-                    <th className="text-left font-medium py-1 pr-4">Аптека</th>
-                    <th className="text-right font-medium py-1 pr-4">Всего</th>
-                    <th className="text-right font-medium py-1">Наличными на руках</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {pharmacySummaries.map((row) => (
-                    <tr key={row.pharmacyId}>
-                      <td className="py-1.5 pr-4 font-medium text-slate-800 whitespace-nowrap">{row.pharmacyName}</td>
-                      <td className="py-1.5 pr-4 text-right">
-                        <strong className={row.summary.total >= 0 ? 'text-green-700' : 'text-red-700'}>
-                          {fmt(row.summary.total)}
-                        </strong>
-                      </td>
-                      <td className="py-1.5 text-right">
-                        <strong className={row.summary.cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>
-                          {fmt(row.summary.cashNet)}
-                        </strong>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {pharmacySummaries.length > 1 && (() => {
-                  const overall = summarizeEntries(visibleEntries);
-                  return (
-                    <tfoot>
-                      <tr className="border-t border-slate-300">
-                        <td className="py-1.5 pr-4 font-semibold text-slate-800">Итого</td>
-                        <td className="py-1.5 pr-4 text-right font-semibold text-green-700">{fmt(overall.total)}</td>
-                        <td className="py-1.5 text-right font-semibold text-green-700">{fmt(overall.cashNet)}</td>
-                      </tr>
-                    </tfoot>
-                  );
-                })()}
-              </table>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Панель модерации — только для admin/bookkeeper */}
       {(role === 'admin' || role === 'bookkeeper') && pendingEntries.length > 0 && (
@@ -644,12 +575,15 @@ export default function RevenueListPage() {
                     <th className="th bg-amber-50 text-right">Терминал</th>
                     <th className="th bg-amber-50 text-right">Каспи</th>
                     <th className="th bg-amber-50 text-right">Расходы</th>
+                    <th className="th bg-amber-50 text-right">Итого</th>
+                    <th className="th bg-amber-50 text-right">Нал. на руках</th>
                     <th className="th bg-amber-50"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-amber-100">
                   {pendingEntries.map((entry) => {
                     const expenses = expenseItemsSum(entry.expenseItems);
+                    const { total, cashNet } = summarizeEntries([entry]);
                     const isExpanded = moderating === entry.id;
                     return (
                       <React.Fragment key={entry.id}>
@@ -661,6 +595,12 @@ export default function RevenueListPage() {
                           <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
                           <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
                           <td className="td text-right text-red-600">{expenses > 0 ? fmt(expenses) : '—'}</td>
+                          <td className="td text-right font-semibold">
+                            <span className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</span>
+                          </td>
+                          <td className="td text-right font-semibold">
+                            <span className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(cashNet)}</span>
+                          </td>
                           <td className="td">
                             {isExpanded ? (
                               <button
@@ -681,7 +621,7 @@ export default function RevenueListPage() {
                         </tr>
                         {isExpanded && (
                           <tr key={`${entry.id}-expand`} className="bg-white">
-                            <td colSpan={8} className="px-4 py-3">
+                            <td colSpan={10} className="px-4 py-3">
                               {entry.expenseItems.length > 0 && (
                                 <div className="mb-3 text-sm">
                                   <p className="font-medium text-slate-700 mb-1">Расходы:</p>
