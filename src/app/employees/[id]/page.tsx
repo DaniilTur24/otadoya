@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
-import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES, FIVE_DAY_VIA_ATTENDANCE_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
 import { useSalaryImpact } from '@/hooks/useSalaryImpact';
@@ -296,13 +296,16 @@ export default function EmployeeDetailPage() {
   }
 
   const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-  // Продавец или торгующая заведующая с включённым fiveDayViaAttendance отмечаются в табеле,
-  // а не сменой в записи выручки — их переработка и явки читаются оттуда же, что и у обычных
-  // табельных типов.
-  const isFiveDaySeller = FIVE_DAY_VIA_ATTENDANCE_TYPES.has(employee.employeeType) && employee.fiveDayViaAttendance;
+  // Продавец с включённым fiveDayViaAttendance отмечается в табеле вместо смены в записи
+  // выручки — переключатель "всё или ничего" (см. canGetRevenueShift). Его переработка и явки
+  // читаются из табеля, как у обычных табельных типов.
+  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
   // seller_five_day_fixed показывает и смены выручки, и табель одновременно — у него оба
   // источника разрешены (в разные дни), в отличие от isFiveDaySeller (только табель).
   const isSellerFiveDayFixedEmployee = employee.employeeType === 'seller_five_day_fixed';
+  // manager_trading с fiveDayViaAttendance — тоже смешанный режим (как seller_five_day_fixed),
+  // просто по другой формуле (baseSalary/workingCalendarDays, а не фикс. ставка).
+  const isMixedFiveDayManager = employee.employeeType === 'manager_trading' && employee.fiveDayViaAttendance;
 
   return (
     <div className="max-w-screen-lg space-y-4">
@@ -825,7 +828,7 @@ export default function EmployeeDetailPage() {
 
             {/* Табель посещаемости (manager_fixed / cleaner / office / pharmacy_manager, а также
                 продавец с включённой пятидневкой по табелю) */}
-            {(ATTENDANCE_BASED_TYPES.has(salary.employeeType) || isFiveDaySeller || isSellerFiveDayFixedEmployee) && (
+            {(ATTENDANCE_BASED_TYPES.has(salary.employeeType) || isFiveDaySeller || isSellerFiveDayFixedEmployee || isMixedFiveDayManager) && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-slate-700">Табель посещаемости за период</h3>

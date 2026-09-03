@@ -51,13 +51,12 @@ describe('validateShiftEmployeeType', () => {
     expect(error).toBe('Этому типу сотрудника нельзя назначить смену в записи выручки — он учитывается через табель посещаемости');
   });
 
-  it('blocks manager_trading once fiveDayViaAttendance is on — same rule as seller', async () => {
+  it('still allows manager_trading a revenue shift once fiveDayViaAttendance is on — mixed schedule, unlike seller', async () => {
     vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       employeeType: 'manager_trading',
       fiveDayViaAttendance: true,
     });
-    const error = await validateShiftEmployeeType(1, 'full_day');
-    expect(error).toBe('У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смену в записи выручки ему назначать нельзя');
+    expect(await validateShiftEmployeeType(1, 'full_day')).toBeNull();
   });
 
   it('allows manager_trading a revenue shift when fiveDayViaAttendance is off', async () => {

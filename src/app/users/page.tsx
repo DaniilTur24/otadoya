@@ -161,7 +161,7 @@ export default function UsersPage() {
     if (form.fiveDayViaAttendance !== original.fiveDayViaAttendance) {
       changed.push(
         form.fiveDayViaAttendance
-          ? 'Пятидневка по табелю: включается (смены будут читаться из табеля, а не из выручки)'
+          ? 'Пятидневка по табелю: включается (можно совмещать со сменами из выручки, кроме одной и той же даты)'
           : 'Пятидневка по табелю: выключается (отметки табеля перестанут оплачиваться)'
       );
     }
@@ -432,8 +432,8 @@ export default function UsersPage() {
                     checked={form.fiveDayViaAttendance}
                     onChange={(e) => setForm((f) => ({ ...f, fiveDayViaAttendance: e.target.checked }))}
                   />
-                  Пятидневка — отмечается в табеле посещаемости
-                  <span className="text-slate-400 font-normal">(вместо смены в записи выручки на каждый рабочий день)</span>
+                  Пятидневка — можно отмечать в табеле посещаемости
+                  <span className="text-slate-400 font-normal">(дополнительно к сменам из записи выручки — не на одну и ту же дату)</span>
                 </label>
               )}
             </div>

@@ -14,8 +14,8 @@ describe('canGetRevenueShift', () => {
     expect(canGetRevenueShift({ employeeType: 'manager_trading', fiveDayViaAttendance: false })).toBe(true);
   });
 
-  it('blocks manager_trading with fiveDayViaAttendance on — same rule as seller', () => {
-    expect(canGetRevenueShift({ employeeType: 'manager_trading', fiveDayViaAttendance: true })).toBe(false);
+  it('still allows manager_trading with fiveDayViaAttendance on — mixed schedule, unlike seller', () => {
+    expect(canGetRevenueShift({ employeeType: 'manager_trading', fiveDayViaAttendance: true })).toBe(true);
   });
 
   it('always allows seller_five_day_fixed regardless of fiveDayViaAttendance', () => {

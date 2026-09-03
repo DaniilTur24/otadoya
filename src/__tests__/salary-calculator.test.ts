@@ -708,6 +708,24 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
       const result = await calculateEmployeeMonthlySalary(5, 6, 2025);
       expect(result!.recordsCount).toBe(2);
     });
+
+    it('combines revenue shifts and attendance days in the same month — mixed schedule, unlike a plain seller', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...manager,
+        fiveDayViaAttendance: true,
+      });
+      vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
+      vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(3);
+      mockRevenueEntries({ shifts: [{ shiftType: 'full_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 }] });
+      const result = await calculateEmployeeMonthlySalary(5, 6, 2025);
+      const revenuePremium = Math.max(0, (0 - 300000) * 0.015); // floors at 0
+      const expected = 150000 / 10 + (150000 / 20) * 3 + revenuePremium;
+      expect(result!.fullDayShiftsCount).toBe(1);
+      expect(result!.fiveDayShiftsCount).toBe(3);
+      expect(result!.salaryFromFullDayShifts).toBeCloseTo(150000 / 10, 5);
+      expect(result!.salaryFromFiveDayShifts).toBeCloseTo((150000 / 20) * 3, 5);
+      expect(result!.totalSalary).toBeCloseTo(expected, 5);
+    });
   });
 
   describe('ladderPremiumEnabled = true', () => {

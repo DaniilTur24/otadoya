@@ -42,21 +42,30 @@ export const ATTENDANCE_BASED_TYPES: ReadonlySet<string> = new Set([
   'pharmacy_manager',
 ]);
 
-// Типы, у которых fiveDayViaAttendance переключает источник смен между DailyRevenueEntry и
-// AttendanceShift целиком, на весь месяц сразу (не по датам, в отличие от seller_five_day_fixed).
-// Для остальных USER_LINKED_TYPES (manager_fixed/pharmacy_manager) это неприменимо — они и так
+// Типы, у которых fiveDayViaAttendance включает учёт пятидневных дней через табель
+// (AttendanceShift), формула — baseSalary/workingCalendarDays × attendanceCount. Для
+// остальных USER_LINKED_TYPES (manager_fixed/pharmacy_manager) поле неприменимо — они и так
 // всегда только по табелю.
 export const FIVE_DAY_VIA_ATTENDANCE_TYPES: ReadonlySet<string> = new Set(['seller', 'manager_trading']);
 
+// Из FIVE_DAY_VIA_ATTENDANCE_TYPES только seller — переключатель "всё или ничего": включив
+// fiveDayViaAttendance, продавец целиком теряет возможность получить смену в записи выручки
+// на весь месяц. manager_trading с тем же флагом ведёт себя иначе — может совмещать смены из
+// выручки и дни по табелю в одном месяце (как seller_five_day_fixed, но по формуле
+// baseSalary/workingCalendarDays, а не по фиксированной ставке); конфликт на одну и ту же
+// дату проверяется отдельно (validateNoAttendanceOnDate/validateNoShiftOnDate), а не блокировкой типа.
+const FIVE_DAY_VIA_ATTENDANCE_BLOCKS_SHIFTS_TYPES: ReadonlySet<string> = new Set(['seller']);
+
 /**
  * Может ли сотрудник получить смену (день/сутки) в записи выручки.
- * false для табельных типов и для seller/manager_trading с включённым fiveDayViaAttendance
- * (их пятидневка считается только по табелю). seller_five_day_fixed — исключение: ему можно
- * и то, и другое, конфликт на конкретную дату проверяется отдельно (см. validateNoAttendanceOnDate).
+ * false для табельных типов и для продавца с включённым fiveDayViaAttendance (его пятидневка
+ * считается только по табелю). seller_five_day_fixed и manager_trading с fiveDayViaAttendance —
+ * исключения: им можно и то, и другое, конфликт на конкретную дату проверяется отдельно
+ * (см. validateNoAttendanceOnDate).
  */
 export function canGetRevenueShift(employee: { employeeType: string; fiveDayViaAttendance?: boolean | null }): boolean {
   if (ATTENDANCE_BASED_TYPES.has(employee.employeeType)) return false;
-  if (FIVE_DAY_VIA_ATTENDANCE_TYPES.has(employee.employeeType) && Boolean(employee.fiveDayViaAttendance)) return false;
+  if (FIVE_DAY_VIA_ATTENDANCE_BLOCKS_SHIFTS_TYPES.has(employee.employeeType) && Boolean(employee.fiveDayViaAttendance)) return false;
   return true;
 }
 
