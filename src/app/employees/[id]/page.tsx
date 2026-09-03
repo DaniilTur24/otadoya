@@ -650,12 +650,14 @@ export default function EmployeeDetailPage() {
                           <>
                             <span className="text-slate-500">Дневных смен</span>
                             <span className="font-medium text-right">
-                              {salary.dayShiftsCount} × {fmt(salary.baseSalary / 15)} = {fmt(salary.salaryFromDayShifts)} ₸
+                              {/* Показываем среднюю ставку как итог ÷ количество (не baseSalary/15 напрямую) —
+                                  итог теперь округлён до 5 тенге, и count × baseSalary/15 с ним не сходится. */}
+                              {salary.dayShiftsCount} × {fmt(salary.dayShiftsCount > 0 ? salary.salaryFromDayShifts / salary.dayShiftsCount : salary.baseSalary / 15)} = {fmt(salary.salaryFromDayShifts)} ₸
                             </span>
 
                             <span className="text-slate-500">Суточных смен</span>
                             <span className="font-medium text-right">
-                              {salary.fullDayShiftsCount} × {fmt(salary.baseSalary / 10)} = {fmt(salary.salaryFromFullDayShifts)} ₸
+                              {salary.fullDayShiftsCount} × {fmt(salary.fullDayShiftsCount > 0 ? salary.salaryFromFullDayShifts / salary.fullDayShiftsCount : salary.baseSalary / 10)} = {fmt(salary.salaryFromFullDayShifts)} ₸
                             </span>
                           </>
                         )}
@@ -666,12 +668,12 @@ export default function EmployeeDetailPage() {
                         <span className="font-medium text-right">
                           {isSellerFiveDayFixed ? (
                             salary.fiveDayShiftsCount > 0 ? (
-                              <>{salary.fiveDayShiftsCount} × {fmt(salary.shiftRate ?? 0)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                              <>{salary.fiveDayShiftsCount} × {fmt(salary.salaryFromFiveDayShifts / salary.fiveDayShiftsCount)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
                             ) : (
                               <span className="text-slate-300">0</span>
                             )
                           ) : salary.fiveDayShiftsCount > 0 && salary.workingCalendarDays ? (
-                            <>{salary.fiveDayShiftsCount} × {fmt(salary.baseSalary / salary.workingCalendarDays)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                            <>{salary.fiveDayShiftsCount} × {fmt(salary.salaryFromFiveDayShifts / salary.fiveDayShiftsCount)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
                           ) : salary.fiveDayShiftsCount > 0 ? (
                             <span className="text-amber-600">{salary.fiveDayShiftsCount} смен — календарь не заполнен</span>
                           ) : (

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 export { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 export { EMPLOYEE_TYPE_LABELS } from '@/lib/employee-types';
 import { MANAGER_BONUS_SHARE_PERCENT, USER_LINKED_TYPES } from '@/lib/employee-types';
+import { roundMoney } from '@/lib/money';
 
 export interface MonthlySalaryResult {
   employeeId: number;
@@ -18,6 +19,12 @@ export interface MonthlySalaryResult {
   salaryFromFiveDayShifts: number;
   /** null — если производственный календарь не заполнен для этого месяца */
   workingCalendarDays: number | null;
+  /**
+   * true — у сотрудника есть отработанные по табелю дни за этот месяц, но производственный
+   * календарь не заполнен, поэтому оклад за пятидневку/табель посчитан как 0 вместо реальной
+   * суммы. Раньше это было незаметно: totalSalary просто получался нулевым без объяснения.
+   */
+  calendarMissing: boolean;
   revenuePremiumDayShifts: number;
   revenuePremiumFullDayShifts: number;
   totalRevenuePremium: number;
@@ -166,7 +173,7 @@ async function computeManagerLadderPremium(
       ph.managerPremiumStepBonus !== null ? Number(ph.managerPremiumStepBonus) : null,
     );
   }
-  return { premium, revenueTotal };
+  return { premium: roundMoney(premium), revenueTotal };
 }
 
 /**
@@ -184,6 +191,7 @@ async function computePooledShiftAverages(
     where: {
       pharmacyId,
       status: 'approved',
+      excludedFromReport: false,
       date: { gte: startOfMonth(year, month), lte: endOfMonth(year, month) },
     },
     select: { shiftType: true, cashRevenue: true, terminalRevenue: true },
@@ -211,11 +219,6 @@ async function computePooledShiftAverages(
   };
 }
 
-/** Округление до ближайших 5 тенге — так исторически считали долю заведующей вручную. */
-function roundToNearest5(value: number): number {
-  return Math.round(value / 5) * 5;
-}
-
 /** 10% от суммы всех pharmaBonus, заработанных в управляемых аптеках за месяц (включая свои). */
 async function computeManagerBonusShare(
   pharmacyIds: number[],
@@ -233,12 +236,13 @@ async function computeManagerBonusShare(
       entry: {
         pharmacyId: { in: pharmacyIds },
         status: 'approved',
+        excludedFromReport: false,
         date: { gte: dateFrom, lte: dateTo },
       },
     },
   });
   const total = Number(agg._sum.amount ?? 0);
-  return { share: roundToNearest5(total * MANAGER_BONUS_SHARE_PERCENT), total };
+  return { share: roundMoney(total * MANAGER_BONUS_SHARE_PERCENT), total };
 }
 
 /**
@@ -300,7 +304,12 @@ async function getAttendanceShiftsCount(
   });
 }
 
-/** Авансы выданные сотруднику как получателю — общий механизм для всех типов сотрудников. */
+/**
+ * Авансы выданные сотруднику как получателю — общий механизм для всех типов сотрудников.
+ * Намеренно НЕ фильтруется по excludedFromReport (в отличие от смены/премии/бонуса в
+ * entryFilter выше): аванс — это уже физически выданные из кассы деньги, факт остаётся фактом
+ * независимо от того, считается ли сама запись выручки в отчёте по аптеке.
+ */
 async function computeAdvances(
   employeeId: number,
   month: number,
@@ -319,13 +328,15 @@ async function computeAdvances(
       },
     },
   });
-  return Number(agg._sum.amount ?? 0);
+  return roundMoney(Number(agg._sum.amount ?? 0));
 }
 
 /**
  * Доплата, выданная сотруднику как получателю (category='employeeSurcharge') — тот же механизм,
  * что и аванс, но прибавляется к зарплате, а не вычитается, и ведётся отдельно от pharmaBonus
  * (та — общий котёл аптеки для доли заведующей, доплата — персональная, в статистику бонусов не входит).
+ * Как и аванс, намеренно НЕ фильтруется по excludedFromReport — это решение о персональной
+ * доплате сотруднику, а не о том, считается ли сама смена в отчёте по аптеке.
  */
 async function computeSurcharges(
   employeeId: number,
@@ -345,7 +356,7 @@ async function computeSurcharges(
       },
     },
   });
-  return Number(agg._sum.amount ?? 0);
+  return roundMoney(Number(agg._sum.amount ?? 0));
 }
 
 const EMPTY_RESULT_BASE = {
@@ -356,6 +367,7 @@ const EMPTY_RESULT_BASE = {
   salaryFromFullDayShifts: 0,
   salaryFromFiveDayShifts: 0,
   workingCalendarDays: null as number | null,
+  calendarMissing: false,
   revenuePremiumDayShifts: 0,
   revenuePremiumFullDayShifts: 0,
   totalRevenuePremium: 0,
@@ -425,9 +437,16 @@ async function calculateTradingEmployeeSalary(
   const useBonusShare = isManager && Boolean(employee.managerBonusShareEnabled);
   const managedPharmacyIds = isManager ? resolveManagedPharmacyIds(employee, pharmacyId) : [];
 
+  // excludedFromReport — бухгалтер вычёркивает запись как ошибочную/дубль (см. monthly-report-
+  // builder.ts). Раньше эта запись переставала попадать в отчёт по аптеке, но продолжала
+  // оплачиваться сотруднику как обычная смена — отчёт и зарплата расходились молча. Смена,
+  // личная премия за выручку и pharmaBonus (через тот же entryFilter в pharmaBonusAgg ниже)
+  // теперь тоже её не считают. Авансы/доплаты (computeAdvances/computeSurcharges) — исключение:
+  // это уже выданные/начисленные деньги, независимо от того, считается ли сама смена.
   const entryFilter = {
     employeeId: employee.id,
     status: 'approved',
+    excludedFromReport: false,
     date: { gte: dateFrom, lte: dateTo },
     ...(pharmacyId ? { pharmacyId } : {}),
   };
@@ -501,15 +520,20 @@ async function calculateTradingEmployeeSalary(
   const fiveDayShiftsCount = fiveDayViaAttendance ? attendanceFiveDayCount : 0;
 
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
-  const salaryFromFullDayShifts = baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0;
-  const salaryFromDayShifts = baseSalary > 0 ? (baseSalary / 15) * dayShiftsCount : 0;
+  const salaryFromFullDayShifts = roundMoney(baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0);
+  const salaryFromDayShifts = roundMoney(baseSalary > 0 ? (baseSalary / 15) * dayShiftsCount : 0);
   const shiftRate = employee.shiftRate != null ? Number(employee.shiftRate) : null;
-  const salaryFromFiveDayShifts = useFixedFiveDayRate
-    ? (shiftRate ? shiftRate * fiveDayShiftsCount : 0)
-    : baseSalary > 0 && workingCalendarDays
-      ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount
-      : 0;
-  const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
+  const salaryFromFiveDayShifts = roundMoney(
+    useFixedFiveDayRate
+      ? (shiftRate ? shiftRate * fiveDayShiftsCount : 0)
+      : baseSalary > 0 && workingCalendarDays
+        ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount
+        : 0
+  );
+  // Фиксированная ставка (useFixedFiveDayRate) не зависит от календаря — только для случая
+  // baseSalary/workingCalendarDays, если дни отработаны, а календарь не заполнен.
+  const calendarMissing = !useFixedFiveDayRate && workingCalendarDays === null && fiveDayShiftsCount > 0;
+  const totalBonuses = roundMoney(Number(pharmaBonusAgg._sum.amount ?? 0));
 
   // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
   // Иначе — премия как у продавца (floor в 0 на каждый тип смены независимо), но для каждой
@@ -535,11 +559,13 @@ async function calculateTradingEmployeeSalary(
       }
     }
   }
+  revenuePremiumDayShifts = roundMoney(revenuePremiumDayShifts);
+  revenuePremiumFullDayShifts = roundMoney(revenuePremiumFullDayShifts);
   const totalRevenuePremium = revenuePremiumDayShifts + revenuePremiumFullDayShifts;
 
   const managerLadderPremium = ladderStats.premium;
   const managedRevenueTotal = ladderStats.revenueTotal;
-  const allowance = Number(employee.allowance ?? 0);
+  const allowance = roundMoney(Number(employee.allowance ?? 0));
 
   const totalSalary =
     salaryFromFullDayShifts +
@@ -568,6 +594,7 @@ async function calculateTradingEmployeeSalary(
     salaryFromFullDayShifts,
     salaryFromFiveDayShifts,
     workingCalendarDays,
+    calendarMissing,
     attendanceShiftsCount: fiveDayShiftsCount,
     shiftRate,
     revenuePremiumDayShifts,
@@ -624,12 +651,14 @@ async function calculateFixedManagerSalary(
         : Promise.resolve({ share: 0, total: 0 }),
     ]);
   const managerBonusShare = bonusShareStats.share;
-  const allowance = Number(employee.allowance ?? 0);
+  const allowance = roundMoney(Number(employee.allowance ?? 0));
 
   const baseSalary = Number(employee.baseSalary);
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
-  const salaryFromFiveDayShifts =
-    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
+  const salaryFromFiveDayShifts = roundMoney(
+    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0
+  );
+  const calendarMissing = workingCalendarDays === null && attendanceShiftsCount > 0;
 
   const totalSalary =
     salaryFromFiveDayShifts +
@@ -650,6 +679,7 @@ async function calculateFixedManagerSalary(
     fiveDayShiftsCount: attendanceShiftsCount,
     salaryFromFiveDayShifts,
     workingCalendarDays,
+    calendarMissing,
     attendanceShiftsCount,
     totalAdvances,
     totalSurcharges,
@@ -687,8 +717,8 @@ async function calculateCleanerSalary(
   ]);
 
   const shiftRate = employee.shiftRate !== null && employee.shiftRate !== undefined ? Number(employee.shiftRate) : null;
-  const salaryFromShiftRate = shiftRate ? shiftRate * attendanceShiftsCount : 0;
-  const allowance = Number(employee.allowance ?? 0);
+  const salaryFromShiftRate = roundMoney(shiftRate ? shiftRate * attendanceShiftsCount : 0);
+  const allowance = roundMoney(Number(employee.allowance ?? 0));
   const totalSalary = salaryFromShiftRate + allowance + totalSurcharges - totalAdvances;
 
   return {
@@ -727,9 +757,11 @@ async function calculateOfficeSalary(
 
   const baseSalary = Number(employee.baseSalary);
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
-  const salaryFromFiveDayShifts =
-    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
-  const allowance = Number(employee.allowance ?? 0);
+  const salaryFromFiveDayShifts = roundMoney(
+    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0
+  );
+  const calendarMissing = workingCalendarDays === null && attendanceShiftsCount > 0;
+  const allowance = roundMoney(Number(employee.allowance ?? 0));
 
   const totalSalary = salaryFromFiveDayShifts + officeStats.premium + allowance + totalSurcharges - totalAdvances;
 
@@ -744,6 +776,7 @@ async function calculateOfficeSalary(
     fiveDayShiftsCount: attendanceShiftsCount,
     salaryFromFiveDayShifts,
     workingCalendarDays,
+    calendarMissing,
     attendanceShiftsCount,
     totalAdvances,
     totalSurcharges,
@@ -797,9 +830,11 @@ async function calculatePharmacyManagerSalary(
 
   const baseSalary = Number(employee.baseSalary);
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
-  const salaryFromFiveDayShifts =
-    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0;
-  const allowance = Number(employee.allowance ?? 0);
+  const salaryFromFiveDayShifts = roundMoney(
+    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * attendanceShiftsCount : 0
+  );
+  const calendarMissing = workingCalendarDays === null && attendanceShiftsCount > 0;
+  const allowance = roundMoney(Number(employee.allowance ?? 0));
 
   const totalSalary =
     salaryFromFiveDayShifts + managerStats.premium + managerBonusShare + allowance + totalSurcharges - totalAdvances;
@@ -815,6 +850,7 @@ async function calculatePharmacyManagerSalary(
     fiveDayShiftsCount: attendanceShiftsCount,
     salaryFromFiveDayShifts,
     workingCalendarDays,
+    calendarMissing,
     attendanceShiftsCount,
     totalAdvances,
     totalSurcharges,
@@ -971,9 +1007,15 @@ export async function getEmployeeMonthlyShifts(
   year: number,
   pharmacyId?: number,
 ): Promise<ShiftEntry[]> {
+  // excludedFromReport: false — этот список показывается в карточке сотрудника как разбивка
+  // того, что вошло в расчёт зарплаты выше (getEmployeeMonthlyShifts). Запись, исключённая
+  // бухгалтером как ошибочная/дубль, больше не считается в зарплате (см. entryFilter в
+  // calculateTradingEmployeeSalary) — показывать её здесь как обычную смену вводило бы в
+  // заблуждение: сумма строки не сходилась бы с итогом.
   const where: Record<string, unknown> = {
     employeeId,
     status: 'approved',
+    excludedFromReport: false,
     date: { gte: startOfMonth(year, month), lte: endOfMonth(year, month) },
   };
   if (pharmacyId) where.pharmacyId = pharmacyId;

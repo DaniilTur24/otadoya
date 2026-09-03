@@ -60,6 +60,27 @@ export async function POST(request: NextRequest) {
     // правка производственного календаря изменили бы карточку за уже закрытый месяц.
     const employeeSalaries = await buildEmployeeSalarySnapshot(year, month);
 
+    // Без производственного календаря пятидневная/табельная часть оклада тихо считается как 0
+    // (см. calendarMissing в salary-calculator.ts). Замораживать такие нули снимком нельзя —
+    // это зафиксирует неверную зарплату навсегда для уже закрытого месяца.
+    const affectedNames = [
+      ...new Set(
+        employeeSalaries
+          .filter((e) => e.pharmacyId === null && e.calendarMissing)
+          .map((e) => e.employeeName),
+      ),
+    ];
+    if (affectedNames.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            `Заполните производственный календарь за ${month}.${year} — иначе зарплата ` +
+            `будет зафиксирована нулём для: ${affectedNames.join(', ')}`,
+        },
+        { status: 400 },
+      );
+    }
+
     const record = await prisma.closedMonth.create({
       data: { year, month, snapshotJson: serializeSnapshot(snapshot, employeeSalaries) },
     });

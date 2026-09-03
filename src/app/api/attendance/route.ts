@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
 import { canMarkAttendance } from '@/lib/employee-types';
 import { isMonthClosed } from '@/lib/closed-month';
-import { validateNoShiftOnDate } from '@/lib/attendance-validation';
+import { validateNoShiftOnDate, validateNotFutureDate, validateEmployeePharmacyLink } from '@/lib/attendance-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +63,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'employeeId и date обязательны' }, { status: 400 });
   }
 
+  const futureDateError = validateNotFutureDate(new Date(date));
+  if (futureDateError) {
+    return NextResponse.json({ error: futureDateError }, { status: 400 });
+  }
+
   // Отметка табеля — это отработанный день, из которого считается зарплата. В закрытом
   // месяце суммы уже зафиксированы, поэтому новая отметка туда попасть не должна:
   // она разошлась бы со снимком (та же защита, что и у записи выручки).
@@ -92,6 +97,15 @@ export async function POST(request: NextRequest) {
       { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }
     );
+  }
+
+  // Сотрудник должен реально работать в этой аптеке — офисные отметки (pharmacyId не передан)
+  // проверке не подлежат, привязывать не к чему.
+  if (pharmacyId) {
+    const pharmacyLinkError = await validateEmployeePharmacyLink(Number(employeeId), Number(pharmacyId));
+    if (pharmacyLinkError) {
+      return NextResponse.json({ error: pharmacyLinkError }, { status: 400 });
+    }
   }
 
   // seller_five_day_fixed может получать и смену в выручке, и отметку табеля, но не обе на одну

@@ -62,6 +62,11 @@ export default function AttendancePage() {
 
   const [selected, setSelected] = useState<Cursor | null>(null);
   const [anchor, setAnchor] = useState<Cursor | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  // Норма рабочих дней месяца — используется только для предупреждения, не для ограничения:
+  // сотрудник, отработавший сверх нормы, получит оплату за все отмеченные дни как и раньше,
+  // просто это становится видно сразу в табеле, а не только в карточке зарплаты.
+  const [workingDaysForMonth, setWorkingDaysForMonth] = useState<number | null>(null);
   const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +103,36 @@ export default function AttendancePage() {
   }, [refreshData]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    fetch('/api/auth/me').then((r) => r.json()).then((d) => setRole(d.role ?? null)).catch(() => setRole(null));
+  }, []);
+
+  // Только admin/bookkeeper видят норму — заведующему решение об оплате всё равно не показывают
+  // нигде в интерфейсе, и /api/working-calendar ему недоступен (403).
+  useEffect(() => {
+    if (role !== 'admin' && role !== 'bookkeeper') {
+      setWorkingDaysForMonth(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/working-calendar?year=${year}`)
+      .then((r) => r.json())
+      .then((entries: { month: number; workingDays: number }[]) => {
+        if (cancelled) return;
+        setWorkingDaysForMonth(entries.find((e) => e.month === month)?.workingDays ?? null);
+      })
+      .catch(() => { if (!cancelled) setWorkingDaysForMonth(null); });
+    return () => { cancelled = true; };
+  }, [role, year, month]);
+
+  // Типы, чей пятидневный/табельный оклад делится на норму рабочих дней месяца
+  // (baseSalary / workingDays × отмеченные дни) — превышение нормы у них реально означает
+  // переплату сверх оклада. cleaner и seller_five_day_fixed платятся по ставке за смену,
+  // у них нет понятия «нормы», предупреждение для них было бы бессмысленным.
+  const CALENDAR_PRORATED_GROUP_TYPES = new Set([
+    'manager_fixed', 'pharmacy_manager', 'office', 'seller_five_day', 'manager_trading_five_day',
+  ]);
 
   const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office', 'seller_five_day_fixed']
     .map((type) => ({ type, label: EMPLOYEE_TYPE_LABELS[type], items: employees.filter((e) => e.employeeType === type) }))
@@ -485,7 +520,18 @@ export default function AttendancePage() {
                             </td>
                           );
                         })}
-                        <td className="td text-center font-medium text-slate-600">{total}</td>
+                        <td className="td text-center font-medium text-slate-600">
+                          {CALENDAR_PRORATED_GROUP_TYPES.has(g.type) && workingDaysForMonth && total > workingDaysForMonth ? (
+                            <span
+                              className="text-amber-600 font-semibold cursor-help"
+                              title={`Отмечено ${total} дней при норме ${workingDaysForMonth} — оплата пойдёт за все ${total}, сверх оклада`}
+                            >
+                              {total}/{workingDaysForMonth} ⚠
+                            </span>
+                          ) : (
+                            total
+                          )}
+                        </td>
                         <td className="td text-center font-medium text-slate-600">
                           {overtimeTotal(emp.id) > 0 ? overtimeTotal(emp.id) : <span className="text-slate-300">—</span>}
                         </td>

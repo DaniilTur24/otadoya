@@ -36,6 +36,7 @@ import {
   calculateAllEmployeesSalaries,
   getEmployeeMonthlyAdvances,
 } from '@/lib/salary-calculator';
+import { roundMoney } from '@/lib/money';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -362,6 +363,192 @@ describe('calculateEmployeeMonthlySalary', () => {
     expect(result!.allowance).toBe(15000);
     expect(result!.allowanceDescription).toBe('за стаж');
     expect(result!.totalSalary).toBe(15000);
+  });
+});
+
+// ─── rounding to the nearest 5 tenge (money.ts) ─────────────────────────────
+// Regression coverage for the bug found in the security audit: raw float division produced
+// unpayable amounts like 46666.66666666667 ₸, and summing several such fractions was
+// order-dependent. Every money component is now rounded to the nearest 5 tenge (the smallest
+// coin in circulation) at the point it is computed, so totalSalary — a sum of already-rounded
+// parts — comes out a multiple of 5 automatically, without a separate final rounding step.
+describe('calculateEmployeeMonthlySalary — rounding to the nearest 5 tenge', () => {
+  it('rounds a day-shift salary that would otherwise be a repeating fraction', async () => {
+    // 100000 / 15 * 7 = 46666.66666666667 before rounding — this exact case is what the audit
+    // flagged as an unpayable amount.
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1, name: 'Продавец', baseSalary: 100000,
+    });
+    mockBonuses(0);
+    mockCalendar(null);
+    mockShifts(Array.from({ length: 7 }, () => ({ shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 })));
+
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    expect(result!.salaryFromDayShifts).toBe(46665); // nearest multiple of 5 to 46666.67
+    expect(result!.salaryFromDayShifts % 5).toBe(0);
+    expect(result!.totalSalary).toBe(46665);
+  });
+
+  it('rounds the 1.5% revenue premium to a payable amount', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockBonuses(0);
+    mockCalendar(null);
+    // (523456.78 - 200000) * 1.5% = 4851.8517 before rounding.
+    mockShifts([{ shiftType: 'day', cashRevenue: 523456.78, terminalRevenue: 0, kaspiRevenue: 0 }]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    expect(result!.revenuePremiumDayShifts).toBe(4850); // nearest multiple of 5 to 4851.85
+    expect(result!.totalRevenuePremium % 5).toBe(0);
+  });
+
+  it('is no longer order-dependent — summing per-shift equals multiplying once', async () => {
+    // Audit finding: summing 470000/15 twenty-six times gave a different float than
+    // multiplying once. Both employees earn the exact same 26 fractional day shifts;
+    // rounding each shift's contributing components removes the discrepancy.
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1, name: 'Продавец А', baseSalary: 470000,
+    });
+    mockBonuses(0);
+    mockCalendar(null);
+    mockShifts(Array.from({ length: 26 }, () => ({ shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 })));
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    expect(result!.salaryFromDayShifts).toBe(roundMoney((470000 / 15) * 26));
+    expect(result!.salaryFromDayShifts % 5).toBe(0);
+  });
+
+  it('rounds the manager bonus share and ladder premium, not just shift pay', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 6, name: 'Заведующая', baseSalary: 0, employeeType: 'manager_fixed',
+      pharmacies: [{ employeeId: 6, pharmacyId: 11 }],
+      ladderPremiumEnabled: true, managerBonusShareEnabled: true,
+    });
+    mockCalendar(null);
+    mockManagedPharmacies([
+      { id: 11, managerPremiumThreshold: 100000, managerPremiumBase: 10001, managerPremiumStepAmount: null, managerPremiumStepBonus: null },
+    ]);
+    mockExpenseAggregates({ managerBonusBase: 123457 }); // 10% -> 12345.7 before rounding
+    mockRevenueEntries({ pharmacyRevenueRows: [{ pharmacyId: 11, cashRevenue: 200000, terminalRevenue: 0, kaspiRevenue: 0 }] });
+
+    const result = await calculateEmployeeMonthlySalary(6, 9, 2026);
+
+    // Ladder base itself (10001) is an admin typo away from a multiple of 5 — still rounds.
+    expect(result!.managerLadderPremium).toBe(10000);
+    expect(result!.managerBonusShare % 5).toBe(0);
+  });
+
+  it('rounds a cleaner shift-rate salary and an allowance that is not a multiple of 5', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 7, name: 'Уборщица', baseSalary: 0, employeeType: 'cleaner', shiftRate: 3333.33, allowance: 1002,
+    });
+    mockAggregates(0, 0, 0);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(3);
+
+    const result = await calculateEmployeeMonthlySalary(7, 9, 2026);
+
+    // 3333.33 * 3 = 9999.99 before rounding.
+    expect(result!.salaryFromShiftRate).toBe(10000);
+    expect(result!.allowance).toBe(1000); // 1002 rounds down to the nearest 5
+    expect(result!.totalSalary).toBe(11000);
+  });
+});
+
+// ─── excludedFromReport must also stop paying the excluded shift ───────────
+// Regression coverage for the audit finding: a revenue entry the bookkeeper marks
+// excludedFromReport (duplicate/mistake) was still counted by the salary calculator, even
+// though computeMonthlyData (the report) already skipped it — report and payroll silently
+// disagreed. Every revenue-derived query in the salary path must now filter it out too.
+// Advances/surcharges are the deliberate exception (see the comments on computeAdvances/
+// computeSurcharges) — that money was already physically handed over, independent of whether
+// the entry counts in the report.
+describe('calculateEmployeeMonthlySalary — excludedFromReport stops paying the shift', () => {
+  beforeEach(() => {
+    mockCalendar(null);
+  });
+
+  it('filters excludedFromReport out of the personal shift/premium query (entryFilter)', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockBonuses(0);
+    const findMany = vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>);
+    findMany.mockResolvedValue([]);
+
+    await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    const call = findMany.mock.calls.find((c) => c[0]?.where?.employeeId !== undefined);
+    expect(call![0].where.excludedFromReport).toBe(false);
+  });
+
+  it('filters excludedFromReport out of the personal pharmaBonus aggregate (same entryFilter)', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockShifts([]);
+    const agg = vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>);
+    agg.mockResolvedValue({ _sum: { amount: 0 } });
+
+    await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    const call = agg.mock.calls.find((c) => c[0]?.where?.category === 'pharmaBonus');
+    expect(call![0].where.entry.excludedFromReport).toBe(false);
+  });
+
+  it('filters excludedFromReport out of the pooled shift-average query', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockBonuses(0);
+    const findMany = vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>);
+    findMany.mockImplementation((args: { where?: { employeeId?: number } }) => {
+      if (args?.where?.employeeId !== undefined) {
+        return Promise.resolve([{ pharmacyId: 10, shiftType: 'day', cashRevenue: 220000, terminalRevenue: 0, kaspiRevenue: 0 }]);
+      }
+      return Promise.resolve([]);
+    });
+    vi.mocked(prisma.pharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 10, poolAverageRevenuePremium: true },
+    ]);
+
+    await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    const poolCall = findMany.mock.calls.find((c) => c[0]?.where?.employeeId === undefined);
+    expect(poolCall![0].where.excludedFromReport).toBe(false);
+  });
+
+  it('filters excludedFromReport out of the manager bonus-share aggregate', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 5, name: 'Заведующая', baseSalary: 150000, employeeType: 'manager_trading',
+      pharmacies: [{ employeeId: 5, pharmacyId: 10 }], managerBonusShareEnabled: true,
+    });
+    mockShifts([]);
+    const agg = vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>);
+    agg.mockResolvedValue({ _sum: { amount: 0 } });
+
+    await calculateEmployeeMonthlySalary(5, 9, 2026);
+
+    const call = agg.mock.calls.find((c) => c[0]?.where?.entry?.pharmacyId !== undefined);
+    expect(call![0].where.entry.excludedFromReport).toBe(false);
+  });
+
+  it('does NOT filter advances by excludedFromReport — the cash was already handed over', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockShifts([]);
+    const agg = vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>);
+    agg.mockResolvedValue({ _sum: { amount: 0 } });
+
+    await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    const advanceCall = agg.mock.calls.find((c) => c[0]?.where?.category === 'employeeAdvance');
+    expect(advanceCall![0].where.entry).not.toHaveProperty('excludedFromReport');
+  });
+
+  it('does NOT filter surcharges by excludedFromReport — same deliberate exception as advances', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockShifts([]);
+    const agg = vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>);
+    agg.mockResolvedValue({ _sum: { amount: 0 } });
+
+    await calculateEmployeeMonthlySalary(1, 9, 2026);
+
+    const surchargeCall = agg.mock.calls.find((c) => c[0]?.where?.category === 'employeeSurcharge');
+    expect(surchargeCall![0].where.entry).not.toHaveProperty('excludedFromReport');
   });
 });
 
@@ -709,6 +896,32 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
       expect(result!.recordsCount).toBe(2);
     });
 
+    it('flags calendarMissing when attendance days exist but the working calendar is not configured', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...manager,
+        fiveDayViaAttendance: true,
+      });
+      vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(4);
+      mockRevenueEntries({ shifts: [] });
+      const result = await calculateEmployeeMonthlySalary(5, 6, 2025);
+      // Silently paid 0 for real work — this is exactly the bug the flag exists to surface.
+      expect(result!.salaryFromFiveDayShifts).toBe(0);
+      expect(result!.calendarMissing).toBe(true);
+    });
+
+    it('does not flag calendarMissing when there is no attendance to lose', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...manager,
+        fiveDayViaAttendance: true,
+      });
+      vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+      mockRevenueEntries({ shifts: [] });
+      const result = await calculateEmployeeMonthlySalary(5, 6, 2025);
+      expect(result!.calendarMissing).toBe(false);
+    });
+
     it('combines revenue shifts and attendance days in the same month — mixed schedule, unlike a plain seller', async () => {
       vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
         ...manager,
@@ -807,6 +1020,15 @@ describe('calculateEmployeeMonthlySalary — seller_five_day_fixed', () => {
     expect(result!.salaryFromFiveDayShifts).toBe(125000);
   });
 
+  it('never flags calendarMissing — the fixed rate does not depend on the working calendar', async () => {
+    // calendar is null (from beforeEach's mockCalendar(null)) and the employee worked days —
+    // exactly the situation that WOULD trip calendarMissing for a calendar-prorated formula.
+    mockShifts([]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(10);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    expect(result!.calendarMissing).toBe(false);
+  });
+
   it('combines revenue shifts (from baseSalary) and attendance days (from shiftRate) in the same month', async () => {
     mockShifts([
       { shiftType: 'full_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
@@ -880,11 +1102,20 @@ describe('calculateEmployeeMonthlySalary — manager_fixed', () => {
     expect(result!.totalSalary).toBeCloseTo((100000 / 20) * 10, 5);
   });
 
-  it('returns zero base salary when calendar is not configured', async () => {
+  it('returns zero base salary when calendar is not configured, and flags calendarMissing', async () => {
     vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(5);
     const result = await calculateEmployeeMonthlySalary(6, 6, 2025);
     expect(result!.salaryFromFiveDayShifts).toBe(0);
+    // 5 worked days paid nothing — calendarMissing is what tells the bookkeeper why.
+    expect(result!.calendarMissing).toBe(true);
+  });
+
+  it('does not flag calendarMissing when nobody worked that month', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    const result = await calculateEmployeeMonthlySalary(6, 6, 2025);
+    expect(result!.calendarMissing).toBe(false);
   });
 
   it('includes managerBonusShare, allowance and ladder premium when both toggles are on', async () => {
@@ -990,6 +1221,19 @@ describe('calculateEmployeeMonthlySalary — office', () => {
     });
     const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
     expect(result!.salaryFromFiveDayShifts).toBeCloseTo((200000 / 20) * 15, 5);
+    expect(result!.calendarMissing).toBe(false);
+  });
+
+  it('flags calendarMissing when attendance exists but the working calendar is not configured', async () => {
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(12);
+    vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _sum: { cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+    });
+    const result = await calculateEmployeeMonthlySalary(8, 6, 2025);
+    expect(result!.salaryFromFiveDayShifts).toBe(0);
+    expect(result!.calendarMissing).toBe(true);
   });
 
   it('applies the flat bonus of the matching office tier based on total revenue of all pharmacies', async () => {
@@ -1083,6 +1327,19 @@ describe('calculateEmployeeMonthlySalary — pharmacy_manager', () => {
     expect(result!.managerBonusShare).toBe(0);
     expect(result!.allowance).toBe(0);
     expect(result!.totalSalary).toBeCloseTo((180000 / 18) * 9, 5);
+    expect(result!.calendarMissing).toBe(false);
+  });
+
+  it('flags calendarMissing when attendance exists but the working calendar is not configured', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(manager);
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(9);
+    mockManagedPharmacies([{ id: 12 }]);
+    mockRevenueEntries();
+
+    const result = await calculateEmployeeMonthlySalary(9, 6, 2025);
+    expect(result!.salaryFromFiveDayShifts).toBe(0);
+    expect(result!.calendarMissing).toBe(true);
   });
 
   it('applies the pharmacy ladder premium when ladderPremiumEnabled is true', async () => {

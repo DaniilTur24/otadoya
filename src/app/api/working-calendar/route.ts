@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/api-auth';
+import { requireAdmin, requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { isYearMonthClosed } from '@/lib/closed-month';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/working-calendar?year=2025 — возвращает все записи за год (до 12 штук) */
+/**
+ * GET /api/working-calendar?year=2025 — возвращает все записи за год (до 12 штук).
+ * Доступно и бухгалтеру (не только админу) — иначе страница табеля не может показать
+ * предупреждение о превышении нормы дней без захода в /settings/working-calendar.
+ * Изменение (PUT) остаётся только за админом.
+ */
 export async function GET(request: NextRequest) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
   const year = Number(new URL(request.url).searchParams.get('year') || new Date().getFullYear());

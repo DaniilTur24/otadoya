@@ -13,6 +13,7 @@ vi.mock('next/server', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     employee: { findUnique: vi.fn() },
+    employeePharmacy: { findFirst: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
     attendanceShift: { create: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
@@ -24,6 +25,7 @@ import { prisma } from '@/lib/prisma';
 import { POST } from '@/app/api/attendance/route';
 
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findFirstEmployeePharmacy = prisma.employeePharmacy.findFirst as unknown as ReturnType<typeof vi.fn>;
 const createShift = prisma.attendanceShift.create as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findFirstRevenueEntry = prisma.dailyRevenueEntry.findFirst as unknown as ReturnType<typeof vi.fn>;
@@ -38,6 +40,9 @@ function makeRequest(body: unknown): NextRequest {
 
 beforeEach(() => {
   findUniqueEmployee.mockReset();
+  // По умолчанию — привязан, если тест вообще передаёт pharmacyId (без него проверка не
+  // вызывается вовсе, см. отдельный describe ниже).
+  findFirstEmployeePharmacy.mockReset().mockResolvedValue({ employeeId: 28, pharmacyId: 2 });
   createShift.mockReset().mockResolvedValue({ id: 1 });
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
   findFirstRevenueEntry.mockReset().mockResolvedValue(null);
@@ -89,6 +94,57 @@ describe('POST /api/attendance — конфликт с сменой в запи�
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/уже назначена смена в записи выручки/);
     expect(createShift).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/attendance — сотрудник должен быть привязан к аптеке', () => {
+  it('отклоняет отметку, если сотрудник не привязан к переданной аптеке', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'cleaner' });
+    findFirstEmployeePharmacy.mockResolvedValue(null);
+
+    const res = await POST(
+      makeRequest({ employeeId: 28, date: '2026-06-26', pharmacyId: 99 })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/не привязан к этой аптеке/);
+    expect(createShift).not.toHaveBeenCalled();
+  });
+
+  it('не проверяет привязку для офисных отметок без аптеки', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'office' });
+
+    const res = await POST(
+      makeRequest({ employeeId: 28, date: '2026-06-26' })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
+    expect(findFirstEmployeePharmacy).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/attendance — запрет будущих дат', () => {
+  it('отклоняет отметку будущей датой', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'cleaner' });
+
+    const res = await POST(
+      makeRequest({ employeeId: 28, date: '2099-01-15', pharmacyId: 2 })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/будущей датой/);
+    expect(createShift).not.toHaveBeenCalled();
+  });
+
+  it('разрешает отметку сегодняшней датой', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'cleaner' });
+    const today = new Date().toISOString().slice(0, 10);
+
+    const res = await POST(
+      makeRequest({ employeeId: 28, date: today, pharmacyId: 2 })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
   });
 });
 
