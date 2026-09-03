@@ -93,4 +93,51 @@ describe('PUT /api/office-premium-settings — проверка диапазон
     expect(res.status).toBe(200);
     expect(transaction).toHaveBeenCalled();
   });
+
+  // Regression: findOfficeTierBonus() при выручке, не попавшей ни в один диапазон, молча
+  // возвращает премию 0 ₸ — без ошибки, без пометки. Разрыв между диапазонами и открытый
+  // сверху "хвост" таблицы — оба создают такую невидимую дыру. Найдено в QA-аудите (round 2, №7).
+  it('отклоняет разрыв между диапазонами', async () => {
+    const res = await PUT(
+      makeRequest({
+        tiers: [
+          { fromAmount: 0, toAmount: 1000000, bonusAmount: 5000 },
+          { fromAmount: 2000000, toAmount: null, bonusAmount: 10000 },
+        ],
+      })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/разрыв/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('отклоняет таблицу, где последний диапазон закрыт сверху', async () => {
+    const res = await PUT(
+      makeRequest({
+        tiers: [
+          { fromAmount: 0, toAmount: 1000000, bonusAmount: 5000 },
+          { fromAmount: 1000000, toAmount: 2000000, bonusAmount: 10000 },
+        ],
+      })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/без верхней границы/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('принимает единственный диапазон без верхней границы', async () => {
+    const res = await PUT(
+      makeRequest({ tiers: [{ fromAmount: 0, toAmount: null, bonusAmount: 5000 }] })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+  });
+
+  it('принимает пустую таблицу (премия офиса отключена)', async () => {
+    const res = await PUT(makeRequest({ tiers: [] })) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+  });
 });

@@ -114,19 +114,13 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const dateFrom = new Date(year, month - 1, 1);
-    const dateTo = new Date(year, month, 0, 23, 59, 59, 999);
-
-    await prisma.$transaction([
-      prisma.closedMonth.deleteMany({ where: { year, month } }),
-      // Записи, созданные пока месяц был закрыт, помечались excludedFromReport — при открытии
-      // месяца обратно нужно вернуть их в отчёт массово, иначе бухгалтер должен включать
-      // каждую запись вручную по одной и легко может забыть часть.
-      prisma.dailyRevenueEntry.updateMany({
-        where: { date: { gte: dateFrom, lte: dateTo }, excludedFromReport: true },
-        data: { excludedFromReport: false },
-      }),
-    ]);
+    // Раньше запись в закрытый месяц не отклонялась, а тихо сохранялась с excludedFromReport:
+    // true, и при открытии месяца обратно эту автопометку нужно было снять массово. Сейчас
+    // POST /api/revenue и табельные эндпоинты просто отклоняют запись в закрытый месяц (423) —
+    // автопометки больше не бывает. excludedFromReport теперь выставляет только бухгалтер вручную
+    // как осознанное решение "не учитывать эту запись" (влияет и на отчёт, и на зарплату), и
+    // массовый сброс здесь стирал бы это решение при каждом открытии месяца обратно.
+    await prisma.closedMonth.deleteMany({ where: { year, month } });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

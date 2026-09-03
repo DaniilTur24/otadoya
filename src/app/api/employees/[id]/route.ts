@@ -100,6 +100,27 @@ export async function DELETE(
     );
   }
 
+  // Жёсткое удаление каскадом стирает весь табель (AttendanceShift.onDelete: Cascade) и рвёт
+  // связь с уже выданными авансами/доплатами (DailyExpenseItem.employeeId.onDelete: SetNull) —
+  // деньги остаются расходом аптеки, но перестают вычитаться из чьей-либо зарплаты. Если у
+  // сотрудника есть история (табель, смены выручки или строки расходов на его имя), удаление
+  // подменяем деактивацией — она достигает той же цели (сотрудник пропадает из активных
+  // списков и зарплатных сводок будущих месяцев), ничего не стирая.
+  const [attendanceCount, revenueCount, expenseItemCount] = await Promise.all([
+    prisma.attendanceShift.count({ where: { employeeId } }),
+    prisma.dailyRevenueEntry.count({ where: { employeeId } }),
+    prisma.dailyExpenseItem.count({ where: { employeeId } }),
+  ]);
+
+  if (attendanceCount > 0 || revenueCount > 0 || expenseItemCount > 0) {
+    await prisma.employee.update({ where: { id: employeeId }, data: { isActive: false } });
+    return NextResponse.json({
+      ok: true,
+      deactivated: true,
+      message: 'У сотрудника есть табель, смены или авансы — карточка деактивирована, а не удалена, чтобы не стереть историю',
+    });
+  }
+
   await prisma.employee.delete({ where: { id: employeeId } });
   return NextResponse.json({ ok: true });
 }

@@ -15,6 +15,10 @@ const BOOKKEEPER_ALLOWED = [
   '/api/users',
   '/api/months/close',
   '/api/attendance',
+  // Нужен для бейджа "переработка" в табеле (/attendance) — GET уже открыт бухгалтеру
+  // на уровне route-хендлера (requireAdminOrBookkeeper), но без пути в этом списке
+  // middleware отклонял запрос раньше, чем он туда доходил.
+  '/api/working-calendar',
 ];
 
 const MANAGER_ALLOWED = [

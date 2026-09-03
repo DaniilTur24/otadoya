@@ -13,6 +13,9 @@ vi.mock('next/server', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     employee: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    attendanceShift: { count: vi.fn() },
+    dailyRevenueEntry: { count: vi.fn() },
+    dailyExpenseItem: { count: vi.fn() },
   },
 }));
 
@@ -22,6 +25,9 @@ import { PUT, DELETE } from '@/app/api/employees/[id]/route';
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const updateEmployee = prisma.employee.update as unknown as ReturnType<typeof vi.fn>;
 const deleteEmployee = prisma.employee.delete as unknown as ReturnType<typeof vi.fn>;
+const countAttendance = prisma.attendanceShift.count as unknown as ReturnType<typeof vi.fn>;
+const countRevenueEntry = prisma.dailyRevenueEntry.count as unknown as ReturnType<typeof vi.fn>;
+const countExpenseItem = prisma.dailyExpenseItem.count as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/employees/1', {
@@ -46,6 +52,10 @@ beforeEach(() => {
   findUniqueEmployee.mockReset();
   updateEmployee.mockReset().mockResolvedValue({ id: 1, pharmacies: [] });
   deleteEmployee.mockReset().mockResolvedValue({ id: 1 });
+  // По умолчанию — без истории, чтобы существующие тесты на реальное удаление продолжали работать
+  countAttendance.mockReset().mockResolvedValue(0);
+  countRevenueEntry.mockReset().mockResolvedValue(0);
+  countExpenseItem.mockReset().mockResolvedValue(0);
 });
 
 describe('PUT /api/employees/[id] — защита USER_LINKED_TYPES от редактирования вне /users', () => {
@@ -136,5 +146,59 @@ describe('DELETE /api/employees/[id] — заведующих/менеджеро
       expect(res.status).toBe(200);
       expect(deleteEmployee).toHaveBeenCalled();
     }
+  });
+});
+
+// Regression: жёсткое удаление каскадом стирает весь табель (AttendanceShift.onDelete:
+// Cascade) и рвёт связь выданных авансов с получателем (DailyExpenseItem.employeeId.onDelete:
+// SetNull) — деньги остаются расходом аптеки, но перестают вычитаться из чьей-либо зарплаты.
+// Найдено в QA-аудите (round 2, №3): для сотрудника с историей удаление должно быть
+// деактивацией, а не физическим удалением строки.
+describe('DELETE /api/employees/[id] — сотрудника с историей деактивируют, а не удаляют', () => {
+  it('деактивирует вместо удаления, если есть отметки табеля', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'cleaner' });
+    countAttendance.mockResolvedValue(3);
+
+    const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as {
+      status: number;
+      body: { ok: boolean; deactivated: boolean };
+    };
+
+    expect(res.status).toBe(200);
+    expect(res.body.deactivated).toBe(true);
+    expect(deleteEmployee).not.toHaveBeenCalled();
+    expect(updateEmployee).toHaveBeenCalledWith({ where: { id: 1 }, data: { isActive: false } });
+  });
+
+  it('деактивирует вместо удаления, если есть смены выручки', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller' });
+    countRevenueEntry.mockResolvedValue(1);
+
+    const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(deleteEmployee).not.toHaveBeenCalled();
+    expect(updateEmployee).toHaveBeenCalledWith({ where: { id: 1 }, data: { isActive: false } });
+  });
+
+  it('деактивирует вместо удаления, если на сотрудника оформлены авансы/доплаты', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'office' });
+    countExpenseItem.mockResolvedValue(2);
+
+    const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(deleteEmployee).not.toHaveBeenCalled();
+    expect(updateEmployee).toHaveBeenCalledWith({ where: { id: 1 }, data: { isActive: false } });
+  });
+
+  it('удаляет по-настоящему, если истории нет вообще', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller' });
+
+    const res = await DELETE(makeDeleteRequest(), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(deleteEmployee).toHaveBeenCalledWith({ where: { id: 1 } });
+    expect(updateEmployee).not.toHaveBeenCalled();
   });
 });

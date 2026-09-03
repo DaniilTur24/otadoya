@@ -22,6 +22,8 @@ vi.mock('@/lib/prisma', () => ({
 import { prisma } from '@/lib/prisma';
 import { GET, DELETE } from '@/app/api/months/close/route';
 
+const deleteManyClosedMonth = prisma.closedMonth.deleteMany as unknown as ReturnType<typeof vi.fn>;
+const updateManyRevenueEntry = prisma.dailyRevenueEntry.updateMany as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -41,6 +43,8 @@ function makeGetRequest(year: number, month: number, role: string, userId?: numb
 }
 
 beforeEach(() => {
+  deleteManyClosedMonth.mockReset().mockResolvedValue({ count: 1 });
+  updateManyRevenueEntry.mockReset().mockResolvedValue({ count: 0 });
   transaction.mockReset().mockResolvedValue([{}, { count: 0 }]);
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
@@ -72,19 +76,29 @@ describe('GET /api/months/close — статус доступен и менед�
 });
 
 describe('DELETE /api/months/close — повторное открытие месяца', () => {
-  it('удаляет ClosedMonth и массово возвращает excludedFromReport записям этого месяца', async () => {
+  it('удаляет только запись ClosedMonth', async () => {
     const res = await DELETE(makeRequest({ year: 2026, month: 6 })) as unknown as { status: number };
 
     expect(res.status).toBe(200);
-    expect(transaction).toHaveBeenCalledTimes(1);
-    const ops = transaction.mock.calls[0][0];
-    expect(ops).toHaveLength(2);
+    expect(deleteManyClosedMonth).toHaveBeenCalledWith({ where: { year: 2026, month: 6 } });
+  });
+
+  // Regression: раньше открытие месяца обратно массово сбрасывало excludedFromReport
+  // всем записям этого месяца — механизм остался от старого поведения (запись в закрытый
+  // месяц раньше не отклонялась, а тихо помечалась excludedFromReport вместо 423). Сейчас
+  // этот флаг выставляет только бухгалтер вручную как осознанное решение не учитывать
+  // конкретную запись — открытие месяца обратно не должно его стирать.
+  it('НЕ трогает excludedFromReport — это ручное решение бухгалтера, а не автопометка', async () => {
+    await DELETE(makeRequest({ year: 2026, month: 6 }));
+
+    expect(updateManyRevenueEntry).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it('требует year и month', async () => {
     const res = await DELETE(makeRequest({})) as unknown as { status: number };
 
     expect(res.status).toBe(400);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(deleteManyClosedMonth).not.toHaveBeenCalled();
   });
 });

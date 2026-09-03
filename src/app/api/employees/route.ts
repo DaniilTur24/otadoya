@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin, requireAnyRole, getManagerPharmacyIds } from '@/lib/api-auth';
+import { requireAdmin, requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
 import { EMPLOYEE_TYPES } from '@/lib/employee-types';
 
 function serialize(emp: Record<string, unknown>) {
@@ -10,6 +10,17 @@ function serialize(emp: Record<string, unknown>) {
     shiftRate: emp.shiftRate != null ? Number(emp.shiftRate) : null,
     allowance: Number(emp.allowance ?? 0),
   };
+}
+
+// Заведующему этот список нужен только чтобы выбрать сотрудника для смены/аванса/табеля —
+// оклад, доплату, ставку и премиальные переключатели коллег ему видеть незачем, а расчёт самой
+// зарплаты (сколько кто заработал) у него и так закрыт отдельным эндпоинтом (requireAdminOrBookkeeper).
+const MANAGER_HIDDEN_FIELDS = ['baseSalary', 'allowance', 'allowanceDescription', 'shiftRate', 'ladderPremiumEnabled', 'managerBonusShareEnabled'] as const;
+
+function stripFinancialFields(emp: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...emp };
+  for (const field of MANAGER_HIDDEN_FIELDS) delete result[field];
+  return result;
 }
 
 export async function GET(request: NextRequest) {
@@ -50,11 +61,12 @@ export async function GET(request: NextRequest) {
     },
   });
 
+  const isManager = getRequestRole(request) === 'manager';
   return NextResponse.json(
-    employees.map((e) => ({
-      ...serialize(e as unknown as Record<string, unknown>),
-      pharmacies: e.pharmacies.map((p) => p.pharmacy),
-    }))
+    employees.map((e) => {
+      const serialized = { ...serialize(e as unknown as Record<string, unknown>), pharmacies: e.pharmacies.map((p) => p.pharmacy) };
+      return isManager ? stripFinancialFields(serialized) : serialized;
+    })
   );
 }
 
