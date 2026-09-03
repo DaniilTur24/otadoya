@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { EMPLOYEE_TYPE_LABELS, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, canMarkAttendance } from '@/lib/employee-types';
 
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -18,11 +18,7 @@ interface Employee {
   fiveDayViaAttendance?: boolean;
 }
 
-// Продавец с включённым fiveDayViaAttendance отмечается в табеле как пятидневник,
-// хотя формально его тип 'seller' — не входит в ATTENDANCE_BASED_TYPES.
-function isAttendanceEligible(e: Employee): boolean {
-  return ATTENDANCE_BASED_TYPES.has(e.employeeType) || (e.employeeType === 'seller' && !!e.fiveDayViaAttendance);
-}
+const isAttendanceEligible = canMarkAttendance;
 interface AttendanceRecord {
   id: number;
   employeeId: number;
@@ -103,13 +99,20 @@ export default function AttendancePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office']
+  const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office', 'seller_five_day_fixed']
     .map((type) => ({ type, label: EMPLOYEE_TYPE_LABELS[type], items: employees.filter((e) => e.employeeType === type) }))
-    .concat([{
-      type: 'seller_five_day',
-      label: 'Продавцы (пятидневка)',
-      items: employees.filter((e) => e.employeeType === 'seller' && e.fiveDayViaAttendance),
-    }])
+    .concat([
+      {
+        type: 'seller_five_day',
+        label: 'Продавцы (пятидневка)',
+        items: employees.filter((e) => e.employeeType === 'seller' && e.fiveDayViaAttendance),
+      },
+      {
+        type: 'manager_trading_five_day',
+        label: 'Заведующие (пятидневка)',
+        items: employees.filter((e) => e.employeeType === 'manager_trading' && e.fiveDayViaAttendance),
+      },
+    ])
     .filter((g) => g.items.length > 0);
 
   const flatEmployees = useMemo(() => groups.flatMap((g) => g.items), [groups]);
@@ -398,7 +401,7 @@ export default function AttendancePage() {
         </div>
       ) : flatEmployees.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
-          Нет сотрудников с типом «Уборщица», «Офис», «Менеджер», «Заведующая (не торгует)» или продавцов с включённой пятидневкой по табелю.
+          Нет сотрудников с типом «Уборщица», «Офис», «Менеджер», «Заведующая (не торгует)», «Суточник / пятидневка (фикс)» или продавцов/заведующих с включённой пятидневкой по табелю.
         </div>
       ) : (
         <div className="card overflow-x-auto">

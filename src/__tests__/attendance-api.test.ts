@@ -16,6 +16,7 @@ vi.mock('@/lib/prisma', () => ({
     userPharmacy: { findMany: vi.fn() },
     attendanceShift: { create: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
+    dailyRevenueEntry: { findFirst: vi.fn() },
   },
 }));
 
@@ -25,6 +26,7 @@ import { POST } from '@/app/api/attendance/route';
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const createShift = prisma.attendanceShift.create as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findFirstRevenueEntry = prisma.dailyRevenueEntry.findFirst as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/attendance', {
@@ -38,6 +40,7 @@ beforeEach(() => {
   findUniqueEmployee.mockReset();
   createShift.mockReset().mockResolvedValue({ id: 1 });
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
+  findFirstRevenueEntry.mockReset().mockResolvedValue(null);
 });
 
 describe('POST /api/attendance — запрет для сменных типов сотрудников', () => {
@@ -53,7 +56,7 @@ describe('POST /api/attendance — запрет для сменных типов
     expect(createShift).not.toHaveBeenCalled();
   });
 
-  it.each(['manager_fixed', 'cleaner', 'office', 'pharmacy_manager'])('разрешает отметку табеля для %s', async (employeeType) => {
+  it.each(['manager_fixed', 'cleaner', 'office', 'pharmacy_manager', 'seller_five_day_fixed'])('разрешает отметку табеля для %s', async (employeeType) => {
     findUniqueEmployee.mockResolvedValue({ employeeType });
 
     const res = await POST(
@@ -61,6 +64,31 @@ describe('POST /api/attendance — запрет для сменных типов
     ) as unknown as { status: number };
 
     expect(res.status).toBe(201);
+  });
+
+  it('разрешает отметку табеля для manager_trading с включённым fiveDayViaAttendance', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'manager_trading', fiveDayViaAttendance: true });
+
+    const res = await POST(
+      makeRequest({ employeeId: 28, date: '2026-06-26' })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
+  });
+});
+
+describe('POST /api/attendance — конфликт с сменой в записи выручки (seller_five_day_fixed)', () => {
+  it('блокирует отметку табеля с 409, если на эту дату уже назначена смена в выручке', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller_five_day_fixed' });
+    findFirstRevenueEntry.mockResolvedValue({ id: 99, date: new Date('2026-06-26') });
+
+    const res = await POST(
+      makeRequest({ employeeId: 28, date: '2026-06-26' })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/уже назначена смена в записи выручки/);
+    expect(createShift).not.toHaveBeenCalled();
   });
 });
 

@@ -17,6 +17,8 @@ function serializeLoginlessManager(e: {
   ladderPremiumEnabled: boolean; managerBonusShareEnabled: boolean; allowance: unknown; allowanceDescription: string;
   pharmacies: { pharmacy: { id: number; name: string } }[];
 }) {
+  // pharmacy_manager (единственный тип, создаваемый без логина) уже 100% табельный —
+  // fiveDayViaAttendance ему неприменим, поэтому здесь не сериализуется.
   return {
     id: -e.id,
     // Карточка Employee, по которой считается зарплата — нужна интерфейсу, чтобы
@@ -30,6 +32,7 @@ function serializeLoginlessManager(e: {
     employeeType: e.employeeType,
     ladderPremiumEnabled: e.ladderPremiumEnabled,
     managerBonusShareEnabled: e.managerBonusShareEnabled,
+    fiveDayViaAttendance: false,
     allowance: Number(e.allowance),
     allowanceDescription: e.allowanceDescription,
     accountType: 'employee' as const,
@@ -44,7 +47,7 @@ export async function GET(request: NextRequest) {
     prisma.user.findMany({
       include: {
         pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } },
-        employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true } },
+        employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true, fiveDayViaAttendance: true } },
       },
     }),
     prisma.employee.findMany({
@@ -64,6 +67,7 @@ export async function GET(request: NextRequest) {
     employeeType: u.employee?.employeeType ?? 'manager_trading',
     ladderPremiumEnabled: u.employee?.ladderPremiumEnabled ?? false,
     managerBonusShareEnabled: u.employee?.managerBonusShareEnabled ?? false,
+    fiveDayViaAttendance: u.employee?.fiveDayViaAttendance ?? false,
     allowance: u.employee ? Number(u.employee.allowance) : 0,
     allowanceDescription: u.employee?.allowanceDescription ?? '',
     accountType: 'user' as const,
@@ -82,7 +86,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription } =
+  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, fiveDayViaAttendance, allowance, allowanceDescription } =
     await request.json();
 
   if (!displayName?.trim()) {
@@ -146,6 +150,9 @@ export async function POST(request: NextRequest) {
         employeeType: resolvedEmployeeType,
         ladderPremiumEnabled: Boolean(ladderPremiumEnabled),
         managerBonusShareEnabled: Boolean(managerBonusShareEnabled),
+        // Применимо только к manager_trading (см. FIVE_DAY_VIA_ATTENDANCE_TYPES) — для
+        // manager_fixed форма чекбокс не показывает, так что здесь всегда false.
+        fiveDayViaAttendance: resolvedEmployeeType === 'manager_trading' ? Boolean(fiveDayViaAttendance) : false,
         allowance: String(allowance ?? 0),
         allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
       },

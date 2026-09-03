@@ -682,6 +682,34 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
     expect(result!.totalSalary).toBe(0);
   });
 
+  describe('fiveDayViaAttendance = true', () => {
+    it('sources fiveDayShiftsCount from attendance, using the same calendar-prorated formula as a seller', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...manager,
+        fiveDayViaAttendance: true,
+      });
+      vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
+      vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(4);
+      mockRevenueEntries({ shifts: [] }); // no revenue shifts at all — attendance is the only source now
+      const result = await calculateEmployeeMonthlySalary(5, 6, 2025);
+      expect(result!.fiveDayShiftsCount).toBe(4);
+      expect(result!.salaryFromFiveDayShifts).toBeCloseTo((150000 / 20) * 4, 5);
+      expect(result!.totalSalary).toBeCloseTo((150000 / 20) * 4, 5);
+    });
+
+    it('recordsCount includes attendance days even with zero revenue entries', async () => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...manager,
+        fiveDayViaAttendance: true,
+      });
+      vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ workingDays: 20 });
+      vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+      mockRevenueEntries({ shifts: [] });
+      const result = await calculateEmployeeMonthlySalary(5, 6, 2025);
+      expect(result!.recordsCount).toBe(2);
+    });
+  });
+
   describe('ladderPremiumEnabled = true', () => {
     const managerWithLadder = {
       id: 5,
@@ -723,6 +751,87 @@ describe('calculateEmployeeMonthlySalary — manager_trading', () => {
       // Выручка 500k < порог 600k → лестничная тоже 0
       expect(result!.managerLadderPremium).toBe(0);
     });
+  });
+});
+
+describe('calculateEmployeeMonthlySalary — seller_five_day_fixed', () => {
+  const mixedEmployee = {
+    id: 20,
+    name: 'Нурлан Ахметов',
+    baseSalary: 150000,
+    employeeType: 'seller_five_day_fixed',
+    shiftRate: 12500,
+  };
+
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mixedEmployee);
+    mockBonuses(0);
+    mockCalendar(null);
+  });
+
+  it('pays only the fixed attendance rate when the employee never gets a revenue shift', async () => {
+    mockShifts([]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(10);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    expect(result!.fiveDayShiftsCount).toBe(10);
+    expect(result!.shiftRate).toBe(12500);
+    expect(result!.salaryFromFiveDayShifts).toBe(125000);
+    expect(result!.dayShiftsCount).toBe(0);
+    expect(result!.fullDayShiftsCount).toBe(0);
+    expect(result!.totalSalary).toBe(125000);
+  });
+
+  it('does NOT divide the fixed rate by the working-calendar days, unlike fiveDayViaAttendance', async () => {
+    mockCalendar(20); // if this were used, 10 shifts would instead yield (baseSalary/20)*10 = 75000
+    mockShifts([]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(10);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    expect(result!.salaryFromFiveDayShifts).toBe(125000);
+  });
+
+  it('combines revenue shifts (from baseSalary) and attendance days (from shiftRate) in the same month', async () => {
+    mockShifts([
+      { shiftType: 'full_day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+      { shiftType: 'day', cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+    ]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(4);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    const revenuePremium = Math.max(0, (0 - 200000) * 0.015) + Math.max(0, (0 - 300000) * 0.015); // floors at 0
+    const expected = 150000 / 10 + 150000 / 15 + 4 * 12500 + revenuePremium;
+    expect(result!.salaryFromFullDayShifts).toBeCloseTo(150000 / 10, 5);
+    expect(result!.salaryFromDayShifts).toBeCloseTo(150000 / 15, 5);
+    expect(result!.salaryFromFiveDayShifts).toBe(50000);
+    expect(result!.totalSalary).toBeCloseTo(expected, 5);
+  });
+
+  it('returns zero attendance salary when shiftRate is not set', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mixedEmployee,
+      shiftRate: null,
+    });
+    mockShifts([]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(5);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    expect(result!.shiftRate).toBeNull();
+    expect(result!.salaryFromFiveDayShifts).toBe(0);
+    expect(result!.totalSalary).toBe(0);
+  });
+
+  it('subtracts advances from the combined total', async () => {
+    mockShifts([]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(4);
+    mockAggregates(0, 30000);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    expect(result!.totalAdvances).toBe(30000);
+    expect(result!.totalSalary).toBe(4 * 12500 - 30000);
+  });
+
+  it('recordsCount includes attendance days so calculateAllEmployeesSalaries does not drop a pure-attendance month', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mixedEmployee);
+    mockShifts([]);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(3);
+    const result = await calculateEmployeeMonthlySalary(20, 6, 2025);
+    expect(result!.recordsCount).toBe(3);
   });
 });
 

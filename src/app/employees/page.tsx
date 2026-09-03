@@ -10,6 +10,7 @@ import { AmountInput } from '@/components/AmountInput';
 // продавцы, уборщицы и офисные сотрудники.
 const CREATABLE_TYPES = [
   { value: 'seller', label: 'На кассе' },
+  { value: 'seller_five_day_fixed', label: 'Суточник / пятидневка (фикс)' },
   { value: 'cleaner', label: 'Уборщица' },
   { value: 'office', label: 'Офис' },
 ] as const;
@@ -79,6 +80,11 @@ export default function EmployeesPage() {
         setError('Укажите ставку за смену');
         return;
       }
+    } else if (form.employeeType === 'seller_five_day_fixed') {
+      if ((!form.baseSalary || Number(form.baseSalary) <= 0) && (!form.shiftRate || Number(form.shiftRate) <= 0)) {
+        setError('Укажите оклад (для смен из выручки) или ставку за смену (для табеля) — хотя бы одно из двух');
+        return;
+      }
     } else if (!form.baseSalary || Number(form.baseSalary) <= 0) {
       setError('Укажите оклад сотрудника');
       return;
@@ -96,7 +102,7 @@ export default function EmployeesPage() {
         name: form.name.trim(),
         employeeType: form.employeeType,
         baseSalary: form.baseSalary || 0,
-        shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
+        shiftRate: form.employeeType === 'cleaner' || form.employeeType === 'seller_five_day_fixed' ? form.shiftRate || 0 : null,
         allowance: form.allowance || 0,
         allowanceDescription: form.allowanceDescription.trim(),
         fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
@@ -209,6 +215,27 @@ export default function EmployeesPage() {
                   required
                 />
               </div>
+            ) : form.employeeType === 'seller_five_day_fixed' ? (
+              <>
+                <div>
+                  <label className="label">Оклад (₸) — для смен из выручки</label>
+                  <AmountInput
+                    value={form.baseSalary}
+                    onChange={(value) => setForm((f) => ({ ...f, baseSalary: value }))}
+                    placeholder="150000"
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">Ставка за смену (₸) — для табеля</label>
+                  <AmountInput
+                    value={form.shiftRate}
+                    onChange={(value) => setForm((f) => ({ ...f, shiftRate: value }))}
+                    placeholder="12500"
+                    className="input"
+                  />
+                </div>
+              </>
             ) : (
               <div>
                 <label className="label">Оклад (₸) *</label>
@@ -401,6 +428,15 @@ function EmployeeRow({
               <span>Ставка за смену: <span className="text-slate-600 font-medium">
                 {(emp.shiftRate ?? 0).toLocaleString('ru-RU')} ₸
               </span></span>
+            ) : emp.employeeType === 'seller_five_day_fixed' ? (
+              <>
+                <span>Оклад: <span className="text-slate-600 font-medium">
+                  {emp.baseSalary.toLocaleString('ru-RU')} ₸
+                </span></span>
+                <span>Ставка за смену: <span className="text-slate-600 font-medium">
+                  {(emp.shiftRate ?? 0).toLocaleString('ru-RU')} ₸
+                </span></span>
+              </>
             ) : (
               <span>Оклад: <span className="text-slate-600 font-medium">
                 {emp.baseSalary.toLocaleString('ru-RU')} ₸

@@ -1,10 +1,12 @@
 import { prisma } from '@/lib/prisma';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
 
 /**
  * Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не должны
  * получать смену в записи выручки — их зарплата считается только по AttendanceShift, а смена
  * в выручке не ограничена количеством рабочих дней и может задвоить/накрутить оплату при смене типа.
+ * Исключение — seller_five_day_fixed: ему смена разрешена, конфликт на конкретную дату
+ * с уже отмеченным табелем проверяется отдельно, см. validateNoAttendanceOnDate.
  */
 export async function validateShiftEmployeeType(employeeId: number, shiftType: string | null): Promise<string | null> {
   if (!employeeId || !shiftType) return null;
@@ -12,15 +14,36 @@ export async function validateShiftEmployeeType(employeeId: number, shiftType: s
     where: { id: employeeId },
     select: { employeeType: true, fiveDayViaAttendance: true },
   });
-  if (employee && ATTENDANCE_BASED_TYPES.has(employee.employeeType)) {
+  if (!employee || canGetRevenueShift(employee)) return null;
+  if (ATTENDANCE_BASED_TYPES.has(employee.employeeType)) {
     return 'Этому типу сотрудника нельзя назначить смену в записи выручки — он учитывается через табель посещаемости';
   }
   // Продавец с включённым fiveDayViaAttendance всегда работает по пятидневному графику —
   // его зарплата считается только по табелю. Смена любого типа (день/сутки/пятидневка) в
   // записи выручки задвоила бы оплату за тот же день; сама выручка при этом заносится как обычно,
   // просто без привязки к смене этого сотрудника.
-  if (employee?.fiveDayViaAttendance) {
-    return 'У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смену в записи выручки ему назначать нельзя';
+  return 'У этого сотрудника пятидневка — зарплата считается по табелю посещаемости, смену в записи выручки ему назначать нельзя';
+}
+
+/**
+ * seller_five_day_fixed может получать и смену в выручке, и отметку табеля — но не обе на одну
+ * и ту же дату, иначе оплата за этот день задвоится (сменная часть + фиксированная за табель).
+ * Для остальных типов не актуально: им либо смена, либо табель разрешены полностью (см.
+ * validateShiftEmployeeType), так что конфликтующей отметки табеля у них в принципе не бывает.
+ */
+export async function validateNoAttendanceOnDate(
+  employeeId: number,
+  date: Date,
+  shiftType: string | null,
+): Promise<string | null> {
+  if (!employeeId || !shiftType) return null;
+  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  const existing = await prisma.attendanceShift.findFirst({
+    where: { employeeId, date: { gte: dayStart, lte: dayEnd } },
+  });
+  if (existing) {
+    return 'На эту дату у сотрудника уже отмечен табель — нельзя также назначить смену в записи выручки';
   }
   return null;
 }

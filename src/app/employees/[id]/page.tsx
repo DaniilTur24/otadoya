@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
-import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, MANAGER_TYPES, USER_LINKED_TYPES, ATTENDANCE_BASED_TYPES, FIVE_DAY_VIA_ATTENDANCE_TYPES } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { SalaryImpactDialog } from '@/components/SalaryImpactDialog';
 import { useSalaryImpact } from '@/hooks/useSalaryImpact';
 
 const EDITABLE_TYPES = [
   { value: 'seller', label: 'На кассе' },
+  { value: 'seller_five_day_fixed', label: 'Суточник / пятидневка (фикс)' },
   { value: 'cleaner', label: 'Уборщица' },
   { value: 'office', label: 'Офис' },
 ] as const;
@@ -203,7 +204,7 @@ export default function EmployeeDetailPage() {
         allowance: form.allowance || 0,
         allowanceDescription: form.allowanceDescription.trim(),
       }),
-      shiftRate: form.employeeType === 'cleaner' ? form.shiftRate || 0 : null,
+      shiftRate: form.employeeType === 'cleaner' || form.employeeType === 'seller_five_day_fixed' ? form.shiftRate || 0 : null,
       fiveDayViaAttendance: form.employeeType === 'seller' ? form.fiveDayViaAttendance : false,
       isActive: form.isActive,
     };
@@ -231,7 +232,10 @@ export default function EmployeeDetailPage() {
     if (p.allowance !== undefined && Number(p.allowance) !== Number(employee.allowance ?? 0)) {
       changed.push(`Фиксированная доплата: ${money(Number(employee.allowance ?? 0))} → ${money(Number(p.allowance))} ₸`);
     }
-    if (form.employeeType === 'cleaner' && Number(p.shiftRate ?? 0) !== Number(employee.shiftRate ?? 0)) {
+    if (
+      (form.employeeType === 'cleaner' || form.employeeType === 'seller_five_day_fixed') &&
+      Number(p.shiftRate ?? 0) !== Number(employee.shiftRate ?? 0)
+    ) {
       changed.push(`Ставка за смену: ${money(Number(employee.shiftRate ?? 0))} → ${money(Number(p.shiftRate ?? 0))} ₸`);
     }
     if (p.fiveDayViaAttendance !== employee.fiveDayViaAttendance) {
@@ -292,9 +296,13 @@ export default function EmployeeDetailPage() {
   }
 
   const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-  // Продавец с включённым fiveDayViaAttendance отмечается в табеле, а не сменой в записи выручки —
-  // его переработка и явки читаются оттуда же, что и у обычных табельных типов.
-  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
+  // Продавец или торгующая заведующая с включённым fiveDayViaAttendance отмечаются в табеле,
+  // а не сменой в записи выручки — их переработка и явки читаются оттуда же, что и у обычных
+  // табельных типов.
+  const isFiveDaySeller = FIVE_DAY_VIA_ATTENDANCE_TYPES.has(employee.employeeType) && employee.fiveDayViaAttendance;
+  // seller_five_day_fixed показывает и смены выручки, и табель одновременно — у него оба
+  // источника разрешены (в разные дни), в отличие от isFiveDaySeller (только табель).
+  const isSellerFiveDayFixedEmployee = employee.employeeType === 'seller_five_day_fixed';
 
   return (
     <div className="max-w-screen-lg space-y-4">
@@ -371,6 +379,25 @@ export default function EmployeeDetailPage() {
                 className="input"
               />
             </div>
+          ) : form.employeeType === 'seller_five_day_fixed' && !USER_LINKED_TYPES.has(employee.employeeType) ? (
+            <>
+              <div>
+                <label className="label">Оклад (₸) — для смен из выручки</label>
+                <AmountInput
+                  value={form.baseSalary}
+                  onChange={(value) => setForm((f) => ({ ...f, baseSalary: value }))}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="label">Ставка за смену (₸) — для табеля</label>
+                <AmountInput
+                  value={form.shiftRate}
+                  onChange={(value) => setForm((f) => ({ ...f, shiftRate: value }))}
+                  className="input"
+                />
+              </div>
+            </>
           ) : (
             <div>
               <label className="label">Оклад (₸)</label>
@@ -597,6 +624,7 @@ export default function EmployeeDetailPage() {
               const isCleaner = salary.employeeType === 'cleaner';
               const isOffice = salary.employeeType === 'office';
               const isSeller = salary.employeeType === 'seller';
+              const isSellerFiveDayFixed = salary.employeeType === 'seller_five_day_fixed';
               return (
                 <div className="bg-slate-50 border border-slate-300 rounded p-3 space-y-2 text-sm">
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -630,10 +658,16 @@ export default function EmployeeDetailPage() {
                         )}
 
                         <span className="text-slate-500">
-                          {isAttendanceBased ? 'Смен по табелю' : 'Пятидневных смен'}
+                          {isAttendanceBased ? 'Смен по табелю' : isSellerFiveDayFixed ? 'Смен по табелю (фикс. ставка)' : 'Пятидневных смен'}
                         </span>
                         <span className="font-medium text-right">
-                          {salary.fiveDayShiftsCount > 0 && salary.workingCalendarDays ? (
+                          {isSellerFiveDayFixed ? (
+                            salary.fiveDayShiftsCount > 0 ? (
+                              <>{salary.fiveDayShiftsCount} × {fmt(salary.shiftRate ?? 0)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                            ) : (
+                              <span className="text-slate-300">0</span>
+                            )
+                          ) : salary.fiveDayShiftsCount > 0 && salary.workingCalendarDays ? (
                             <>{salary.fiveDayShiftsCount} × {fmt(salary.baseSalary / salary.workingCalendarDays)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
                           ) : salary.fiveDayShiftsCount > 0 ? (
                             <span className="text-amber-600">{salary.fiveDayShiftsCount} смен — календарь не заполнен</span>
@@ -651,7 +685,7 @@ export default function EmployeeDetailPage() {
                       </>
                     )}
 
-                    {isSeller && (
+                    {(isSeller || isSellerFiveDayFixed) && (
                       <>
                         <span className="text-slate-500">Премия по выручке</span>
                         <span className={`font-medium text-right ${salary.totalRevenuePremium < 0 ? 'text-red-600' : ''}`}>
@@ -791,7 +825,7 @@ export default function EmployeeDetailPage() {
 
             {/* Табель посещаемости (manager_fixed / cleaner / office / pharmacy_manager, а также
                 продавец с включённой пятидневкой по табелю) */}
-            {(ATTENDANCE_BASED_TYPES.has(salary.employeeType) || isFiveDaySeller) && (
+            {(ATTENDANCE_BASED_TYPES.has(salary.employeeType) || isFiveDaySeller || isSellerFiveDayFixedEmployee) && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-slate-700">Табель посещаемости за период</h3>

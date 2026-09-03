@@ -17,6 +17,7 @@ vi.mock('@/lib/prisma', () => ({
     attendanceShift: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
     user: { findUnique: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
+    dailyRevenueEntry: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -29,6 +30,7 @@ const findManyShifts = prisma.attendanceShift.findMany as unknown as ReturnType<
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findManyRevenueEntries = prisma.dailyRevenueEntry.findMany as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown, opts: { role?: string; userId?: number } = {}): NextRequest {
@@ -49,6 +51,7 @@ beforeEach(() => {
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
+  findManyRevenueEntries.mockReset().mockResolvedValue([]);
   transaction.mockReset().mockResolvedValue([]);
 });
 
@@ -126,6 +129,34 @@ describe('PUT /api/attendance/bulk', () => {
         { employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-10'] },
         { role: 'manager', userId: 5 }
       )
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('PUT /api/attendance/bulk — конфликт с сменой в записи выручки (seller_five_day_fixed)', () => {
+  it('блокирует новую дату табеля с 409, если на неё уже назначена смена в выручке', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 30, employeeType: 'seller_five_day_fixed' });
+    findManyShifts.mockResolvedValue([]); // ни одной существующей отметки табеля
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date('2026-06-12') }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 30, year: 2026, month: 6, dates: ['2026-06-12'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/уже назначена смена в записи выручки/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('не блокирует повторную реконсиляцию уже существующей отметки табеля', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 30, employeeType: 'seller_five_day_fixed' });
+    findManyShifts.mockResolvedValue([{ id: 1, date: new Date('2026-06-12'), pharmacyId: null }]);
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date('2026-06-12') }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 30, year: 2026, month: 6, dates: ['2026-06-12'] })
     ) as unknown as { status: number };
 
     expect(res.status).toBe(200);

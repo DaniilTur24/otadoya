@@ -25,11 +25,11 @@ export interface MonthlySalaryResult {
   totalAdvances: number;
   /** Доплаты сотруднику (category='employeeSurcharge') — прибавляются к зарплате, отдельно от pharmaBonus */
   totalSurcharges: number;
-  /** Кол-во отметок в табеле посещаемости (manager_fixed / cleaner / office) */
+  /** Кол-во отметок в табеле посещаемости (manager_fixed / cleaner / office / seller_five_day_fixed) */
   attendanceShiftsCount: number;
-  /** Ставка за смену — только для cleaner */
+  /** Ставка за смену — для cleaner и seller_five_day_fixed */
   shiftRate: number | null;
-  /** shiftRate × attendanceShiftsCount — только для cleaner */
+  /** shiftRate × attendanceShiftsCount — только для cleaner (у seller_five_day_fixed эта сумма входит в salaryFromFiveDayShifts) */
   salaryFromShiftRate: number;
   /** 10% от бонусов аптек, которыми управляет заведующая/менеджер (если managerBonusShareEnabled) */
   managerBonusShare: number;
@@ -376,20 +376,27 @@ const EMPTY_RESULT_BASE = {
 };
 
 /**
- * Зарплата продавца (seller) и заведующей, которая торгует (manager_trading).
+ * Зарплата продавца (seller), заведующей, которая торгует (manager_trading), и суточника/
+ * пятидневщика с фиксированной ставкой (seller_five_day_fixed).
  *
- * Окладная часть в обоих случаях считается по сменам, привязанным к записям выручки:
+ * Окладная часть по сменам, привязанным к записям выручки, одинакова для всех трёх типов:
  *   salaryFromFullDayShifts = baseSalary / 10 * fullDayShiftsCount
  *   salaryFromDayShifts     = baseSalary / 15 * dayShiftsCount
  *
+ * Пятидневная часть по табелю посещаемости считается по-разному в зависимости от типа:
+ *  - seller с fiveDayViaAttendance: salaryFromFiveDayShifts = baseSalary / workingCalendarDays × attendanceCount
+ *  - seller_five_day_fixed:         salaryFromFiveDayShifts = shiftRate × attendanceCount (без деления на календарь —
+ *    фиксированная ставка за смену, как у cleaner). У него оба источника (смены выручки и табель)
+ *    разрешены одновременно, но не на одну и ту же дату — см. revenue-validation/attendance-validation.
+ *
  * Премия по выручке (revenuePremium: 200k/300k порог, 1.5% от избытка за смену, floor в 0 на
- * каждый тип смены независимо — недобор не вычитается из оклада) одинакова для обоих типов и
- * считается по умолчанию от личной выручки сотрудника за его смены. Если у аптеки включено
- * Pharmacy.poolAverageRevenuePremium — вместо личной выручки берётся средняя выручка аптеки за
- * смену того же типа за месяц (см. computePooledShiftAverages). Если у заведующей включена
- * лестничная премия аптеки (ladderPremiumEnabled) — эта премия не начисляется вовсе, вместо неё
- * managerLadderPremium (как у заведующей без торговли, calculateFixedManagerSalary). У заведующей,
- * которая торгует, дополнительно прибавляется 10% от бонусов управляемой аптеки (managerBonusShare).
+ * каждый тип смены независимо — недобор не вычитается из оклада) считается по умолчанию от личной
+ * выручки сотрудника за его смены. Если у аптеки включено Pharmacy.poolAverageRevenuePremium —
+ * вместо личной выручки берётся средняя выручка аптеки за смену того же типа за месяц (см.
+ * computePooledShiftAverages). Если у заведующей включена лестничная премия аптеки
+ * (ladderPremiumEnabled) — эта премия не начисляется вовсе, вместо неё managerLadderPremium (как у
+ * заведующей без торговли, calculateFixedManagerSalary). У заведующей, которая торгует, дополнительно
+ * прибавляется 10% от бонусов управляемой аптеки (managerBonusShare).
  * Фиксированная доплата (Employee.allowance) добавляется для любого типа сотрудника.
  */
 async function calculateTradingEmployeeSalary(
@@ -403,6 +410,7 @@ async function calculateTradingEmployeeSalary(
     ladderPremiumEnabled?: boolean;
     managerBonusShareEnabled?: boolean;
     fiveDayViaAttendance?: boolean;
+    shiftRate?: unknown;
   },
   employeeType: string,
   month: number,
@@ -424,7 +432,8 @@ async function calculateTradingEmployeeSalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const fiveDayViaAttendance = Boolean(employee.fiveDayViaAttendance);
+  const useFixedFiveDayRate = employeeType === 'seller_five_day_fixed';
+  const fiveDayViaAttendance = Boolean(employee.fiveDayViaAttendance) || useFixedFiveDayRate;
 
   const [entries, pharmaBonusAgg, totalAdvances, totalSurcharges, calendarEntry, bonusShareStats, ladderStats, attendanceFiveDayCount] =
     await Promise.all([
@@ -494,8 +503,12 @@ async function calculateTradingEmployeeSalary(
   const workingCalendarDays = calendarEntry?.workingDays ?? null;
   const salaryFromFullDayShifts = baseSalary > 0 ? (baseSalary / 10) * fullDayShiftsCount : 0;
   const salaryFromDayShifts = baseSalary > 0 ? (baseSalary / 15) * dayShiftsCount : 0;
-  const salaryFromFiveDayShifts =
-    baseSalary > 0 && workingCalendarDays ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount : 0;
+  const shiftRate = employee.shiftRate != null ? Number(employee.shiftRate) : null;
+  const salaryFromFiveDayShifts = useFixedFiveDayRate
+    ? (shiftRate ? shiftRate * fiveDayShiftsCount : 0)
+    : baseSalary > 0 && workingCalendarDays
+      ? (baseSalary / workingCalendarDays) * fiveDayShiftsCount
+      : 0;
   const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
 
   // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
@@ -555,6 +568,8 @@ async function calculateTradingEmployeeSalary(
     salaryFromFullDayShifts,
     salaryFromFiveDayShifts,
     workingCalendarDays,
+    attendanceShiftsCount: fiveDayShiftsCount,
+    shiftRate,
     revenuePremiumDayShifts,
     revenuePremiumFullDayShifts,
     totalRevenuePremium,
@@ -822,6 +837,10 @@ async function calculatePharmacyManagerSalary(
  *  - manager_trading — то же, что seller (включая revenuePremium) + опционально 10% бонусов аптеки
  *                      (managerBonusShareEnabled). Если ladderPremiumEnabled=true — вместо личной
  *                      revenuePremium получает лестничную премию аптеки.
+ *  - seller_five_day_fixed — смены (день/сутки) от baseSalary, как у seller (включая revenuePremium
+ *                      и pharmaBonus), ПЛЮС дни по табелю посещаемости, оплачиваемые фиксированной
+ *                      ставкой shiftRate × attendanceCount (без деления на календарь). Оба источника
+ *                      разрешены одновременно, но не на одну и ту же дату.
  *  - manager_fixed   — пятидневка по табелю посещаемости + опционально 10% бонусов
  *                      (managerBonusShareEnabled) + опционально лестничная премия (ladderPremiumEnabled)
  *  - cleaner         — ставка за смену × количество смен в табеле − авансы
@@ -932,8 +951,9 @@ export async function calculateEmployeeMonthlySalary(
       allowance: unknown;
       allowanceDescription: string;
       fiveDayViaAttendance: boolean;
+      shiftRate: unknown;
     },
-    'seller',
+    employeeType === 'seller_five_day_fixed' ? 'seller_five_day_fixed' : 'seller',
     month,
     year,
     pharmacyId,

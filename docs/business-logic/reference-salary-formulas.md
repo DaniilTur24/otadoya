@@ -30,9 +30,31 @@ totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayS
 
 `totalBonuses` — сумма строк `DailyExpenseItem` с `category = 'pharmaBonus'` по записям сотрудника за месяц.
 
+## seller_five_day_fixed — суточник / пятидневка (фикс)
+
+Один тип, покрывающий два сценария: сотрудник, который **только** отмечается в табеле (по факту никогда не получает смену в записи выручки), и сотрудник, который **иногда** ещё и выходит на день/сутки. Разница между ними — не в типе, а в том, назначают ли ему когда-либо смену.
+
+Сменная часть (день/сутки) идентична `seller` — от `baseSalary`, включая `revenuePremium` и `pharmaBonus`. Пятидневная часть — по табелю посещаемости (`AttendanceShift`), но **фиксированной ставкой** `shiftRate` (то же поле, что у `cleaner`), **без деления на `WorkingCalendar.workingDays`** — в отличие от `fiveDayViaAttendance` у `seller` (см. ниже).
+
+```
+salaryFromDayShifts     = baseSalary / 15 × dayShiftsCount
+salaryFromFullDayShifts = baseSalary / 10 × fullDayShiftsCount
+salaryFromFiveDayShifts = shiftRate × attendanceShiftsCount        (0, если shiftRate не задан)
+
+revenuePremium, totalBonuses — как у seller (только от дней со сменой из выручки)
+
+totalSalary = salaryFromDayShifts + salaryFromFullDayShifts + salaryFromFiveDayShifts
+            + totalBonuses + totalRevenuePremium + allowance
+            − totalAdvances
+```
+
+Оба источника смен разрешены одновременно, но не на одну и ту же календарную дату — сервер отклоняет с 409 попытку назначить смену на дату с уже отмеченным табелем (`validateNoAttendanceOnDate`, `src/lib/revenue-validation.ts`) и наоборот, отметить табель на дату с уже назначенной сменой (`validateNoShiftOnDate`, `src/lib/attendance-validation.ts`).
+
+`baseSalary` не обязателен, если у сотрудника никогда не бывает смен из выручки (чистый табельный сценарий); `shiftRate` не обязателен, если табель не используется вовсе.
+
 ## manager_trading — заведующая, которая торгует
 
-Окладная часть идентична `seller` (те же `/15`, `/10`, `/workingCalendarDays` за day/full_day/five_day смены). Дополнительно к этому — два независимых переключателя на карточке сотрудника (`/users`), в любой комбинации: `managerBonusShareEnabled` (10% от бонусов управляемых аптек) и `ladderPremiumEnabled` (лестничная премия аптеки вместо личной премии за выручку смены). Те же два переключателя есть у `manager_fixed` и `pharmacy_manager` — см. ниже.
+Окладная часть идентична `seller` (те же `/15`, `/10`, `/workingCalendarDays` за day/full_day/five_day смены), включая `fiveDayViaAttendance` — если включён на `/users`, её пятидневные дни тоже читаются из `AttendanceShift`, а не из записи выручки, по той же формуле `baseSalary/workingCalendarDays × attendanceCount` (см. `FIVE_DAY_VIA_ATTENDANCE_TYPES` в [reference-employee-types.md](reference-employee-types.md)). Дополнительно к этому — два независимых переключателя на карточке сотрудника (`/users`), в любой комбинации: `managerBonusShareEnabled` (10% от бонусов управляемых аптек) и `ladderPremiumEnabled` (лестничная премия аптеки вместо личной премии за выручку смены). Те же два переключателя есть у `manager_fixed` и `pharmacy_manager` — см. ниже.
 
 Премия за выручку смены (`revenuePremium`) зависит от `ladderPremiumEnabled`:
 - **выключен** (по умолчанию) — заведующая получает премию за выручку смены, по той же формуле, что и продавец (порог 200k/300k, ставка 1.5%, floor в 0 на каждый тип смены независимо);

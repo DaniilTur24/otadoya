@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { canMarkAttendance } from '@/lib/employee-types';
 import { isYearMonthClosed } from '@/lib/closed-month';
 
 function dateKey(d: Date): string {
@@ -36,8 +36,7 @@ export async function PUT(request: NextRequest) {
   const employee = await prisma.employee.findUnique({ where: { id: Number(employeeId) } });
   if (!employee) return NextResponse.json({ error: 'Сотрудник не найден' }, { status: 404 });
 
-  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
-  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType) && !isFiveDaySeller) {
+  if (!canMarkAttendance(employee)) {
     return NextResponse.json(
       { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }
@@ -76,6 +75,27 @@ export async function PUT(request: NextRequest) {
     const current = existingByKey.get(d);
     return !current || current.pharmacyId !== pid;
   });
+
+  // seller_five_day_fixed может получать и смену в выручке, и отметку табеля, но не обе на одну
+  // дату — проверяем только реально новые даты табеля (уже существующие переотмечать не мешает).
+  const newDates = new Set([...desired].filter((d) => !existingByKey.has(d)));
+  if (newDates.size > 0) {
+    const monthShifts = await prisma.dailyRevenueEntry.findMany({
+      where: {
+        employeeId: Number(employeeId),
+        shiftType: { not: null },
+        date: { gte: monthStart, lte: monthEnd },
+      },
+      select: { date: true },
+    });
+    const conflictingShift = monthShifts.find((s) => newDates.has(dateKey(s.date)));
+    if (conflictingShift) {
+      return NextResponse.json(
+        { error: `На дату ${dateKey(conflictingShift.date)} у сотрудника уже назначена смена в записи выручки — нельзя также отметить табель` },
+        { status: 409 }
+      );
+    }
+  }
 
   await prisma.$transaction([
     ...(toDeleteIds.length > 0 ? [prisma.attendanceShift.deleteMany({ where: { id: { in: toDeleteIds } } })] : []),
