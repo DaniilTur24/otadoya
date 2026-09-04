@@ -16,16 +16,24 @@ vi.mock('@/lib/prisma', () => ({
     employeePharmacy: { findMany: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
-    dailyRevenueEntry: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    dailyRevenueEntry: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    dailyExpenseItem: { findMany: vi.fn() },
     attendanceShift: { findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
 
+vi.mock('@/lib/revenue-delete-impact', () => ({
+  computeRevenueDeleteImpact: vi.fn(),
+}));
+
 import { prisma } from '@/lib/prisma';
+import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 import { POST } from '@/app/api/revenue/route';
-import { PUT } from '@/app/api/revenue/[id]/route';
+import { PUT, DELETE } from '@/app/api/revenue/[id]/route';
+
+const mockComputeImpact = computeRevenueDeleteImpact as unknown as ReturnType<typeof vi.fn>;
 
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findManyEmployeePharmacy = prisma.employeePharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
@@ -34,6 +42,8 @@ const findUniqueRevenueEntry = prisma.dailyRevenueEntry.findUnique as unknown as
 const findFirstRevenueEntry = prisma.dailyRevenueEntry.findFirst as unknown as ReturnType<typeof vi.fn>;
 const findFirstAttendanceShift = prisma.attendanceShift.findFirst as unknown as ReturnType<typeof vi.fn>;
 const updateRevenueEntry = prisma.dailyRevenueEntry.update as unknown as ReturnType<typeof vi.fn>;
+const deleteRevenueEntry = prisma.dailyRevenueEntry.delete as unknown as ReturnType<typeof vi.fn>;
+const findManyExpenseItem = prisma.dailyExpenseItem.findMany as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
@@ -68,6 +78,9 @@ beforeEach(() => {
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   updateRevenueEntry.mockReset().mockResolvedValue({ id: 1, expenseItems: [] });
+  deleteRevenueEntry.mockReset().mockResolvedValue({ id: 1 });
+  findManyExpenseItem.mockReset().mockResolvedValue([]);
+  mockComputeImpact.mockReset().mockResolvedValue(null);
   transaction.mockReset().mockImplementation(async (cb: (tx: unknown) => unknown) =>
     cb({
       dailyRevenueEntry: {
@@ -351,5 +364,125 @@ describe('PUT /api/revenue/[id] — запрет смены для табель�
     expect(res.status).toBe(200);
     const lastCall = updateRevenueEntry.mock.calls[updateRevenueEntry.mock.calls.length - 1];
     expect(lastCall[0].data.status).toBe('approved');
+  });
+});
+
+// Regression QA раунд 3, находка №1: аванс/доплата другому сотруднику хранится как дочерняя
+// строка расходов этой же записи (DailyExpenseItem.employeeId), и раньше удаление записи
+// стирало её молча вместе с записью (onDelete: Cascade) — получатель уже получил деньги
+// наличными, но при следующем расчёте зарплаты аванс больше не вычитался.
+describe('DELETE /api/revenue/[id] — защита авансов/доплат другому сотруднику', () => {
+  function makeParams(id = 1) {
+    return { params: Promise.resolve({ id: String(id) }) };
+  }
+  function makeDeleteRequest(url: string, opts: { role?: string; userId?: number } = {}): NextRequest {
+    return new Request(url, {
+      method: 'DELETE',
+      headers: {
+        'x-user-role': opts.role ?? 'admin',
+        ...(opts.userId ? { 'x-user-id': String(opts.userId) } : {}),
+      },
+    }) as unknown as NextRequest;
+  }
+
+  it('404, если запись не найдена', async () => {
+    findUniqueRevenueEntry.mockResolvedValue(null);
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(404);
+  });
+
+  it('423, если месяц закрыт', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+    findUniqueClosedMonth.mockResolvedValue({ id: 1 });
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(423);
+    expect(deleteRevenueEntry).not.toHaveBeenCalled();
+  });
+
+  it('удаляет сразу, если в записи нет аванса/доплаты', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+    findManyExpenseItem.mockResolvedValue([]);
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(deleteRevenueEntry).toHaveBeenCalledWith({ where: { id: 1 } });
+  });
+
+  it('без ?force=1 возвращает 409 со списком получателей и НЕ удаляет запись', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+    findManyExpenseItem.mockResolvedValue([
+      { category: 'employeeAdvance', amount: '20000', employee: { name: 'Бота' } },
+    ]);
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as {
+      status: number;
+      body: { error: string; items: { employeeName: string; category: string; amount: number }[] };
+    };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('revenue_delete_impact');
+    expect(res.body.items).toEqual([{ employeeName: 'Бота', category: 'employeeAdvance', amount: 20000 }]);
+    expect(deleteRevenueEntry).not.toHaveBeenCalled();
+  });
+
+  it('без ?force=1 возвращает 409 с impact, даже если авансов/доплат нет — есть влияние на выручку/зарплату', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+    findManyExpenseItem.mockResolvedValue([]);
+    mockComputeImpact.mockResolvedValue({
+      revenue: { pharmacyName: 'Тестовая аптека QA', before: 500000, after: 460000 },
+      employees: [{ employeeId: 19, employeeName: 'Etel', before: 100000, after: 87000 }],
+      partial: true,
+    });
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as {
+      status: number;
+      body: { error: string; impact: { revenue: unknown; employees: unknown[]; partial: boolean } };
+    };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('revenue_delete_impact');
+    expect(res.body.impact.revenue).toEqual({ pharmacyName: 'Тестовая аптека QA', before: 500000, after: 460000 });
+    expect(res.body.impact.employees).toHaveLength(1);
+    expect(deleteRevenueEntry).not.toHaveBeenCalled();
+  });
+
+  it('с ?force=1 удаляет запись, даже если внутри есть аванс/доплата', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+    findManyExpenseItem.mockResolvedValue([
+      { category: 'employeeSurcharge', amount: '5000', employee: { name: 'Айгерим' } },
+    ]);
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1?force=1'), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(deleteRevenueEntry).toHaveBeenCalledWith({ where: { id: 1 } });
+  });
+
+  it('не считает препятствием обычную (не employeeAdvance/Surcharge) строку расходов', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+    // dailyExpenseItem.findMany сам фильтрует по category в запросе — здесь просто
+    // подтверждаем, что при пустом результате (обычные категории отфильтрованы) удаление проходит.
+    findManyExpenseItem.mockResolvedValue([]);
+
+    const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
   });
 });

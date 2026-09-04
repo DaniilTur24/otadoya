@@ -24,6 +24,7 @@ interface Manager {
   ladderPremiumEnabled: boolean;
   managerBonusShareEnabled: boolean;
   fiveDayViaAttendance: boolean;
+  shiftRate: number | null;
   allowance: number;
   allowanceDescription: string;
   pharmacies: Pharmacy[];
@@ -56,6 +57,7 @@ export default function UsersPage() {
     ladderPremiumEnabled: false,
     managerBonusShareEnabled: true,
     fiveDayViaAttendance: false,
+    shiftRate: '',
     allowance: '',
     allowanceDescription: '',
     pharmacyIds: [] as number[],
@@ -79,7 +81,7 @@ export default function UsersPage() {
     setForm({
       username: '', password: '', displayName: '', baseSalary: '',
       employeeType: 'manager_trading', ladderPremiumEnabled: false, managerBonusShareEnabled: true,
-      fiveDayViaAttendance: false,
+      fiveDayViaAttendance: false, shiftRate: '',
       allowance: '', allowanceDescription: '', pharmacyIds: [],
     });
     setEditingId(null);
@@ -103,6 +105,7 @@ export default function UsersPage() {
       ladderPremiumEnabled: m.ladderPremiumEnabled,
       managerBonusShareEnabled: m.managerBonusShareEnabled,
       fiveDayViaAttendance: m.fiveDayViaAttendance,
+      shiftRate: m.shiftRate != null ? String(m.shiftRate) : '',
       allowance: m.allowance ? String(m.allowance) : '',
       allowanceDescription: m.allowanceDescription ?? '',
       pharmacyIds: m.pharmacies.map((p) => p.id),
@@ -161,9 +164,12 @@ export default function UsersPage() {
     if (form.fiveDayViaAttendance !== original.fiveDayViaAttendance) {
       changed.push(
         form.fiveDayViaAttendance
-          ? 'Пятидневка по табелю: включается (можно совмещать со сменами из выручки, кроме одной и той же даты)'
+          ? 'Пятидневка по табелю: включается (можно совмещать со сменами из выручки, кроме одной и той же даты; оплата — фиксированная ставка за смену, а не от оклада)'
           : 'Пятидневка по табелю: выключается (отметки табеля перестанут оплачиваться)'
       );
+    }
+    if (Number(form.shiftRate || 0) !== Number(original.shiftRate ?? 0)) {
+      changed.push(`Ставка за смену (пятидневка по табелю): ${money(Number(original.shiftRate ?? 0))} → ${money(Number(form.shiftRate || 0))} ₸`);
     }
     return changed;
   }
@@ -195,6 +201,7 @@ export default function UsersPage() {
       ladderPremiumEnabled: form.ladderPremiumEnabled,
       managerBonusShareEnabled: form.managerBonusShareEnabled,
       fiveDayViaAttendance: form.employeeType === 'manager_trading' ? form.fiveDayViaAttendance : false,
+      shiftRate: form.employeeType === 'manager_trading' ? form.shiftRate || null : null,
       allowance: form.allowance || 0,
       allowanceDescription: form.allowanceDescription.trim(),
     };
@@ -436,6 +443,22 @@ export default function UsersPage() {
                   <span className="text-slate-400 font-normal">(дополнительно к сменам из записи выручки — не на одну и ту же дату)</span>
                 </label>
               )}
+
+              {form.employeeType === 'manager_trading' && form.fiveDayViaAttendance && (
+                <div>
+                  <label className="label">Ставка за смену (₸) — для табеля *</label>
+                  <AmountInput
+                    value={form.shiftRate}
+                    onChange={(value) => setForm((f) => ({ ...f, shiftRate: value }))}
+                    placeholder="12500"
+                    className="input"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Отмеченный в табеле день оплачивается этой фиксированной ставкой, а не долей от оклада
+                  </p>
+                </div>
+              )}
             </div>
 
             <div>
@@ -531,7 +554,10 @@ export default function UsersPage() {
                         <span className="text-green-600">{' '}· премия по выручке аптеки</span>
                       )}
                       {m.fiveDayViaAttendance && (
-                        <span className="text-slate-500">{' '}· пятидневка по табелю</span>
+                        <span className={m.shiftRate ? 'text-slate-500' : 'text-amber-600 font-medium'}>
+                          {' '}· пятидневка по табелю
+                          {m.shiftRate ? ` (${m.shiftRate.toLocaleString('ru-RU')} ₸/смена)` : ' — ставка не задана!'}
+                        </span>
                       )}
                       {m.allowance > 0 && (
                         <span title={m.allowanceDescription || undefined}>

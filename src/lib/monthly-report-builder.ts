@@ -108,7 +108,17 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
         if (!systemData[pid]) continue;
         const result = await calculateEmployeeMonthlySalary(emp.id, month, year, pid);
         if (!result) continue;
-        systemData[pid][targetField] += result.totalSalary + result.totalAdvances - result.totalBonuses;
+        const grossAccrued = result.totalSalary + result.totalAdvances - result.totalBonuses;
+        // baseSalary и allowance не привязаны к конкретной аптеке (в отличие от сменной части,
+        // лестничной премии и доли бонуса — calculateEmployeeMonthlySalary уже считает их только
+        // для переданной pharmacyId, см. resolveManagedPharmacyIds в salary-calculator.ts). При
+        // вызове на каждую аптеку отдельно baseSalary+allowance попадают в grossAccrued целиком
+        // на каждой итерации — без деления сотрудник, привязанный к N аптекам, задваивал(N-кратил)
+        // бы свой оклад+доплату в сумме отчёта по всем аптекам (QA раунд 3, находка №4). Сам
+        // сотрудник от этого не переплачивается — искажался только совокупный отчёт по аптекам.
+        const flatPortion = result.baseSalary + result.allowance;
+        const perPharmacyFlat = flatPortion / pharmacyIds.length;
+        systemData[pid][targetField] += grossAccrued - flatPortion + perPharmacyFlat;
       }
     }),
   );

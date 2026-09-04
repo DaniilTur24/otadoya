@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
     prisma.user.findMany({
       include: {
         pharmacies: { include: { pharmacy: { select: { id: true, name: true } } } },
-        employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true, fiveDayViaAttendance: true } },
+        employee: { select: { baseSalary: true, employeeType: true, ladderPremiumEnabled: true, managerBonusShareEnabled: true, allowance: true, allowanceDescription: true, fiveDayViaAttendance: true, shiftRate: true } },
       },
     }),
     prisma.employee.findMany({
@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
     ladderPremiumEnabled: u.employee?.ladderPremiumEnabled ?? false,
     managerBonusShareEnabled: u.employee?.managerBonusShareEnabled ?? false,
     fiveDayViaAttendance: u.employee?.fiveDayViaAttendance ?? false,
+    shiftRate: u.employee?.shiftRate != null ? Number(u.employee.shiftRate) : null,
     allowance: u.employee ? Number(u.employee.allowance) : 0,
     allowanceDescription: u.employee?.allowanceDescription ?? '',
     accountType: 'user' as const,
@@ -86,7 +87,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdminOrBookkeeper(request);
   if (auth) return auth;
 
-  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, fiveDayViaAttendance, allowance, allowanceDescription } =
+  const { username, password, displayName, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, fiveDayViaAttendance, shiftRate, allowance, allowanceDescription } =
     await request.json();
 
   if (!displayName?.trim()) {
@@ -153,6 +154,10 @@ export async function POST(request: NextRequest) {
         // Применимо только к manager_trading (см. FIVE_DAY_VIA_ATTENDANCE_TYPES) — для
         // manager_fixed форма чекбокс не показывает, так что здесь всегда false.
         fiveDayViaAttendance: resolvedEmployeeType === 'manager_trading' ? Boolean(fiveDayViaAttendance) : false,
+        // Ставка за смену — заведующая, которая торгует, набирает пятидневные/суточные дни по
+        // табелю так же, как suточник: фиксированная ставка, а не доля от оклада (см.
+        // calculateTradingEmployeeSalary в salary-calculator.ts).
+        shiftRate: resolvedEmployeeType === 'manager_trading' && shiftRate != null ? String(shiftRate) : null,
         allowance: String(allowance ?? 0),
         allowanceDescription: typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '',
       },

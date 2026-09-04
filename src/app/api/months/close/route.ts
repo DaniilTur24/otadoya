@@ -81,6 +81,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Симметричный случай для заведующей на фиксированной ставке (manager_trading с
+    // fiveDayViaAttendance) и суточника (seller_five_day_fixed): дни в табеле отработаны, а
+    // shiftRate не задан — та же защита от заморозки тихого нуля, что и для календаря выше.
+    const shiftRateMissingNames = [
+      ...new Set(
+        employeeSalaries
+          .filter((e) => e.pharmacyId === null && e.shiftRateMissing)
+          .map((e) => e.employeeName),
+      ),
+    ];
+    if (shiftRateMissingNames.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            `Заполните ставку за смену на странице /users для: ${shiftRateMissingNames.join(', ')} — иначе зарплата ` +
+            `за ${month}.${year} будет зафиксирована нулём`,
+        },
+        { status: 400 },
+      );
+    }
+
     const record = await prisma.closedMonth.create({
       data: { year, month, snapshotJson: serializeSnapshot(snapshot, employeeSalaries) },
     });

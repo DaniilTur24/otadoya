@@ -180,6 +180,10 @@ export default function MonthlyReportPage() {
   // часть оклада сейчас считается как 0 вместо реальной суммы. Показываем заранее, до клика
   // «Закрыть месяц», где сервер это же самое отклонит с 400.
   const [calendarMissingNames, setCalendarMissingNames] = useState<string[]>([]);
+  // Симметричный случай для заведующей на фиксированной ставке (manager_trading с
+  // fiveDayViaAttendance) — та же тихая нулевая зарплата, но лечится не календарём, а ставкой
+  // на /users, поэтому отдельный список и отдельная подсказка.
+  const [shiftRateMissingNames, setShiftRateMissingNames] = useState<string[]>([]);
   const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
 
   const editableRows = MONTHLY_REPORT_ROWS.filter((r) => !r.section);
@@ -202,21 +206,17 @@ export default function MonthlyReportPage() {
     }
     setLoading(false);
 
-    // Закрытый месяц уже заморожен снимком — календарь на его цифры больше не влияет,
+    // Закрытый месяц уже заморожен снимком — календарь/ставка на его цифры больше не влияют,
     // проверять нечего.
     if (!json.isClosed) {
       const salaryRes = await fetch(`/api/employees/salary-summary?year=${year}&month=${month}`);
       const salaryJson = await salaryRes.json();
-      const names: string[] = [
-        ...new Set(
-          (salaryJson.employees ?? [])
-            .filter((e: { calendarMissing?: boolean }) => e.calendarMissing)
-            .map((e: { employeeName: string }) => e.employeeName),
-        ),
-      ] as string[];
-      setCalendarMissingNames(names);
+      const employees: { employeeName: string; calendarMissing?: boolean; shiftRateMissing?: boolean }[] = salaryJson.employees ?? [];
+      setCalendarMissingNames([...new Set(employees.filter((e) => e.calendarMissing).map((e) => e.employeeName))]);
+      setShiftRateMissingNames([...new Set(employees.filter((e) => e.shiftRateMissing).map((e) => e.employeeName))]);
     } else {
       setCalendarMissingNames([]);
+      setShiftRateMissingNames([]);
     }
   }, [year, month]);
 
@@ -487,6 +487,19 @@ export default function MonthlyReportPage() {
             Пятидневная/табельная часть оклада сейчас считается как 0 для: {calendarMissingNames.join(', ')}.
             Закрыть месяц не получится, пока календарь не заполнен —{' '}
             <Link href="/settings/working-calendar" className="underline">заполнить сейчас</Link>.
+          </span>
+        </div>
+      )}
+
+      {!isClosed && shiftRateMissingNames.length > 0 && (
+        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded">
+          <span className="text-amber-700 text-sm font-medium">
+            Не заполнена ставка за смену за {MONTH_NAMES[month - 1]} {year}
+          </span>
+          <span className="text-amber-600 text-xs block mt-0.5">
+            Пятидневная часть зарплаты сейчас считается как 0 для: {shiftRateMissingNames.join(', ')}.
+            Закрыть месяц не получится, пока ставка не заполнена —{' '}
+            <Link href="/users" className="underline">заполнить сейчас</Link>.
           </span>
         </div>
       )}

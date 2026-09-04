@@ -25,6 +25,13 @@ export interface MonthlySalaryResult {
    * суммы. Раньше это было незаметно: totalSalary просто получался нулевым без объяснения.
    */
   calendarMissing: boolean;
+  /**
+   * true — у сотрудника на фиксированной ставке за смену (manager_trading с fiveDayViaAttendance,
+   * seller_five_day_fixed) есть отработанные по табелю дни, но shiftRate не задан, поэтому эта
+   * часть зарплаты посчитана как 0. Симметрично calendarMissing, только для типов, чья пятидневка
+   * не зависит от оклада/календаря вообще.
+   */
+  shiftRateMissing: boolean;
   revenuePremiumDayShifts: number;
   revenuePremiumFullDayShifts: number;
   totalRevenuePremium: number;
@@ -34,7 +41,7 @@ export interface MonthlySalaryResult {
   totalSurcharges: number;
   /** Кол-во отметок в табеле посещаемости (manager_fixed / cleaner / office / seller_five_day_fixed) */
   attendanceShiftsCount: number;
-  /** Ставка за смену — для cleaner и seller_five_day_fixed */
+  /** Ставка за смену — для cleaner, seller_five_day_fixed и manager_trading с fiveDayViaAttendance */
   shiftRate: number | null;
   /** shiftRate × attendanceShiftsCount — только для cleaner (у seller_five_day_fixed эта сумма входит в salaryFromFiveDayShifts) */
   salaryFromShiftRate: number;
@@ -368,6 +375,7 @@ const EMPTY_RESULT_BASE = {
   salaryFromFiveDayShifts: 0,
   workingCalendarDays: null as number | null,
   calendarMissing: false,
+  shiftRateMissing: false,
   revenuePremiumDayShifts: 0,
   revenuePremiumFullDayShifts: 0,
   totalRevenuePremium: 0,
@@ -397,9 +405,14 @@ const EMPTY_RESULT_BASE = {
  *
  * Пятидневная часть по табелю посещаемости считается по-разному в зависимости от типа:
  *  - seller с fiveDayViaAttendance: salaryFromFiveDayShifts = baseSalary / workingCalendarDays × attendanceCount
- *  - seller_five_day_fixed:         salaryFromFiveDayShifts = shiftRate × attendanceCount (без деления на календарь —
- *    фиксированная ставка за смену, как у cleaner). У него оба источника (смены выручки и табель)
- *    разрешены одновременно, но не на одну и ту же дату — см. revenue-validation/attendance-validation.
+ *    (продавец без личных смен на пятидневке — оклад делится на норму месяца, как у табельных типов).
+ *  - manager_trading с fiveDayViaAttendance И seller_five_day_fixed: salaryFromFiveDayShifts =
+ *    shiftRate × attendanceCount (без деления на календарь — фиксированная ставка за смену, как у
+ *    cleaner). Оба источника (смены выручки и табель) разрешены одновременно, но не на одну и ту же
+ *    дату — см. revenue-validation/attendance-validation. Заведующая, которая торгует, набирает
+ *    пятидневные/суточные дни так же, как любой другой сотрудник на фиксированной ставке — если
+ *    вместо этого нужна оплата от оклада/календаря (без личных смен вообще), для этого есть
+ *    отдельный тип manager_fixed (calculateFixedManagerSalary), а не этот переключатель.
  *
  * Премия по выручке (revenuePremium: 200k/300k порог, 1.5% от избытка за смену, floor в 0 на
  * каждый тип смены независимо — недобор не вычитается из оклада) считается по умолчанию от личной
@@ -451,8 +464,12 @@ async function calculateTradingEmployeeSalary(
     ...(pharmacyId ? { pharmacyId } : {}),
   };
 
-  const useFixedFiveDayRate = employeeType === 'seller_five_day_fixed';
-  const fiveDayViaAttendance = Boolean(employee.fiveDayViaAttendance) || useFixedFiveDayRate;
+  // manager_trading набирает пятидневные/суточные дни по фиксированной ставке за смену, как
+  // seller_five_day_fixed — она торгует, а не сидит на окладе, поэтому её табельный день
+  // не должен зависеть от производственного календаря. Заведующая, которой действительно
+  // нужна оплата от оклада/календаря без личных смен, заводится как manager_fixed.
+  const useFixedFiveDayRate = employeeType === 'seller_five_day_fixed' || employeeType === 'manager_trading';
+  const fiveDayViaAttendance = Boolean(employee.fiveDayViaAttendance) || employeeType === 'seller_five_day_fixed';
 
   const [entries, pharmaBonusAgg, totalAdvances, totalSurcharges, calendarEntry, bonusShareStats, ladderStats, attendanceFiveDayCount] =
     await Promise.all([
@@ -533,6 +550,9 @@ async function calculateTradingEmployeeSalary(
   // Фиксированная ставка (useFixedFiveDayRate) не зависит от календаря — только для случая
   // baseSalary/workingCalendarDays, если дни отработаны, а календарь не заполнен.
   const calendarMissing = !useFixedFiveDayRate && workingCalendarDays === null && fiveDayShiftsCount > 0;
+  // Симметричный случай для фиксированной ставки: дни в табеле отработаны, а shiftRate не задан —
+  // без этой пометки оплата тихо считалась бы нулём, как раньше происходило с календарём.
+  const shiftRateMissing = useFixedFiveDayRate && !shiftRate && fiveDayShiftsCount > 0;
   const totalBonuses = roundMoney(Number(pharmaBonusAgg._sum.amount ?? 0));
 
   // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
@@ -595,6 +615,7 @@ async function calculateTradingEmployeeSalary(
     salaryFromFiveDayShifts,
     workingCalendarDays,
     calendarMissing,
+    shiftRateMissing,
     attendanceShiftsCount: fiveDayShiftsCount,
     shiftRate,
     revenuePremiumDayShifts,
@@ -970,6 +991,7 @@ export async function calculateEmployeeMonthlySalary(
         ladderPremiumEnabled: boolean;
         managerBonusShareEnabled: boolean;
         fiveDayViaAttendance: boolean;
+        shiftRate: unknown;
       },
       employeeType,
       month,

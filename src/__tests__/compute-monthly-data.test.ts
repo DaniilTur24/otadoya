@@ -54,9 +54,22 @@ function mockEmployees(employees: { id: number; employeeType: string; pharmacies
 }
 
 /** calculateEmployeeMonthlySalary — по умолчанию возвращает null (как если бы данных не было). */
-function mockSalaryResult(result: Partial<{ totalSalary: number; totalBonuses: number; totalAdvances: number }> | null) {
+function mockSalaryResult(
+  result: Partial<{ totalSalary: number; totalBonuses: number; totalAdvances: number; baseSalary: number; allowance: number }> | null
+) {
   vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
-    result === null ? null : { totalSalary: 0, totalBonuses: 0, totalAdvances: 0, ...result }
+    result === null ? null : { totalSalary: 0, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, ...result }
+  );
+}
+
+/** Вариант с разным результатом на разные вызовы calculateEmployeeMonthlySalary (по pharmacyId). */
+function mockSalaryResultPerPharmacy(byPharmacyId: Record<number, { totalSalary: number; totalBonuses?: number; totalAdvances?: number; baseSalary?: number; allowance?: number }>) {
+  vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockImplementation(
+    (_employeeId: number, _month: number, _year: number, pharmacyId?: number) => {
+      const r = pharmacyId != null ? byPharmacyId[pharmacyId] : undefined;
+      if (!r) return Promise.resolve(null);
+      return Promise.resolve({ totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, ...r });
+    }
   );
 }
 
@@ -220,6 +233,55 @@ describe('computeMonthlyData', () => {
 
     expect(systemData[1].cleaning).toBe(40000);
     expect(systemData[1].pharmaSalary).toBe(0);
+  });
+
+  // Regression QA раунд 3, находка №4: заведующая/менеджер, привязанные к нескольким аптекам,
+  // раньше получали свой оклад+доплату в отчёте по КАЖДОЙ аптеке целиком (calculateEmployeeMonthlySalary
+  // вызывается отдельно на каждую pharmacyId, и flat-поля не были ни к чему привязаны) — суммарно
+  // по всем аптекам оклад задваивался/N-кратился, хотя реально сотруднику платят один раз.
+  it('делит оклад+доплату заведующей на количество привязанных аптек, не задваивая их в сумме отчёта', async () => {
+    mockPharmacies([pharmacy1, { ...pharmacy1, id: 2, name: 'hi hi' }, { ...pharmacy1, id: 3, name: 'hu hu' }]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'manager_trading', pharmacies: [{ pharmacyId: 1 }, { pharmacyId: 2 }, { pharmacyId: 3 }] }]);
+    // baseSalary=190000 + allowance=30000 = 220000 "плоской" части — одинаковой на каждый вызов,
+    // независимо от pharmacyId (сменная часть здесь 0, чтобы изолировать именно эту часть).
+    mockSalaryResult({ totalSalary: 220000, baseSalary: 190000, allowance: 30000, totalBonuses: 0, totalAdvances: 0 });
+
+    const { systemData } = await computeMonthlyData(2026, 9);
+
+    // По 220000/3 ≈ 73333.33 на каждую аптеку, суммарно — ровно 220000, а не 660000.
+    expect(systemData[1].pharmaSalary).toBeCloseTo(220000 / 3);
+    expect(systemData[2].pharmaSalary).toBeCloseTo(220000 / 3);
+    expect(systemData[3].pharmaSalary).toBeCloseTo(220000 / 3);
+    const total = systemData[1].pharmaSalary + systemData[2].pharmaSalary + systemData[3].pharmaSalary;
+    expect(total).toBeCloseTo(220000);
+  });
+
+  it('не делит сменную часть — она уже корректно относится к своей аптеке', async () => {
+    mockPharmacies([pharmacy1, { ...pharmacy1, id: 2, name: 'hi hi' }]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'manager_trading', pharmacies: [{ pharmacyId: 1 }, { pharmacyId: 2 }] }]);
+    // Оклад/доплата отсутствуют (0) — вся сумма только от смен, разная в каждой аптеке.
+    mockSalaryResultPerPharmacy({
+      1: { totalSalary: 50000, baseSalary: 0, allowance: 0 },
+      2: { totalSalary: 12000, baseSalary: 0, allowance: 0 },
+    });
+
+    const { systemData } = await computeMonthlyData(2026, 9);
+
+    expect(systemData[1].pharmaSalary).toBe(50000);
+    expect(systemData[2].pharmaSalary).toBe(12000);
+  });
+
+  it('не меняет поведение для сотрудника с одной аптекой (обратная совместимость)', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'seller', pharmacies: [{ pharmacyId: 1 }] }]);
+    mockSalaryResult({ totalSalary: 45000, baseSalary: 40000, allowance: 5000, totalBonuses: 0, totalAdvances: 0 });
+
+    const { systemData } = await computeMonthlyData(2026, 9);
+
+    expect(systemData[1].pharmaSalary).toBe(45000);
   });
 
   it('splits office employee salary evenly across all active pharmacies', async () => {

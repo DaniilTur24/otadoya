@@ -128,10 +128,12 @@ export default function AttendancePage() {
 
   // Типы, чей пятидневный/табельный оклад делится на норму рабочих дней месяца
   // (baseSalary / workingDays × отмеченные дни) — превышение нормы у них реально означает
-  // переплату сверх оклада. cleaner и seller_five_day_fixed платятся по ставке за смену,
-  // у них нет понятия «нормы», предупреждение для них было бы бессмысленным.
+  // переплату сверх оклада. cleaner, seller_five_day_fixed и заведующая-продавец на пятидневке
+  // (manager_trading_five_day) платятся по фиксированной ставке за смену, у них нет понятия
+  // «нормы» — предупреждение для них было бы бессмысленным (см. useFixedFiveDayRate в
+  // salary-calculator.ts).
   const CALENDAR_PRORATED_GROUP_TYPES = new Set([
-    'manager_fixed', 'pharmacy_manager', 'office', 'seller_five_day', 'manager_trading_five_day',
+    'manager_fixed', 'pharmacy_manager', 'office', 'seller_five_day',
   ]);
 
   const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office', 'seller_five_day_fixed']
