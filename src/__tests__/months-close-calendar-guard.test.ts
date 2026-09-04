@@ -120,3 +120,48 @@ describe('POST /api/months/close — блокировка без произво�
     expect(createClosedMonth).toHaveBeenCalled();
   });
 });
+
+// Симметричный случай для заведующей на фиксированной ставке (manager_trading с
+// fiveDayViaAttendance) и суточника (seller_five_day_fixed) — та же защита от заморозки
+// тихого нуля, что и производственный календарь выше, только для отсутствующей ставки.
+describe('POST /api/months/close — блокировка без ставки за смену (shiftRateMissing)', () => {
+  it('отклоняет закрытие месяца, если хотя бы у одного сотрудника shiftRateMissing = true', async () => {
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 5, employeeName: 'Заведующая Алия', pharmacyId: null, calendarMissing: false, shiftRateMissing: true },
+      { employeeId: 6, employeeName: 'Продавец Аян', pharmacyId: null, calendarMissing: false, shiftRateMissing: false },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/ставку за смену/);
+    expect(res.body.error).toMatch(/Заведующая Алия/);
+    expect(res.body.error).not.toMatch(/Продавец Аян/);
+    expect(createClosedMonth).not.toHaveBeenCalled();
+  });
+
+  it('проверяет календарь и ставку независимо — обе ошибки не гасят друг друга', async () => {
+    // calendarMissing проверяется первым и возвращает раньше — сотрудник со ставкой,
+    // но без календаря, должен попасть именно в календарное сообщение, а не пройти незамеченным.
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 1, employeeName: 'Уборщица Света', pharmacyId: null, calendarMissing: true, shiftRateMissing: false },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/производственный календарь/);
+  });
+
+  it('закрывает месяц как обычно, когда ставка задана для всех', async () => {
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 5, employeeName: 'Заведующая Алия', pharmacyId: null, calendarMissing: false, shiftRateMissing: false },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number; body: { ok: boolean } };
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(createClosedMonth).toHaveBeenCalledTimes(1);
+  });
+});

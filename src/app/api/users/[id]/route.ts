@@ -40,7 +40,7 @@ export async function PUT(
   if (auth) return auth;
 
   const id = Number((await params).id);
-  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, fiveDayViaAttendance, allowance, allowanceDescription } =
+  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, fiveDayViaAttendance, shiftRate, allowance, allowanceDescription } =
     await request.json();
 
   if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
@@ -144,6 +144,9 @@ export async function PUT(
       // но если тип одновременно меняют на manager_fixed, значение всё равно безобидно
       // (FIVE_DAY_VIA_ATTENDANCE_TYPES для manager_fixed его не читает).
       if (fiveDayViaAttendance !== undefined) employeeData.fiveDayViaAttendance = Boolean(fiveDayViaAttendance);
+      // Ставка за смену — заведующая на фиксированной ставке (см. useFixedFiveDayRate в
+      // salary-calculator.ts); безобидна для остальных типов, они её не читают.
+      if (shiftRate !== undefined) employeeData.shiftRate = shiftRate != null ? String(shiftRate) : null;
       if (allowance !== undefined) employeeData.allowance = String(allowance ?? 0);
       if (allowanceDescription !== undefined) employeeData.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
       if (Object.keys(employeeData).length > 0) {

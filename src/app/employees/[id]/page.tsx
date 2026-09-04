@@ -82,6 +82,7 @@ interface SalaryResult {
   salaryFromFullDayShifts: number;
   salaryFromFiveDayShifts: number;
   workingCalendarDays: number | null;
+  shiftRateMissing: boolean;
   revenuePremiumDayShifts: number;
   revenuePremiumFullDayShifts: number;
   totalRevenuePremium: number;
@@ -628,6 +629,10 @@ export default function EmployeeDetailPage() {
               const isOffice = salary.employeeType === 'office';
               const isSeller = salary.employeeType === 'seller';
               const isSellerFiveDayFixed = salary.employeeType === 'seller_five_day_fixed';
+              // Заведующая, которая торгует (manager_trading с fiveDayViaAttendance), тоже платится
+              // фиксированной ставкой за смену, а не долей от оклада/календаря — см.
+              // useFixedFiveDayRate в salary-calculator.ts.
+              const usesFixedFiveDayRate = isSellerFiveDayFixed || salary.employeeType === 'manager_trading';
               return (
                 <div className="bg-slate-50 border border-slate-300 rounded p-3 space-y-2 text-sm">
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -663,12 +668,16 @@ export default function EmployeeDetailPage() {
                         )}
 
                         <span className="text-slate-500">
-                          {isAttendanceBased ? 'Смен по табелю' : isSellerFiveDayFixed ? 'Смен по табелю (фикс. ставка)' : 'Пятидневных смен'}
+                          {isAttendanceBased ? 'Смен по табелю' : usesFixedFiveDayRate ? 'Смен по табелю (фикс. ставка)' : 'Пятидневных смен'}
                         </span>
                         <span className="font-medium text-right">
-                          {isSellerFiveDayFixed ? (
+                          {usesFixedFiveDayRate ? (
                             salary.fiveDayShiftsCount > 0 ? (
-                              <>{salary.fiveDayShiftsCount} × {fmt(salary.salaryFromFiveDayShifts / salary.fiveDayShiftsCount)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                              salary.shiftRateMissing ? (
+                                <span className="text-amber-600">{salary.fiveDayShiftsCount} смен — ставка не задана</span>
+                              ) : (
+                                <>{salary.fiveDayShiftsCount} × {fmt(salary.salaryFromFiveDayShifts / salary.fiveDayShiftsCount)} = {fmt(salary.salaryFromFiveDayShifts)} ₸</>
+                              )
                             ) : (
                               <span className="text-slate-300">0</span>
                             )
