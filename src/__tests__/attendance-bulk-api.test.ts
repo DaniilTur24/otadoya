@@ -13,10 +13,12 @@ vi.mock('next/server', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     employee: { findUnique: vi.fn() },
+    employeePharmacy: { findFirst: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
     attendanceShift: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
     user: { findUnique: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
+    dailyRevenueEntry: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -25,10 +27,12 @@ import { prisma } from '@/lib/prisma';
 import { PUT } from '@/app/api/attendance/bulk/route';
 
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findFirstEmployeePharmacy = prisma.employeePharmacy.findFirst as unknown as ReturnType<typeof vi.fn>;
 const findManyShifts = prisma.attendanceShift.findMany as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+const findManyRevenueEntries = prisma.dailyRevenueEntry.findMany as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: unknown, opts: { role?: string; userId?: number } = {}): NextRequest {
@@ -45,10 +49,14 @@ function makeRequest(body: unknown, opts: { role?: string; userId?: number } = {
 
 beforeEach(() => {
   findUniqueEmployee.mockReset().mockResolvedValue({ id: 28, employeeType: 'manager_fixed' });
+  // По умолчанию сотрудник считается привязанным к переданной аптеке — большинство тестов
+  // проверяют другое поведение, а не эту проверку конкретно (см. отдельный describe ниже).
+  findFirstEmployeePharmacy.mockReset().mockResolvedValue({ employeeId: 28, pharmacyId: 2 });
   findManyShifts.mockReset().mockResolvedValue([]);
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
+  findManyRevenueEntries.mockReset().mockResolvedValue([]);
   transaction.mockReset().mockResolvedValue([]);
 });
 
@@ -126,6 +134,81 @@ describe('PUT /api/attendance/bulk', () => {
         { employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-10'] },
         { role: 'manager', userId: 5 }
       )
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('PUT /api/attendance/bulk — сотрудник должен быть привязан к аптеке', () => {
+  it('отклоняет отметку, если сотрудник не привязан к переданной аптеке', async () => {
+    findFirstEmployeePharmacy.mockResolvedValue(null);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 99, year: 2026, month: 6, dates: ['2026-06-05'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/не привязан к этой аптеке/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('не проверяет привязку для офисных отметок без аптеки', async () => {
+    const res = await PUT(
+      makeRequest({ employeeId: 28, year: 2026, month: 6, dates: ['2026-06-05'] })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(findFirstEmployeePharmacy).not.toHaveBeenCalled();
+  });
+});
+
+describe('PUT /api/attendance/bulk — запрет будущих дат', () => {
+  it('отклоняет новую отметку будущей датой', async () => {
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2099, month: 1, dates: ['2099-01-15'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/будущей датой/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('позволяет снять уже существующую отметку будущей датой (не создаёт новую)', async () => {
+    // Дата гипотетически уже отмечена раньше — сама отметка не новая, снять её можно всегда.
+    findManyShifts.mockResolvedValue([{ id: 1, date: new Date('2099-01-15'), pharmacyId: 2 }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2099, month: 1, dates: [] })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(transaction).toHaveBeenCalled();
+  });
+});
+
+describe('PUT /api/attendance/bulk — конфликт с сменой в записи выручки (seller_five_day_fixed)', () => {
+  it('блокирует новую дату табеля с 409, если на неё уже назначена смена в выручке', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 30, employeeType: 'seller_five_day_fixed' });
+    findManyShifts.mockResolvedValue([]); // ни одной существующей отметки табеля
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date('2026-06-12') }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 30, year: 2026, month: 6, dates: ['2026-06-12'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/уже назначена смена в записи выручки/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('не блокирует повторную реконсиляцию уже существующей отметки табеля', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 30, employeeType: 'seller_five_day_fixed' });
+    findManyShifts.mockResolvedValue([{ id: 1, date: new Date('2026-06-12'), pharmacyId: null }]);
+    findManyRevenueEntries.mockResolvedValue([{ date: new Date('2026-06-12') }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 30, year: 2026, month: 6, dates: ['2026-06-12'] })
     ) as unknown as { status: number };
 
     expect(res.status).toBe(200);

@@ -82,7 +82,7 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
   // включая уже выданный аванс — аванс это часть зарплаты, а не отдельный расход на этой странице
   // (totalSalary = начислено − totalAdvances, поэтому добавляем totalAdvances обратно).
   // Бонус исключаем — он отдельно учтён в pharmaBonus.
-  const PHARMA_SALARY_TYPES = new Set(['seller', 'manager_trading', 'manager_fixed', 'pharmacy_manager']);
+  const PHARMA_SALARY_TYPES = new Set(['seller', 'seller_five_day_fixed', 'manager_trading', 'manager_fixed', 'pharmacy_manager']);
   const activePharmacyIds = pharmacies.filter((p) => p.isActive).map((p) => p.id);
 
   await Promise.all(

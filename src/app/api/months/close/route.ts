@@ -60,6 +60,27 @@ export async function POST(request: NextRequest) {
     // правка производственного календаря изменили бы карточку за уже закрытый месяц.
     const employeeSalaries = await buildEmployeeSalarySnapshot(year, month);
 
+    // Без производственного календаря пятидневная/табельная часть оклада тихо считается как 0
+    // (см. calendarMissing в salary-calculator.ts). Замораживать такие нули снимком нельзя —
+    // это зафиксирует неверную зарплату навсегда для уже закрытого месяца.
+    const affectedNames = [
+      ...new Set(
+        employeeSalaries
+          .filter((e) => e.pharmacyId === null && e.calendarMissing)
+          .map((e) => e.employeeName),
+      ),
+    ];
+    if (affectedNames.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            `Заполните производственный календарь за ${month}.${year} — иначе зарплата ` +
+            `будет зафиксирована нулём для: ${affectedNames.join(', ')}`,
+        },
+        { status: 400 },
+      );
+    }
+
     const record = await prisma.closedMonth.create({
       data: { year, month, snapshotJson: serializeSnapshot(snapshot, employeeSalaries) },
     });
@@ -93,19 +114,13 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const dateFrom = new Date(year, month - 1, 1);
-    const dateTo = new Date(year, month, 0, 23, 59, 59, 999);
-
-    await prisma.$transaction([
-      prisma.closedMonth.deleteMany({ where: { year, month } }),
-      // Записи, созданные пока месяц был закрыт, помечались excludedFromReport — при открытии
-      // месяца обратно нужно вернуть их в отчёт массово, иначе бухгалтер должен включать
-      // каждую запись вручную по одной и легко может забыть часть.
-      prisma.dailyRevenueEntry.updateMany({
-        where: { date: { gte: dateFrom, lte: dateTo }, excludedFromReport: true },
-        data: { excludedFromReport: false },
-      }),
-    ]);
+    // Раньше запись в закрытый месяц не отклонялась, а тихо сохранялась с excludedFromReport:
+    // true, и при открытии месяца обратно эту автопометку нужно было снять массово. Сейчас
+    // POST /api/revenue и табельные эндпоинты просто отклоняют запись в закрытый месяц (423) —
+    // автопометки больше не бывает. excludedFromReport теперь выставляет только бухгалтер вручную
+    // как осознанное решение "не учитывать эту запись" (влияет и на отчёт, и на зарплату), и
+    // массовый сброс здесь стирал бы это решение при каждом открытии месяца обратно.
+    await prisma.closedMonth.deleteMany({ where: { year, month } });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

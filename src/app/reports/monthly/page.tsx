@@ -176,6 +176,10 @@ export default function MonthlyReportPage() {
   const [closedAt, setClosedAt] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const [selected, setSelected] = useState<{ rowIdx: number; colIdx: number } | null>(null);
+  // Сотрудники, у которых не заполнен производственный календарь — их пятидневная/табельная
+  // часть оклада сейчас считается как 0 вместо реальной суммы. Показываем заранее, до клика
+  // «Закрыть месяц», где сервер это же самое отклонит с 400.
+  const [calendarMissingNames, setCalendarMissingNames] = useState<string[]>([]);
   const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
 
   const editableRows = MONTHLY_REPORT_ROWS.filter((r) => !r.section);
@@ -197,6 +201,23 @@ export default function MonthlyReportPage() {
       setOverrideMap(json.overrideMap ?? {});
     }
     setLoading(false);
+
+    // Закрытый месяц уже заморожен снимком — календарь на его цифры больше не влияет,
+    // проверять нечего.
+    if (!json.isClosed) {
+      const salaryRes = await fetch(`/api/employees/salary-summary?year=${year}&month=${month}`);
+      const salaryJson = await salaryRes.json();
+      const names: string[] = [
+        ...new Set(
+          (salaryJson.employees ?? [])
+            .filter((e: { calendarMissing?: boolean }) => e.calendarMissing)
+            .map((e: { employeeName: string }) => e.employeeName),
+        ),
+      ] as string[];
+      setCalendarMissingNames(names);
+    } else {
+      setCalendarMissingNames([]);
+    }
   }, [year, month]);
 
   useEffect(() => { load(); }, [load]);
@@ -277,12 +298,19 @@ export default function MonthlyReportPage() {
         snapshot[String(p.id)][row.key] = getCurrentValue(p.id, row.key);
       }
     }
-    await fetch('/api/months/close', {
+    const res = await fetch('/api/months/close', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ year, month, snapshot }),
     });
     setClosing(false);
+    if (!res.ok) {
+      // Раньше ответ вообще не проверялся — сервер мог отклонить закрытие (например,
+      // из-за незаполненного календаря), а бухгалтер не видел никакой причины.
+      const json = await res.json().catch(() => ({}));
+      alert(json.error || 'Не удалось закрыть месяц');
+      return;
+    }
     await load();
   }
 
@@ -447,6 +475,19 @@ export default function MonthlyReportPage() {
             Месяц закрыт {new Date(closedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
           </span>
           <span className="text-green-600 text-xs">Данные зафиксированы и недоступны для изменения</span>
+        </div>
+      )}
+
+      {!isClosed && calendarMissingNames.length > 0 && (
+        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded">
+          <span className="text-amber-700 text-sm font-medium">
+            Не заполнен производственный календарь за {MONTH_NAMES[month - 1]} {year}
+          </span>
+          <span className="text-amber-600 text-xs block mt-0.5">
+            Пятидневная/табельная часть оклада сейчас считается как 0 для: {calendarMissingNames.join(', ')}.
+            Закрыть месяц не получится, пока календарь не заполнен —{' '}
+            <Link href="/settings/working-calendar" className="underline">заполнить сейчас</Link>.
+          </span>
         </div>
       )}
 

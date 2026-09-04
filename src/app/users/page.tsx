@@ -23,6 +23,7 @@ interface Manager {
   employeeType: string;
   ladderPremiumEnabled: boolean;
   managerBonusShareEnabled: boolean;
+  fiveDayViaAttendance: boolean;
   allowance: number;
   allowanceDescription: string;
   pharmacies: Pharmacy[];
@@ -54,6 +55,7 @@ export default function UsersPage() {
     employeeType: 'manager_trading' as string,
     ladderPremiumEnabled: false,
     managerBonusShareEnabled: true,
+    fiveDayViaAttendance: false,
     allowance: '',
     allowanceDescription: '',
     pharmacyIds: [] as number[],
@@ -77,6 +79,7 @@ export default function UsersPage() {
     setForm({
       username: '', password: '', displayName: '', baseSalary: '',
       employeeType: 'manager_trading', ladderPremiumEnabled: false, managerBonusShareEnabled: true,
+      fiveDayViaAttendance: false,
       allowance: '', allowanceDescription: '', pharmacyIds: [],
     });
     setEditingId(null);
@@ -99,6 +102,7 @@ export default function UsersPage() {
       employeeType: m.employeeType,
       ladderPremiumEnabled: m.ladderPremiumEnabled,
       managerBonusShareEnabled: m.managerBonusShareEnabled,
+      fiveDayViaAttendance: m.fiveDayViaAttendance,
       allowance: m.allowance ? String(m.allowance) : '',
       allowanceDescription: m.allowanceDescription ?? '',
       pharmacyIds: m.pharmacies.map((p) => p.id),
@@ -154,6 +158,13 @@ export default function UsersPage() {
           : 'Лестничная премия по выручке аптеки: выключается'
       );
     }
+    if (form.fiveDayViaAttendance !== original.fiveDayViaAttendance) {
+      changed.push(
+        form.fiveDayViaAttendance
+          ? 'Пятидневка по табелю: включается (можно совмещать со сменами из выручки, кроме одной и той же даты)'
+          : 'Пятидневка по табелю: выключается (отметки табеля перестанут оплачиваться)'
+      );
+    }
     return changed;
   }
 
@@ -183,6 +194,7 @@ export default function UsersPage() {
       employeeType: form.employeeType,
       ladderPremiumEnabled: form.ladderPremiumEnabled,
       managerBonusShareEnabled: form.managerBonusShareEnabled,
+      fiveDayViaAttendance: form.employeeType === 'manager_trading' ? form.fiveDayViaAttendance : false,
       allowance: form.allowance || 0,
       allowanceDescription: form.allowanceDescription.trim(),
     };
@@ -411,6 +423,19 @@ export default function UsersPage() {
                 Лестничная премия по выручке аптеки
                 {form.employeeType === 'manager_trading' && ' (вместо личной премии за смену)'}
               </label>
+
+              {form.employeeType === 'manager_trading' && (
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded"
+                    checked={form.fiveDayViaAttendance}
+                    onChange={(e) => setForm((f) => ({ ...f, fiveDayViaAttendance: e.target.checked }))}
+                  />
+                  Пятидневка — можно отмечать в табеле посещаемости
+                  <span className="text-slate-400 font-normal">(дополнительно к сменам из записи выручки — не на одну и ту же дату)</span>
+                </label>
+              )}
             </div>
 
             <div>
@@ -504,6 +529,9 @@ export default function UsersPage() {
                       )}
                       {m.ladderPremiumEnabled && (
                         <span className="text-green-600">{' '}· премия по выручке аптеки</span>
+                      )}
+                      {m.fiveDayViaAttendance && (
+                        <span className="text-slate-500">{' '}· пятидневка по табелю</span>
                       )}
                       {m.allowance > 0 && (
                         <span title={m.allowanceDescription || undefined}>

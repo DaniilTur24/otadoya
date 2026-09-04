@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
@@ -167,7 +167,9 @@ export default function RevenueListPage() {
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
   const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
   const editSelectedEmployee = editState ? employees.find((e) => e.id === Number(editState.employeeId)) : undefined;
-  const isEditFiveDayEmployee = Boolean(editSelectedEmployee?.fiveDayViaAttendance);
+  // "Пятидневщик, у которого блокируется смена" — сейчас это только seller. manager_trading
+  // с тем же флагом может совмещать оба источника (см. canGetRevenueShift).
+  const isEditFiveDayEmployee = Boolean(editSelectedEmployee && !canGetRevenueShift(editSelectedEmployee));
   // Аванс/доплату можно назначить только сотруднику, привязанному к аптеке этой записи
   const editPharmacyEmployees = editState
     ? employees.filter((e) => e.pharmacies.some((p) => p.id === Number(editState.pharmacyId)))
@@ -312,8 +314,9 @@ export default function RevenueListPage() {
       if (field === 'employeeId') {
         const emp = employees.find((e) => e.id === Number(value));
         updated.employeeName = emp ? emp.name : s.employeeName;
-        // У пятидневщика зарплата считается по табелю — смену в записи выручки ему не назначаем
-        if (emp?.fiveDayViaAttendance) {
+        // У чисто табельного пятидневщика (seller) зарплата считается только по табелю — смену
+        // в записи выручки ему не назначаем. manager_trading с тем же флагом — исключение.
+        if (emp && !canGetRevenueShift(emp)) {
           updated.shiftType = '';
         }
       }

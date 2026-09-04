@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { EMPLOYEE_TYPE_LABELS, ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { EMPLOYEE_TYPE_LABELS, canMarkAttendance } from '@/lib/employee-types';
 
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -18,11 +18,7 @@ interface Employee {
   fiveDayViaAttendance?: boolean;
 }
 
-// Продавец с включённым fiveDayViaAttendance отмечается в табеле как пятидневник,
-// хотя формально его тип 'seller' — не входит в ATTENDANCE_BASED_TYPES.
-function isAttendanceEligible(e: Employee): boolean {
-  return ATTENDANCE_BASED_TYPES.has(e.employeeType) || (e.employeeType === 'seller' && !!e.fiveDayViaAttendance);
-}
+const isAttendanceEligible = canMarkAttendance;
 interface AttendanceRecord {
   id: number;
   employeeId: number;
@@ -66,6 +62,11 @@ export default function AttendancePage() {
 
   const [selected, setSelected] = useState<Cursor | null>(null);
   const [anchor, setAnchor] = useState<Cursor | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  // Норма рабочих дней месяца — используется только для предупреждения, не для ограничения:
+  // сотрудник, отработавший сверх нормы, получит оплату за все отмеченные дни как и раньше,
+  // просто это становится видно сразу в табеле, а не только в карточке зарплаты.
+  const [workingDaysForMonth, setWorkingDaysForMonth] = useState<number | null>(null);
   const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -103,13 +104,50 @@ export default function AttendancePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office']
+  useEffect(() => {
+    fetch('/api/auth/me').then((r) => r.json()).then((d) => setRole(d.role ?? null)).catch(() => setRole(null));
+  }, []);
+
+  // Только admin/bookkeeper видят норму — заведующему решение об оплате всё равно не показывают
+  // нигде в интерфейсе, и /api/working-calendar ему недоступен (403).
+  useEffect(() => {
+    if (role !== 'admin' && role !== 'bookkeeper') {
+      setWorkingDaysForMonth(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/working-calendar?year=${year}`)
+      .then((r) => r.json())
+      .then((entries: { month: number; workingDays: number }[]) => {
+        if (cancelled) return;
+        setWorkingDaysForMonth(entries.find((e) => e.month === month)?.workingDays ?? null);
+      })
+      .catch(() => { if (!cancelled) setWorkingDaysForMonth(null); });
+    return () => { cancelled = true; };
+  }, [role, year, month]);
+
+  // Типы, чей пятидневный/табельный оклад делится на норму рабочих дней месяца
+  // (baseSalary / workingDays × отмеченные дни) — превышение нормы у них реально означает
+  // переплату сверх оклада. cleaner и seller_five_day_fixed платятся по ставке за смену,
+  // у них нет понятия «нормы», предупреждение для них было бы бессмысленным.
+  const CALENDAR_PRORATED_GROUP_TYPES = new Set([
+    'manager_fixed', 'pharmacy_manager', 'office', 'seller_five_day', 'manager_trading_five_day',
+  ]);
+
+  const groups: { type: string; label: string; items: Employee[] }[] = ['manager_fixed', 'pharmacy_manager', 'cleaner', 'office', 'seller_five_day_fixed']
     .map((type) => ({ type, label: EMPLOYEE_TYPE_LABELS[type], items: employees.filter((e) => e.employeeType === type) }))
-    .concat([{
-      type: 'seller_five_day',
-      label: 'Продавцы (пятидневка)',
-      items: employees.filter((e) => e.employeeType === 'seller' && e.fiveDayViaAttendance),
-    }])
+    .concat([
+      {
+        type: 'seller_five_day',
+        label: 'Продавцы (пятидневка)',
+        items: employees.filter((e) => e.employeeType === 'seller' && e.fiveDayViaAttendance),
+      },
+      {
+        type: 'manager_trading_five_day',
+        label: 'Заведующие (пятидневка)',
+        items: employees.filter((e) => e.employeeType === 'manager_trading' && e.fiveDayViaAttendance),
+      },
+    ])
     .filter((g) => g.items.length > 0);
 
   const flatEmployees = useMemo(() => groups.flatMap((g) => g.items), [groups]);
@@ -398,7 +436,7 @@ export default function AttendancePage() {
         </div>
       ) : flatEmployees.length === 0 ? (
         <div className="card p-5 text-center text-slate-500 text-sm">
-          Нет сотрудников с типом «Уборщица», «Офис», «Менеджер», «Заведующая (не торгует)» или продавцов с включённой пятидневкой по табелю.
+          Нет сотрудников с типом «Уборщица», «Офис», «Менеджер», «Заведующая (не торгует)», «Суточник / пятидневка (фикс)» или продавцов/заведующих с включённой пятидневкой по табелю.
         </div>
       ) : (
         <div className="card overflow-x-auto">
@@ -482,7 +520,18 @@ export default function AttendancePage() {
                             </td>
                           );
                         })}
-                        <td className="td text-center font-medium text-slate-600">{total}</td>
+                        <td className="td text-center font-medium text-slate-600">
+                          {CALENDAR_PRORATED_GROUP_TYPES.has(g.type) && workingDaysForMonth && total > workingDaysForMonth ? (
+                            <span
+                              className="text-amber-600 font-semibold cursor-help"
+                              title={`Отмечено ${total} дней при норме ${workingDaysForMonth} — оплата пойдёт за все ${total}, сверх оклада`}
+                            >
+                              {total}/{workingDaysForMonth} ⚠
+                            </span>
+                          ) : (
+                            total
+                          )}
+                        </td>
                         <td className="td text-center font-medium text-slate-600">
                           {overtimeTotal(emp.id) > 0 ? overtimeTotal(emp.id) : <span className="text-slate-300">—</span>}
                         </td>

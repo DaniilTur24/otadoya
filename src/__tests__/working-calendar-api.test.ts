@@ -12,16 +12,23 @@ vi.mock('next/server', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    workingCalendar: { upsert: vi.fn() },
+    workingCalendar: { upsert: vi.fn(), findMany: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
   },
 }));
 
 import { prisma } from '@/lib/prisma';
-import { PUT } from '@/app/api/working-calendar/route';
+import { GET, PUT } from '@/app/api/working-calendar/route';
 
 const upsert = prisma.workingCalendar.upsert as unknown as ReturnType<typeof vi.fn>;
+const findManyCalendar = prisma.workingCalendar.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+
+function makeGetRequest(role: string, year = 2026): NextRequest {
+  return new Request(`http://localhost/api/working-calendar?year=${year}`, {
+    headers: { 'x-user-role': role },
+  }) as unknown as NextRequest;
+}
 
 function makeRequest(body: unknown): NextRequest {
   return new Request('http://localhost/api/working-calendar', {
@@ -34,7 +41,28 @@ function makeRequest(body: unknown): NextRequest {
 beforeEach(() => {
   vi.clearAllMocks();
   upsert.mockResolvedValue({ month: 8, workingDays: 21 });
+  findManyCalendar.mockResolvedValue([{ month: 8, workingDays: 21 }]);
   findUniqueClosedMonth.mockResolvedValue(null);
+});
+
+describe('GET /api/working-calendar', () => {
+  // Табель посещаемости (страница /attendance) показывает предупреждение о превышении
+  // нормы дней бухгалтеру — без доступа на чтение этого пришлось бы отправлять его
+  // отдельно в /settings/working-calendar на каждую проверку.
+  it('доступен бухгалтеру', async () => {
+    const res = await GET(makeGetRequest('bookkeeper')) as unknown as { status: number };
+    expect(res.status).toBe(200);
+  });
+
+  it('доступен админу', async () => {
+    const res = await GET(makeGetRequest('admin')) as unknown as { status: number };
+    expect(res.status).toBe(200);
+  });
+
+  it('недоступен заведующему', async () => {
+    const res = await GET(makeGetRequest('manager')) as unknown as { status: number };
+    expect(res.status).toBe(403);
+  });
 });
 
 describe('PUT /api/working-calendar', () => {

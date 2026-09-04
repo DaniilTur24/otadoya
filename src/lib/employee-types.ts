@@ -2,6 +2,7 @@
 
 export const EMPLOYEE_TYPES = {
   seller: 'seller',
+  seller_five_day_fixed: 'seller_five_day_fixed',
   manager_trading: 'manager_trading',
   manager_fixed: 'manager_fixed',
   cleaner: 'cleaner',
@@ -13,6 +14,7 @@ export type EmployeeType = keyof typeof EMPLOYEE_TYPES;
 
 export const EMPLOYEE_TYPE_LABELS: Record<string, string> = {
   seller: 'На кассе',
+  seller_five_day_fixed: 'Суточник / пятидневка (фикс)',
   manager_trading: 'Заведующая (торгует)',
   manager_fixed: 'Заведующая (не торгует)',
   cleaner: 'Уборщица',
@@ -22,6 +24,7 @@ export const EMPLOYEE_TYPE_LABELS: Record<string, string> = {
 
 export const EMPLOYEE_TYPE_OPTIONS = [
   { value: 'seller', label: 'На кассе' },
+  { value: 'seller_five_day_fixed', label: 'Суточник / пятидневка (фикс)' },
   { value: 'manager_trading', label: 'Заведующая (торгует)' },
   { value: 'manager_fixed', label: 'Заведующая (не торгует)' },
   { value: 'cleaner', label: 'Уборщица' },
@@ -29,14 +32,53 @@ export const EMPLOYEE_TYPE_OPTIONS = [
   { value: 'pharmacy_manager', label: 'Менеджер' },
 ] as const;
 
-// Типы, которые отмечаются через табель посещаемости (AttendanceShift),
-// а не через смену в записи выручки
+// Типы, которые отмечаются ТОЛЬКО через табель посещаемости (AttendanceShift) — смена в
+// записи выручки им запрещена полностью. seller_five_day_fixed сюда НЕ входит: у него оба
+// источника разрешены одновременно (см. canGetRevenueShift/canMarkAttendance ниже).
 export const ATTENDANCE_BASED_TYPES: ReadonlySet<string> = new Set([
   'manager_fixed',
   'cleaner',
   'office',
   'pharmacy_manager',
 ]);
+
+// Типы, у которых fiveDayViaAttendance включает учёт пятидневных дней через табель
+// (AttendanceShift), формула — baseSalary/workingCalendarDays × attendanceCount. Для
+// остальных USER_LINKED_TYPES (manager_fixed/pharmacy_manager) поле неприменимо — они и так
+// всегда только по табелю.
+export const FIVE_DAY_VIA_ATTENDANCE_TYPES: ReadonlySet<string> = new Set(['seller', 'manager_trading']);
+
+// Из FIVE_DAY_VIA_ATTENDANCE_TYPES только seller — переключатель "всё или ничего": включив
+// fiveDayViaAttendance, продавец целиком теряет возможность получить смену в записи выручки
+// на весь месяц. manager_trading с тем же флагом ведёт себя иначе — может совмещать смены из
+// выручки и дни по табелю в одном месяце (как seller_five_day_fixed, но по формуле
+// baseSalary/workingCalendarDays, а не по фиксированной ставке); конфликт на одну и ту же
+// дату проверяется отдельно (validateNoAttendanceOnDate/validateNoShiftOnDate), а не блокировкой типа.
+const FIVE_DAY_VIA_ATTENDANCE_BLOCKS_SHIFTS_TYPES: ReadonlySet<string> = new Set(['seller']);
+
+/**
+ * Может ли сотрудник получить смену (день/сутки) в записи выручки.
+ * false для табельных типов и для продавца с включённым fiveDayViaAttendance (его пятидневка
+ * считается только по табелю). seller_five_day_fixed и manager_trading с fiveDayViaAttendance —
+ * исключения: им можно и то, и другое, конфликт на конкретную дату проверяется отдельно
+ * (см. validateNoAttendanceOnDate).
+ */
+export function canGetRevenueShift(employee: { employeeType: string; fiveDayViaAttendance?: boolean | null }): boolean {
+  if (ATTENDANCE_BASED_TYPES.has(employee.employeeType)) return false;
+  if (FIVE_DAY_VIA_ATTENDANCE_BLOCKS_SHIFTS_TYPES.has(employee.employeeType) && Boolean(employee.fiveDayViaAttendance)) return false;
+  return true;
+}
+
+/**
+ * Может ли сотрудник отмечаться в табеле посещаемости (AttendanceShift).
+ * Табельные типы — всегда; seller/manager_trading — только если включён fiveDayViaAttendance;
+ * seller_five_day_fixed — всегда (это его основной или дополнительный способ учёта смен).
+ */
+export function canMarkAttendance(employee: { employeeType: string; fiveDayViaAttendance?: boolean | null }): boolean {
+  if (ATTENDANCE_BASED_TYPES.has(employee.employeeType)) return true;
+  if (employee.employeeType === 'seller_five_day_fixed') return true;
+  return FIVE_DAY_VIA_ATTENDANCE_TYPES.has(employee.employeeType) && Boolean(employee.fiveDayViaAttendance);
+}
 
 // Типы, у которых есть фиксированная доплата и два независимых переключателя —
 // managerBonusShareEnabled (10%-доля от бонусов аптеки) и ladderPremiumEnabled

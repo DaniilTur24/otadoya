@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
 import { SHIFT_OPTIONS } from '@/lib/shift-types';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
@@ -155,8 +155,10 @@ export default function NewRevenuePage() {
       if (name === 'employeeId') {
         const emp = employees.find((em) => em.id === Number(value));
         updated.employeeName = emp ? emp.name : '';
-        // У пятидневщика зарплата считается по табелю — смену в записи выручки ему не назначаем
-        if (emp?.fiveDayViaAttendance) {
+        // У чисто табельного пятидневщика (seller) зарплата считается только по табелю — смену
+        // в записи выручки ему не назначаем. manager_trading с тем же флагом — исключение, ей
+        // можно и то, и другое (см. canGetRevenueShift).
+        if (emp && !canGetRevenueShift(emp)) {
           updated.shiftType = '';
         }
       }
@@ -210,7 +212,10 @@ export default function NewRevenuePage() {
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
   const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
   const selectedEmployee = employees.find((e) => e.id === Number(form.employeeId));
-  const isFiveDayEmployee = Boolean(selectedEmployee?.fiveDayViaAttendance);
+  // "Пятидневщик, у которого блокируется смена" — сейчас это только seller. manager_trading
+  // с тем же флагом может совмещать оба источника (см. canGetRevenueShift), поэтому не
+  // подходит под этот флаг: селектор смены остаётся включён.
+  const isFiveDayEmployee = Boolean(selectedEmployee && !canGetRevenueShift(selectedEmployee));
 
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),

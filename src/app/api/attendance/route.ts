@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
-import { ATTENDANCE_BASED_TYPES } from '@/lib/employee-types';
+import { canMarkAttendance } from '@/lib/employee-types';
 import { isMonthClosed } from '@/lib/closed-month';
+import { validateNoShiftOnDate, validateNotFutureDate, validateEmployeePharmacyLink } from '@/lib/attendance-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +63,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'employeeId и date обязательны' }, { status: 400 });
   }
 
+  const futureDateError = validateNotFutureDate(new Date(date));
+  if (futureDateError) {
+    return NextResponse.json({ error: futureDateError }, { status: 400 });
+  }
+
   // Отметка табеля — это отработанный день, из которого считается зарплата. В закрытом
   // месяце суммы уже зафиксированы, поэтому новая отметка туда попасть не должна:
   // она разошлась бы со снимком (та же защита, что и у записи выручки).
@@ -85,13 +91,28 @@ export async function POST(request: NextRequest) {
 
   // Сменные типы (seller/manager_trading) учитываются через смену в записи выручки, а не через
   // табель — их зарплата не читает AttendanceShift, отметка здесь была бы мёртвой и вводящей в заблуждение.
-  // Исключение — продавец с включённым fiveDayViaAttendance: его пятидневка отмечается именно здесь.
-  const isFiveDaySeller = employee.employeeType === 'seller' && employee.fiveDayViaAttendance;
-  if (!ATTENDANCE_BASED_TYPES.has(employee.employeeType) && !isFiveDaySeller) {
+  // Исключения — продавец с включённым fiveDayViaAttendance и seller_five_day_fixed: см. canMarkAttendance.
+  if (!canMarkAttendance(employee)) {
     return NextResponse.json(
       { error: 'Этому типу сотрудника нельзя отметить табель — он учитывается через смену в записи выручки' },
       { status: 400 }
     );
+  }
+
+  // Сотрудник должен реально работать в этой аптеке — офисные отметки (pharmacyId не передан)
+  // проверке не подлежат, привязывать не к чему.
+  if (pharmacyId) {
+    const pharmacyLinkError = await validateEmployeePharmacyLink(Number(employeeId), Number(pharmacyId));
+    if (pharmacyLinkError) {
+      return NextResponse.json({ error: pharmacyLinkError }, { status: 400 });
+    }
+  }
+
+  // seller_five_day_fixed может получать и смену в выручке, и отметку табеля, но не обе на одну
+  // дату — иначе оплата за этот день задвоится.
+  const shiftConflictError = await validateNoShiftOnDate(Number(employeeId), new Date(date));
+  if (shiftConflictError) {
+    return NextResponse.json({ error: shiftConflictError }, { status: 409 });
   }
 
   try {

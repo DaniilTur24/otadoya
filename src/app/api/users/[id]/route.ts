@@ -25,6 +25,7 @@ function serializeLoginlessManager(e: {
     employeeType: e.employeeType,
     ladderPremiumEnabled: e.ladderPremiumEnabled,
     managerBonusShareEnabled: e.managerBonusShareEnabled,
+    fiveDayViaAttendance: false,
     allowance: Number(e.allowance),
     allowanceDescription: e.allowanceDescription,
     accountType: 'employee' as const,
@@ -39,7 +40,7 @@ export async function PUT(
   if (auth) return auth;
 
   const id = Number((await params).id);
-  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, allowance, allowanceDescription } =
+  const { displayName, password, isActive, pharmacyIds, baseSalary, employeeType, ladderPremiumEnabled, managerBonusShareEnabled, fiveDayViaAttendance, allowance, allowanceDescription } =
     await request.json();
 
   if (employeeType != null && !USER_LINKED_TYPES.has(employeeType)) {
@@ -139,6 +140,10 @@ export async function PUT(
       if (employeeType != null) employeeData.employeeType = employeeType;
       if (ladderPremiumEnabled !== undefined) employeeData.ladderPremiumEnabled = Boolean(ladderPremiumEnabled);
       if (managerBonusShareEnabled !== undefined) employeeData.managerBonusShareEnabled = Boolean(managerBonusShareEnabled);
+      // Применимо только к manager_trading — форма отправляет это поле только для неё,
+      // но если тип одновременно меняют на manager_fixed, значение всё равно безобидно
+      // (FIVE_DAY_VIA_ATTENDANCE_TYPES для manager_fixed его не читает).
+      if (fiveDayViaAttendance !== undefined) employeeData.fiveDayViaAttendance = Boolean(fiveDayViaAttendance);
       if (allowance !== undefined) employeeData.allowance = String(allowance ?? 0);
       if (allowanceDescription !== undefined) employeeData.allowanceDescription = typeof allowanceDescription === 'string' ? allowanceDescription.trim() : '';
       if (Object.keys(employeeData).length > 0) {

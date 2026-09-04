@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNonNegativeAmounts } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts } from '@/lib/revenue-validation';
 import { isMonthClosed } from '@/lib/closed-month';
 
 async function canModifyEntry(
@@ -119,6 +119,9 @@ export async function PUT(
 
     const duplicateError = await validateUniqueShift(effectiveEmployeeId, effectiveDate, effectiveShiftType, id);
     if (duplicateError) return NextResponse.json({ error: duplicateError }, { status: 409 });
+
+    const attendanceConflictError = await validateNoAttendanceOnDate(effectiveEmployeeId, effectiveDate, effectiveShiftType);
+    if (attendanceConflictError) return NextResponse.json({ error: attendanceConflictError }, { status: 409 });
   }
 
   // Скалярные поля записи

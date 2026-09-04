@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNonNegativeAmounts } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts } from '@/lib/revenue-validation';
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
@@ -105,6 +105,9 @@ export async function POST(request: NextRequest) {
 
     const duplicateError = await validateUniqueShift(Number(employeeId), new Date(date), shiftType || null);
     if (duplicateError) return NextResponse.json({ error: duplicateError }, { status: 409 });
+
+    const attendanceConflictError = await validateNoAttendanceOnDate(Number(employeeId), new Date(date), shiftType || null);
+    if (attendanceConflictError) return NextResponse.json({ error: attendanceConflictError }, { status: 409 });
   }
 
   // Менеджер может писать только в свои аптеки

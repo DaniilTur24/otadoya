@@ -34,6 +34,18 @@ function validateTierRanges(
     if (next && t.toAmount != null && t.toAmount > next.fromAmount) {
       return `Диапазоны от ${t.fromAmount} и от ${next.fromAmount} пересекаются`;
     }
+    // Разрыв между диапазонами findOfficeTierBonus() молча превращает в премию 0 ₸ без единой
+    // пометки — выручка, попавшая между ${t.toAmount} и ${next.fromAmount}, не совпадёт ни с
+    // одной строкой таблицы.
+    if (next && t.toAmount != null && t.toAmount < next.fromAmount) {
+      return `Между диапазоном до ${t.toAmount} и диапазоном от ${next.fromAmount} есть разрыв — выручка в этом промежутке останется без премии`;
+    }
+  }
+  // Последняя строка обязана быть без верхней границы (проверено выше — иначе строку выше
+  // последней) — если строк ноль, проверять нечего; если хотя бы одна и последняя не открыта
+  // вверх, любая выручка выше её toAmount тоже молча получит премию 0.
+  if (sorted.length > 0 && sorted[sorted.length - 1].toAmount != null) {
+    return `Последний по порядку диапазон (от ${sorted[sorted.length - 1].fromAmount}) должен быть без верхней границы — иначе выручка выше него останется без премии`;
   }
   return null;
 }
