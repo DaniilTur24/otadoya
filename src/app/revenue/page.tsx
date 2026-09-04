@@ -360,9 +360,69 @@ export default function RevenueListPage() {
     );
   }
 
+  const PROTECTED_CATEGORY_LABELS: Record<string, string> = {
+    employeeAdvance: 'Аванс',
+    employeeSurcharge: 'Доплата',
+  };
+
+  interface RevenueDeleteImpact {
+    revenue: { pharmacyName: string; before: number; after: number } | null;
+    employees: { employeeId: number; employeeName: string; before: number; after: number }[];
+    partial: boolean;
+  }
+
+  function money(n: number): string {
+    return `${n.toLocaleString('ru-RU')} ₸`;
+  }
+
+  // Удаление подтверждённой записи меняет не только сам факт выручки — выручка аптеки и
+  // зарплата вовлечённых сотрудников (сменная оплата, аванс/доплата другому сотруднику из
+  // DailyExpenseItem.employeeId, см. CLAUDE.md) пересчитаются вместе с ней. Бэкенд считает
+  // это заранее (см. computeRevenueDeleteImpact) и возвращает 409 с конкретными суммами
+  // «было → станет» — здесь показываем их и удаляем только после явного подтверждения.
+  async function deleteRevenueEntry(id: number): Promise<boolean> {
+    const res = await fetch(`/api/revenue/${id}`, { method: 'DELETE' });
+    if (res.ok) return true;
+
+    let data: { error?: string; items?: { employeeName: string; category: string; amount: number }[]; impact?: RevenueDeleteImpact } | null = null;
+    try { data = await res.json(); } catch { /* тело не JSON — ниже покажем общее сообщение */ }
+
+    if (res.status === 409 && data?.error === 'revenue_delete_impact') {
+      const lines: string[] = [];
+
+      if (data.impact?.revenue) {
+        const { pharmacyName, before, after } = data.impact.revenue;
+        lines.push(`Выручка «${pharmacyName}» за месяц: ${money(before)} → ${money(after)}`);
+      }
+      for (const emp of data.impact?.employees ?? []) {
+        lines.push(`Зарплата ${emp.employeeName} за месяц: ${money(emp.before)} → ${money(emp.after)}`);
+      }
+      for (const item of data.items ?? []) {
+        lines.push(`— ${PROTECTED_CATEGORY_LABELS[item.category] ?? item.category} сотруднику ${item.employeeName} (${money(item.amount)}) будет удалён вместе с записью`);
+      }
+      const caveat = data.impact?.partial
+        ? '\n\nПремия/лестница/доля бонуса могут измениться дополнительно — здесь не учтено, точная сумма появится после удаления.'
+        : '';
+
+      const proceed = confirm(
+        `⚠️ Эта запись подтверждена — при удалении пересчитаются:\n\n${lines.join('\n')}${caveat}\n\nВсё равно удалить запись целиком?`
+      );
+      if (!proceed) return false;
+      const retry = await fetch(`/api/revenue/${id}?force=1`, { method: 'DELETE' });
+      if (!retry.ok) {
+        alert('Не удалось удалить запись');
+        return false;
+      }
+      return true;
+    }
+
+    alert(data?.error || 'Не удалось удалить запись');
+    return false;
+  }
+
   async function deleteEntry(id: number) {
     if (!confirm('Удалить запись? Это действие нельзя отменить.')) return;
-    await fetch(`/api/revenue/${id}`, { method: 'DELETE' });
+    if (!(await deleteRevenueEntry(id))) return;
     if (editingId === id) cancelEdit();
     load();
   }
@@ -385,9 +445,11 @@ export default function RevenueListPage() {
   async function deleteSelected() {
     if (selectedIds.size === 0) return;
     if (!confirm(`Удалить ${selectedIds.size} выбранных записей? Это действие нельзя отменить.`)) return;
-    await Promise.all(
-      Array.from(selectedIds).map((id) => fetch(`/api/revenue/${id}`, { method: 'DELETE' }))
-    );
+    // Последовательно, не Promise.all — deleteRevenueEntry может показать подтверждение по
+    // каждой записи отдельно (см. deleteRevenueEntry), параллельные confirm() наложились бы друг на друга.
+    for (const id of selectedIds) {
+      await deleteRevenueEntry(id);
+    }
     if (editingId !== null && selectedIds.has(editingId)) cancelEdit();
     load();
   }

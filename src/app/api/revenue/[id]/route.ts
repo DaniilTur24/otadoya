@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
 import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts } from '@/lib/revenue-validation';
 import { isMonthClosed } from '@/lib/closed-month';
+import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 
 async function canModifyEntry(
   request: Request,
@@ -32,6 +33,8 @@ function serialize(entry: Record<string, unknown>) {
   };
 }
 
+const PROTECTED_CATEGORIES = ['employeeAdvance', 'employeeSurcharge'];
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -49,6 +52,33 @@ export async function DELETE(
 
   if (await isMonthClosed(entry.date)) {
     return NextResponse.json({ error: 'Месяц закрыт — удаление невозможно' }, { status: 423 });
+  }
+
+  // Удаление подтверждённой записи меняет не только сам факт выручки — выручка аптеки за месяц,
+  // и зарплата вовлечённых сотрудников (сменная оплата, премия, а для получателей аванса/доплаты
+  // из DailyExpenseItem.employeeId, см. CLAUDE.md — тоже, независимо от того, чья это запись)
+  // пересчитаются вместе с ней. Без ?force=1 сначала показываем, что именно изменится и как.
+  const force = new URL(request.url).searchParams.get('force') === '1';
+  if (!force) {
+    const protectedItems = await prisma.dailyExpenseItem.findMany({
+      where: { entryId: id, category: { in: PROTECTED_CATEGORIES }, employeeId: { not: null } },
+      include: { employee: { select: { name: true } } },
+    });
+    const impact = await computeRevenueDeleteImpact(id);
+    if (protectedItems.length > 0 || impact) {
+      return NextResponse.json(
+        {
+          error: 'revenue_delete_impact',
+          items: protectedItems.map((i) => ({
+            employeeName: i.employee?.name ?? '—',
+            category: i.category,
+            amount: Number(i.amount),
+          })),
+          impact,
+        },
+        { status: 409 }
+      );
+    }
   }
 
   await prisma.dailyRevenueEntry.delete({ where: { id } });
