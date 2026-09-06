@@ -163,6 +163,30 @@ export default function RevenueListPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
+  // Плавающий горизонтальный скроллбар для таблицы записей — прилипает к низу окна,
+  // пока таблица частично на экране, чтобы не листать вниз через все записи до обычного скроллбара.
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const floatingScrollRef = useRef<HTMLDivElement>(null);
+  const syncingScrollRef = useRef(false);
+  const [showFloatingScrollbar, setShowFloatingScrollbar] = useState(false);
+  const [floatingBarRect, setFloatingBarRect] = useState({ left: 0, width: 0 });
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+
+  const handleTableScroll = () => {
+    if (syncingScrollRef.current) { syncingScrollRef.current = false; return; }
+    if (floatingScrollRef.current && tableScrollRef.current) {
+      syncingScrollRef.current = true;
+      floatingScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  };
+  const handleFloatingScroll = () => {
+    if (syncingScrollRef.current) { syncingScrollRef.current = false; return; }
+    if (floatingScrollRef.current && tableScrollRef.current) {
+      syncingScrollRef.current = true;
+      tableScrollRef.current.scrollLeft = floatingScrollRef.current.scrollLeft;
+    }
+  };
+
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
   const shiftEligibleEmployees = employees.filter((e) => !ATTENDANCE_BASED_TYPES.has(e.employeeType));
@@ -602,6 +626,33 @@ export default function RevenueListPage() {
   }
 
   const manageableEntries = visibleEntries.filter(canManageEntry);
+
+  useEffect(() => {
+    const container = tableScrollRef.current;
+    if (!container) return;
+
+    const updateMetrics = () => {
+      const rect = container.getBoundingClientRect();
+      setTableScrollWidth(container.scrollWidth);
+      setFloatingBarRect({ left: rect.left, width: rect.width });
+      const hasOverflow = container.scrollWidth > container.clientWidth + 1;
+      const scrollbarBelowViewport = rect.bottom > window.innerHeight;
+      const tableVisible = rect.top < window.innerHeight && rect.bottom > 0;
+      setShowFloatingScrollbar(hasOverflow && scrollbarBelowViewport && tableVisible);
+    };
+
+    updateMetrics();
+    const resizeObserver = new ResizeObserver(updateMetrics);
+    resizeObserver.observe(container);
+    window.addEventListener('scroll', updateMetrics, { passive: true });
+    window.addEventListener('resize', updateMetrics);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('scroll', updateMetrics);
+      window.removeEventListener('resize', updateMetrics);
+    };
+  }, [visibleEntries]);
 
   return (
     <div>
@@ -1124,8 +1175,8 @@ export default function RevenueListPage() {
               </button>
             </div>
           )}
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="overflow-x-auto" ref={tableScrollRef} onScroll={handleTableScroll}>
+            <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th w-8">
@@ -1138,8 +1189,8 @@ export default function RevenueListPage() {
                   </th>
                   <th className="th">Дата</th>
                   <th className="th">Аптека</th>
-                  <th className="th text-right">Наличные</th>
-                  <th className="th text-right">Терминал</th>
+                  <th className="th text-right">Нал.</th>
+                  <th className="th text-right">Терм.</th>
                   <th className="th text-right">Каспи</th>
                   <th className="th text-right">Доп. доходы</th>
                   <th className="th text-right">Бонусы</th>
@@ -1149,7 +1200,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Расходы</th>
                   <th className="th">Сотрудник</th>
                   <th className="th">Статус</th>
-                  <th className="th border-l border-slate-300"></th>
+                  <th className="th border-l border-slate-300 sticky right-0 z-20"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1164,7 +1215,7 @@ export default function RevenueListPage() {
                       <tr
                         className={`group ${editingId === entry.id ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
                         onMouseEnter={(e) => {
-                          if (entry.expenseItems.some(i => i.category !== 'pharmaBonus') || entry.generalComment) {
+                          if (entry.expenseItems.length > 0 || entry.generalComment) {
                             setTooltipEntry(entry);
                             setTooltipPos({ x: e.clientX, y: e.clientY });
                           }
@@ -1181,7 +1232,7 @@ export default function RevenueListPage() {
                           )}
                         </td>
                         <td className="td whitespace-nowrap">{fmtDate(entry.date)}</td>
-                        <td className="td font-medium whitespace-nowrap">{entry.pharmacy.name}</td>
+                        <td className="td font-medium max-w-[110px] truncate" title={entry.pharmacy.name}>{entry.pharmacy.name}</td>
                         <td className="td text-right text-green-700 whitespace-nowrap">{fmt(entry.cashRevenue)}</td>
                         <td className="td text-right text-green-700 whitespace-nowrap">{fmt(entry.terminalRevenue)}</td>
                         <td className="td text-right text-green-700 whitespace-nowrap">
@@ -1205,9 +1256,9 @@ export default function RevenueListPage() {
                         <td className="td text-right text-red-600 whitespace-nowrap">
                           {expenses > 0 ? fmt(expenses) : '—'}
                         </td>
-                        <td className="td text-slate-500">
+                        <td className="td text-slate-500 max-w-[130px]">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="whitespace-nowrap">{entry.employeeName}</span>
+                            <span className="truncate" title={entry.employeeName}>{entry.employeeName}</span>
                             {entry.excludedFromReport && (
                               <button
                                 className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
@@ -1251,8 +1302,8 @@ export default function RevenueListPage() {
                           </span>
                         </td>
                         <td
-                          className={`td border-l border-slate-300 ${
-                            editingId === entry.id ? 'bg-slate-100' : ''
+                          className={`td border-l border-slate-300 sticky right-0 z-10 ${
+                            editingId === entry.id ? 'bg-slate-100' : 'bg-white group-hover:bg-slate-50'
                           }`}
                         >
                           {editingId === entry.id ? (
@@ -1278,6 +1329,19 @@ export default function RevenueListPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Плавающий горизонтальный скроллбар — прилипает к низу окна, пока таблица на экране,
+              чтобы не нужно было листать вниз через все записи ради обычного нижнего скроллбара. */}
+          {showFloatingScrollbar && (
+            <div
+              ref={floatingScrollRef}
+              onScroll={handleFloatingScroll}
+              style={{ position: 'fixed', bottom: 0, left: floatingBarRect.left, width: floatingBarRect.width, zIndex: 30 }}
+              className="overflow-x-auto overflow-y-hidden h-3 bg-slate-100 border-t border-slate-300"
+            >
+              <div style={{ width: tableScrollWidth, height: 1 }} />
+            </div>
+          )}
 
           {/* Итого */}
           {(() => {
@@ -1316,9 +1380,10 @@ export default function RevenueListPage() {
 
       {tooltipEntry && (() => {
         const items = tooltipEntry.expenseItems.filter(i => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? ''));
+        const bonusItems = tooltipEntry.expenseItems.filter(i => i.category === 'pharmaBonus');
         const advanceItems = tooltipEntry.expenseItems.filter(i => i.category === 'employeeAdvance');
         const surchargeItems = tooltipEntry.expenseItems.filter(i => i.category === 'employeeSurcharge');
-        const hasContent = items.length > 0 || advanceItems.length > 0 || surchargeItems.length > 0 || tooltipEntry.generalComment;
+        const hasContent = items.length > 0 || bonusItems.length > 0 || advanceItems.length > 0 || surchargeItems.length > 0 || tooltipEntry.generalComment;
         if (!hasContent) return null;
         return (
           <div
@@ -1341,8 +1406,19 @@ export default function RevenueListPage() {
                 })}
               </div>
             )}
-            {advanceItems.length > 0 && (
+            {bonusItems.length > 0 && (
               <div className={`space-y-1.5 ${items.length > 0 ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
+                {bonusItems.map((item) => (
+                  <div key={item.id} className="flex gap-2 items-baseline">
+                    <span className="font-semibold shrink-0 text-red-600">−{fmt(item.amount)}</span>
+                    <span className="text-slate-700">Бонус</span>
+                    {item.comment && <span className="text-slate-400">— {item.comment}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {advanceItems.length > 0 && (
+              <div className={`space-y-1.5 ${(items.length > 0 || bonusItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
                 {advanceItems.map((item) => {
                   const recipient = employees.find((e) => e.id === item.employeeId);
                   return (
@@ -1356,7 +1432,7 @@ export default function RevenueListPage() {
               </div>
             )}
             {surchargeItems.length > 0 && (
-              <div className={`space-y-1.5 ${(items.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
+              <div className={`space-y-1.5 ${(items.length > 0 || bonusItems.length > 0 || advanceItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
                 {surchargeItems.map((item) => {
                   const recipient = employees.find((e) => e.id === item.employeeId);
                   return (
@@ -1371,7 +1447,7 @@ export default function RevenueListPage() {
               </div>
             )}
             {tooltipEntry.generalComment && (
-              <div className={`text-slate-400 italic ${(items.length > 0 || advanceItems.length > 0 || surchargeItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
+              <div className={`text-slate-400 italic ${(items.length > 0 || bonusItems.length > 0 || advanceItems.length > 0 || surchargeItems.length > 0) ? 'mt-2 pt-2 border-t border-slate-100' : ''}`}>
                 {tooltipEntry.generalComment}
               </div>
             )}
