@@ -239,6 +239,7 @@ export default function RevenueListPage() {
   useEffect(() => { load(); }, [load]);
 
   async function approveEntry(id: number) {
+    if (!confirm('Подтвердить запись?')) return;
     await fetch(`/api/revenue/${id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -254,6 +255,7 @@ export default function RevenueListPage() {
       alert('Укажите причину отклонения');
       return;
     }
+    if (!confirm('Отклонить запись?')) return;
     await fetch(`/api/revenue/${id}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -267,6 +269,10 @@ export default function RevenueListPage() {
   function startEdit(entry: RevenueEntry) {
     setEditingId(entry.id);
     setSaveError('');
+    // Форма появляется прямо под этой записью — если для неё (или для другой) было открыто
+    // окно модерации, закрываем его, чтобы под одной строкой не было двух развёрнутых блоков.
+    setModerating(null);
+    setModerateComment('');
 
     // Существующие авансы/доплата (если есть) редактируются через выделенные поля
     // «Аванс сотруднику» / «Доплата сотруднику» ниже, а не как обычные строки в
@@ -654,191 +660,10 @@ export default function RevenueListPage() {
     };
   }, [visibleEntries]);
 
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-lg font-semibold text-slate-900">Записи выручки</h1>
-        <Link href="/revenue/new" className="btn-primary text-sm">+ Добавить</Link>
-      </div>
-      <p className="text-slate-500 text-sm mb-4">
-        Все введённые бухгалтером записи. Нажмите «Изменить» для редактирования.
-      </p>
-
-      {/* Панель модерации — только для admin/bookkeeper */}
-      {(role === 'admin' || role === 'bookkeeper') && pendingEntries.length > 0 && (
-        <div className="mb-5">
-          <button
-            className="flex items-center gap-2 mb-2 text-sm font-semibold text-amber-700"
-            onClick={() => setShowModeration((v) => !v)}
-          >
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-500 text-white text-xs font-bold">
-              {pendingEntries.length}
-            </span>
-            На проверке
-            <span className="text-slate-400 font-normal">{showModeration ? '▲' : '▼'}</span>
-          </button>
-
-          {showModeration && (
-            <div className="card overflow-hidden border-amber-200 border">
-              <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-amber-50 border-b border-amber-200">
-                  <tr>
-                    <th className="th bg-amber-50">Дата</th>
-                    <th className="th bg-amber-50">Аптека</th>
-                    <th className="th bg-amber-50">Сотрудник</th>
-                    <th className="th bg-amber-50 text-right">Нал.</th>
-                    <th className="th bg-amber-50 text-right">Терминал</th>
-                    <th className="th bg-amber-50 text-right">Каспи</th>
-                    <th className="th bg-amber-50 text-right">Расходы</th>
-                    <th className="th bg-amber-50 text-right">Итого</th>
-                    <th className="th bg-amber-50 text-right">Нал. на руках</th>
-                    <th className="th bg-amber-50"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-amber-100">
-                  {pendingEntries.map((entry) => {
-                    const expenses = expenseItemsSum(entry.expenseItems);
-                    const { total, cashNet } = summarizeEntries([entry]);
-                    const isExpanded = moderating === entry.id;
-                    return (
-                      <React.Fragment key={entry.id}>
-                        <tr className="bg-amber-50/40">
-                          <td className="td">{fmtDate(entry.date)}</td>
-                          <td className="td font-medium">{entry.pharmacy.name}</td>
-                          <td className="td text-slate-600">{entry.employeeName}</td>
-                          <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
-                          <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
-                          <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
-                          <td className="td text-right text-red-600">{expenses > 0 ? fmt(expenses) : '—'}</td>
-                          <td className="td text-right font-semibold">
-                            <span className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</span>
-                          </td>
-                          <td className="td text-right font-semibold">
-                            <span className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(cashNet)}</span>
-                          </td>
-                          <td className="td">
-                            {isExpanded ? (
-                              <button
-                                className="text-xs text-slate-400 hover:text-slate-600"
-                                onClick={() => { setModerating(null); setModerateComment(''); }}
-                              >
-                                Закрыть
-                              </button>
-                            ) : (
-                              <button
-                                className="btn-warning text-xs"
-                                onClick={() => { setModerating(entry.id); setModerateComment(''); }}
-                              >
-                                Проверить
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                        {isExpanded && (
-                          <tr key={`${entry.id}-expand`} className="bg-white">
-                            <td colSpan={10} className="px-4 py-3">
-                              {entry.expenseItems.length > 0 && (
-                                <div className="mb-3 text-sm">
-                                  <p className="font-medium text-slate-700 mb-1">Расходы:</p>
-                                  <ul className="space-y-0.5">
-                                    {entry.expenseItems.map((item) => (
-                                      <li key={item.id} className="text-slate-600 flex gap-2">
-                                        <span className="text-red-600">{fmt(item.amount)}</span>
-                                        <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
-                                        {item.comment && <span className="text-slate-400">— {item.comment}</span>}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                              {entry.generalComment && (
-                                <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
-                              )}
-                              <div className="flex flex-col sm:flex-row gap-2 items-start">
-                                <input
-                                  type="text"
-                                  className="input flex-1"
-                                  placeholder="Комментарий бухгалтера (обязателен при отклонении)"
-                                  value={moderateComment}
-                                  onChange={(e) => setModerateComment(e.target.value)}
-                                />
-                                <div className="flex gap-2 shrink-0">
-                                  <button
-                                    className="btn-success text-sm"
-                                    onClick={() => approveEntry(entry.id)}
-                                  >
-                                    Подтвердить
-                                  </button>
-                                  <button
-                                    className="btn-danger text-sm"
-                                    onClick={() => rejectEntry(entry.id)}
-                                  >
-                                    Отклонить
-                                  </button>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Фильтры */}
-      <div className="card p-3 mb-4">
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
-          <div>
-            <label className="label">Дата с</label>
-            <input type="date" className="input" value={filterFrom}
-              onChange={(e) => setFilterFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Дата по</label>
-            <input type="date" className="input" value={filterTo}
-              onChange={(e) => setFilterTo(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Аптека</label>
-            <select className="input" value={filterPharmacy}
-              onChange={(e) => { setFilterPharmacy(e.target.value); setFilterEmployee(''); }}>
-              <option value="">Все аптеки</option>
-              {pharmacies.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Сотрудник</label>
-            <select className="input" value={filterEmployee}
-              onChange={(e) => setFilterEmployee(e.target.value)}
-              disabled={employeeFilterOptions.length === 0}>
-              <option value="">Все сотрудники</option>
-              {employeeFilterOptions.map((emp) => (
-                <option key={emp.id} value={emp.id}>{emp.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <button className="btn-warning w-full" onClick={() => {
-              setFilterFrom(''); setFilterTo(''); setFilterPharmacy(''); setFilterEmployee('');
-            }}>
-              Сбросить
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Форма редактирования */}
-      {editingId !== null && editState && (
-        <div className="card p-4 mb-4 border-slate-400 border">
+  function renderEditForm() {
+    if (!editState) return null;
+    return (
+        <div className="card p-4 border-slate-400 border">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-slate-800">Редактирование записи</h2>
             <button onClick={requestCancelEdit} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
@@ -1154,7 +979,212 @@ export default function RevenueListPage() {
             <button className="btn-secondary" onClick={requestCancelEdit}>Отмена</button>
           </div>
         </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-lg font-semibold text-slate-900">Записи выручки</h1>
+        <Link href="/revenue/new" className="btn-primary text-sm">+ Добавить</Link>
+      </div>
+      <p className="text-slate-500 text-sm mb-4">
+        Все введённые бухгалтером записи. Нажмите «Изменить» для редактирования.
+      </p>
+
+      {/* Панель модерации — только для admin/bookkeeper */}
+      {(role === 'admin' || role === 'bookkeeper') && pendingEntries.length > 0 && (
+        <div className="mb-5">
+          <button
+            className="flex items-center gap-2 mb-2 text-sm font-semibold text-amber-700"
+            onClick={() => setShowModeration((v) => !v)}
+          >
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-500 text-white text-xs font-bold">
+              {pendingEntries.length}
+            </span>
+            На проверке
+            <span className="text-slate-400 font-normal">{showModeration ? '▲' : '▼'}</span>
+          </button>
+
+          {showModeration && (
+            <div className="card overflow-hidden border-amber-200 border">
+              <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-amber-50 border-b border-amber-200">
+                  <tr>
+                    <th className="th bg-amber-50">Дата</th>
+                    <th className="th bg-amber-50">Аптека</th>
+                    <th className="th bg-amber-50">Сотрудник</th>
+                    <th className="th bg-amber-50">Смена</th>
+                    <th className="th bg-amber-50 text-right">Нал.</th>
+                    <th className="th bg-amber-50 text-right">Терминал</th>
+                    <th className="th bg-amber-50 text-right">Каспи</th>
+                    <th className="th bg-amber-50 text-right">Расходы</th>
+                    <th className="th bg-amber-50 text-right">Итого</th>
+                    <th className="th bg-amber-50 text-right">Нал. на руках</th>
+                    <th className="th bg-amber-50"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {pendingEntries.map((entry) => {
+                    const expenses = expenseItemsSum(entry.expenseItems);
+                    const { total, cashNet } = summarizeEntries([entry]);
+                    const isExpanded = moderating === entry.id;
+                    const isEditingThis = editingId === entry.id;
+                    return (
+                      <React.Fragment key={entry.id}>
+                        <tr className={isEditingThis ? 'bg-slate-100' : 'bg-amber-50/40'}>
+                          <td className="td">{fmtDate(entry.date)}</td>
+                          <td className="td font-medium">{entry.pharmacy.name}</td>
+                          <td className="td text-slate-600">{entry.employeeName}</td>
+                          <td className="td">
+                            {entry.shiftType ? (SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType) : '—'}
+                          </td>
+                          <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
+                          <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
+                          <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
+                          <td className="td text-right text-red-600">{expenses > 0 ? fmt(expenses) : '—'}</td>
+                          <td className="td text-right font-semibold">
+                            <span className={total >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(total)}</span>
+                          </td>
+                          <td className="td text-right font-semibold">
+                            <span className={cashNet >= 0 ? 'text-green-700' : 'text-red-700'}>{fmt(cashNet)}</span>
+                          </td>
+                          <td className="td">
+                            {isEditingThis ? (
+                              <span className="text-xs text-slate-700 font-medium whitespace-nowrap">Редактируется</span>
+                            ) : isExpanded ? (
+                              <button
+                                className="text-xs text-slate-400 hover:text-slate-600"
+                                onClick={() => { setModerating(null); setModerateComment(''); }}
+                              >
+                                Закрыть
+                              </button>
+                            ) : (
+                              <div className="flex gap-1">
+                                <button
+                                  className="btn-warning text-xs"
+                                  onClick={() => { setModerating(entry.id); setModerateComment(''); }}
+                                >
+                                  Проверить
+                                </button>
+                                <button
+                                  className="btn-secondary text-xs"
+                                  onClick={() => startEdit(entry)}
+                                >
+                                  Изменить
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded && !isEditingThis && (
+                          <tr key={`${entry.id}-expand`} className="bg-white">
+                            <td colSpan={11} className="px-4 py-3">
+                              {entry.expenseItems.length > 0 && (
+                                <div className="mb-3 text-sm">
+                                  <p className="font-medium text-slate-700 mb-1">Расходы:</p>
+                                  <ul className="space-y-0.5">
+                                    {entry.expenseItems.map((item) => (
+                                      <li key={item.id} className="text-slate-600 flex gap-2">
+                                        <span className="text-red-600">{fmt(item.amount)}</span>
+                                        <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
+                                        {item.comment && <span className="text-slate-400">— {item.comment}</span>}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {entry.generalComment && (
+                                <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
+                              )}
+                              <div className="flex flex-col sm:flex-row gap-2 items-start">
+                                <input
+                                  type="text"
+                                  className="input flex-1"
+                                  placeholder="Комментарий бухгалтера (обязателен при отклонении)"
+                                  value={moderateComment}
+                                  onChange={(e) => setModerateComment(e.target.value)}
+                                />
+                                <div className="flex gap-2 shrink-0">
+                                  <button
+                                    className="btn-success text-sm"
+                                    onClick={() => approveEntry(entry.id)}
+                                  >
+                                    Подтвердить
+                                  </button>
+                                  <button
+                                    className="btn-danger text-sm"
+                                    onClick={() => rejectEntry(entry.id)}
+                                  >
+                                    Отклонить
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        {isEditingThis && (
+                          <tr key={`${entry.id}-edit`} className="bg-white">
+                            <td colSpan={11} className="px-4 py-3">
+                              {renderEditForm()}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+              </div>
+            </div>
+          )}
+        </div>
       )}
+
+      {/* Фильтры */}
+      <div className="card p-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+          <div>
+            <label className="label">Дата с</label>
+            <input type="date" className="input" value={filterFrom}
+              onChange={(e) => setFilterFrom(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Дата по</label>
+            <input type="date" className="input" value={filterTo}
+              onChange={(e) => setFilterTo(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Аптека</label>
+            <select className="input" value={filterPharmacy}
+              onChange={(e) => { setFilterPharmacy(e.target.value); setFilterEmployee(''); }}>
+              <option value="">Все аптеки</option>
+              {pharmacies.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Сотрудник</label>
+            <select className="input" value={filterEmployee}
+              onChange={(e) => setFilterEmployee(e.target.value)}
+              disabled={employeeFilterOptions.length === 0}>
+              <option value="">Все сотрудники</option>
+              {employeeFilterOptions.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <button className="btn-warning w-full" onClick={() => {
+              setFilterFrom(''); setFilterTo(''); setFilterPharmacy(''); setFilterEmployee('');
+            }}>
+              Сбросить
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Таблица записей */}
       {loading ? (
@@ -1322,7 +1352,13 @@ export default function RevenueListPage() {
                           )}
                         </td>
                       </tr>
-
+                      {editingId === entry.id && (
+                        <tr key={`${entry.id}-edit`} className="bg-slate-50">
+                          <td colSpan={15} className="px-4 py-3">
+                            {renderEditForm()}
+                          </td>
+                        </tr>
+                      )}
                     </React.Fragment>
                   );
                 })}
