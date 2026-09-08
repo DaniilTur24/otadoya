@@ -239,6 +239,7 @@ export default function RevenueListPage() {
   useEffect(() => { load(); }, [load]);
 
   async function approveEntry(id: number) {
+    if (!confirm('Подтвердить запись?')) return;
     await fetch(`/api/revenue/${id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -254,6 +255,7 @@ export default function RevenueListPage() {
       alert('Укажите причину отклонения');
       return;
     }
+    if (!confirm('Отклонить запись?')) return;
     await fetch(`/api/revenue/${id}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -687,6 +689,7 @@ export default function RevenueListPage() {
                     <th className="th bg-amber-50">Дата</th>
                     <th className="th bg-amber-50">Аптека</th>
                     <th className="th bg-amber-50">Сотрудник</th>
+                    <th className="th bg-amber-50">Смена</th>
                     <th className="th bg-amber-50 text-right">Нал.</th>
                     <th className="th bg-amber-50 text-right">Терминал</th>
                     <th className="th bg-amber-50 text-right">Каспи</th>
@@ -707,6 +710,9 @@ export default function RevenueListPage() {
                           <td className="td">{fmtDate(entry.date)}</td>
                           <td className="td font-medium">{entry.pharmacy.name}</td>
                           <td className="td text-slate-600">{entry.employeeName}</td>
+                          <td className="td">
+                            {entry.shiftType ? (SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType) : '—'}
+                          </td>
                           <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
                           <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
                           <td className="td text-right text-green-700">{entry.kaspiRevenue > 0 ? fmt(entry.kaspiRevenue) : '—'}</td>
@@ -737,7 +743,7 @@ export default function RevenueListPage() {
                         </tr>
                         {isExpanded && (
                           <tr key={`${entry.id}-expand`} className="bg-white">
-                            <td colSpan={10} className="px-4 py-3">
+                            <td colSpan={11} className="px-4 py-3">
                               {entry.expenseItems.length > 0 && (
                                 <div className="mb-3 text-sm">
                                   <p className="font-medium text-slate-700 mb-1">Расходы:</p>
