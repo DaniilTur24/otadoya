@@ -239,6 +239,7 @@ export default function RevenueListPage() {
   useEffect(() => { load(); }, [load]);
 
   async function approveEntry(id: number) {
+    if (!confirm('Подтвердить запись?')) return;
     await fetch(`/api/revenue/${id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -254,6 +255,7 @@ export default function RevenueListPage() {
       alert('Укажите причину отклонения');
       return;
     }
+    if (!confirm('Отклонить запись?')) return;
     await fetch(`/api/revenue/${id}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
