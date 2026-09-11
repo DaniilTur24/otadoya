@@ -167,7 +167,7 @@ export default function NewRevenuePage() {
   }
 
   function addExpenseItem() {
-    setExpenseItems((items) => [...items, emptyItem()]);
+    setExpenseItems((items) => [...items, isManager ? { ...emptyItem(), category: 'pharmaBonus' } : emptyItem()]);
   }
 
   function removeExpenseItem(id: number) {
@@ -216,6 +216,9 @@ export default function NewRevenuePage() {
   // с тем же флагом может совмещать оба источника (см. canGetRevenueShift), поэтому не
   // подходит под этот флаг: селектор смены остаётся включён.
   const isFiveDayEmployee = Boolean(selectedEmployee && !canGetRevenueShift(selectedEmployee));
+  // Заведующие видят только «Бонусы» без выбора категории — полный список статей расхода
+  // (аренда, коммуналка и т.п.) им не нужен и путает; бухгалтер/админ видят его как раньше.
+  const isManager = role === 'manager';
 
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),
@@ -298,7 +301,7 @@ export default function NewRevenuePage() {
     const validAvansItems = avansItems.filter((i) => parseFloat(i.amount) > 0);
     const missingAvansEmployee = validAvansItems.find((i) => !i.employeeId);
     if (missingAvansEmployee) {
-      setError('Выберите сотрудника, которому выдан аванс');
+      setError('Выберите сотрудника, которому выдана зарплата');
       setSubmitting(false);
       return;
     }
@@ -322,7 +325,7 @@ export default function NewRevenuePage() {
       allExpenseItems.push({
         amount: item.amount,
         category: 'employeeAdvance',
-        comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
+        comment: avansEmployee ? `Зарплата: ${avansEmployee.name}` : null,
         employeeId: Number(item.employeeId),
       });
     }
@@ -557,23 +560,53 @@ export default function NewRevenuePage() {
           </div>
         )}
 
-        {/* Дополнительные расходы */}
+        {/* Дополнительные расходы — заведующие видят только «Бонусы» (категория зафиксирована,
+            без выбора статьи); бухгалтер/админ видят полный список статей, как и раньше */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="label mb-0">Дополнительные статьи</label>
+            <label className="label mb-0">{isManager ? 'Бонусы' : 'Дополнительные статьи'}</label>
             <button
               type="button"
               onClick={addExpenseItem}
               className="text-sm text-slate-700 hover:text-slate-900 font-medium flex items-center gap-1"
             >
-              + Добавить строку
+              {isManager ? '+ Добавить бонус' : '+ Добавить строку'}
             </button>
           </div>
 
           {expenseItems.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-1">
-              Нет записей — нажмите «+ Добавить строку»
+              {isManager ? 'Нет бонусов — нажмите «+ Добавить бонус»' : 'Нет записей — нажмите «+ Добавить строку»'}
             </p>
+          ) : isManager ? (
+            <div className="space-y-2">
+              {expenseItems.map((item, idx) => (
+                <div key={item.id} className="flex gap-2 items-center">
+                  <AmountInput
+                    value={item.amount}
+                    onChange={(value) => updateExpenseItem(item.id, 'amount', value)}
+                    placeholder="Сумма бонуса"
+                    className="input flex-1"
+                    autoFocus={idx === expenseItems.length - 1}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeExpenseItem(item.id)}
+                    className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                    title="Удалить"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+
+              {expenseItems.length > 1 && (
+                <div className="text-sm text-slate-600 pt-1">
+                  Итого:{' '}
+                  <strong>{totalExpenses.toLocaleString('ru-RU')}</strong>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="hidden sm:grid gap-2 text-xs text-slate-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
@@ -698,18 +731,18 @@ export default function NewRevenuePage() {
         {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене; можно добавить несколько за день */}
         <div className="rounded border border-slate-300 p-3">
           <div className="flex items-center justify-between mb-2">
-            <label className="label mb-0">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+            <label className="label mb-0">Зарплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
             <button
               type="button"
               onClick={addAvansItem}
               className="text-sm text-slate-700 hover:text-slate-900 font-medium"
             >
-              + Добавить аванс
+              + Добавить зарплату
             </button>
           </div>
           {avansItems.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-1">
-              Нет авансов — нажмите «+ Добавить аванс»
+              Нет зарплат — нажмите «+ Добавить зарплату»
             </p>
           ) : (
             <div className="space-y-2">
@@ -719,7 +752,7 @@ export default function NewRevenuePage() {
                     <AmountInput
                       value={item.amount}
                       onChange={(value) => updateAvansItem(item.id, 'amount', value)}
-                      placeholder="Сумма аванса"
+                      placeholder="Сумма зарплаты"
                       className="input"
                       autoFocus
                     />
@@ -731,7 +764,7 @@ export default function NewRevenuePage() {
                       className="input"
                       disabled={employees.length === 0}
                     >
-                      <option value="">— кому выдан аванс —</option>
+                      <option value="">— кому выдана зарплата —</option>
                       {employees.map((emp) => (
                         <option key={emp.id} value={emp.id}>{emp.name}</option>
                       ))}

@@ -355,7 +355,7 @@ export default function RevenueListPage() {
   }
 
   function addExpenseItem() {
-    setEditState((s) => s ? { ...s, expenseItems: [...s.expenseItems, newItem()] } : s);
+    setEditState((s) => s ? { ...s, expenseItems: [...s.expenseItems, isManager ? { ...newItem(), category: 'pharmaBonus' } : newItem()] } : s);
   }
   function removeExpenseItem(id: number) {
     setEditState((s) => s ? { ...s, expenseItems: s.expenseItems.filter((i) => i.id !== id) } : s);
@@ -391,7 +391,7 @@ export default function RevenueListPage() {
   }
 
   const PROTECTED_CATEGORY_LABELS: Record<string, string> = {
-    employeeAdvance: 'Аванс',
+    employeeAdvance: 'Зарплата',
     employeeSurcharge: 'Доплата',
   };
 
@@ -513,7 +513,7 @@ export default function RevenueListPage() {
     const validAvansItems = editState.avansItems.filter((i) => parseFloat(i.amount) > 0);
     const missingAvansEmployee = validAvansItems.find((i) => !i.employeeId);
     if (missingAvansEmployee) {
-      setSaveError('Выберите сотрудника, которому выдан аванс');
+      setSaveError('Выберите сотрудника, которому выдана зарплата');
       setSaving(false);
       return;
     }
@@ -545,7 +545,7 @@ export default function RevenueListPage() {
       allExpenseItems.push({
         amount: item.amount,
         category: 'employeeAdvance',
-        comment: avansEmployee ? `Аванс: ${avansEmployee.name}` : null,
+        comment: avansEmployee ? `Зарплата: ${avansEmployee.name}` : null,
         employeeId: Number(item.employeeId),
       });
     }
@@ -590,6 +590,10 @@ export default function RevenueListPage() {
   const totalExpenses = editState
     ? editState.expenseItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
     : 0;
+
+  // Заведующие видят только «Бонусы» (категория зафиксирована, без выбора статьи);
+  // бухгалтер/админ видят полный список статей, как и раньше.
+  const isManager = role === 'manager';
 
   const avansTotal = editState
     ? editState.avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
@@ -773,16 +777,44 @@ export default function RevenueListPage() {
             </div>
           )}
 
-          {/* Дополнительные статьи */}
+          {/* Дополнительные статьи — заведующие видят только «Бонусы» (категория зафиксирована,
+              без выбора статьи); бухгалтер/админ видят полный список статей, как и раньше */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Дополнительные статьи</label>
+              <label className="label mb-0">{isManager ? 'Бонусы' : 'Дополнительные статьи'}</label>
               <button type="button" onClick={addExpenseItem}
                 className="text-sm text-slate-700 hover:text-slate-900 font-medium">
-                + Добавить строку
+                {isManager ? '+ Добавить бонус' : '+ Добавить строку'}
               </button>
             </div>
-            {editState.expenseItems.length === 0 ? (
+            {isManager ? (
+              (() => {
+                const bonusItems = editState.expenseItems.filter((i) => i.category === 'pharmaBonus');
+                const bonusTotal = bonusItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+                return bonusItems.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic">Нет бонусов</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {bonusItems.map((item) => (
+                      <div key={item.id} className="flex gap-2 items-center">
+                        <AmountInput placeholder="Сумма бонуса"
+                          className="input flex-1" value={item.amount}
+                          onChange={(value) => updateExpenseItem(item.id, 'amount', value)} />
+                        <button type="button" onClick={() => removeExpenseItem(item.id)}
+                          className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0">
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {bonusItems.length > 1 && (
+                      <p className="text-sm text-slate-600 pt-1">
+                        Итого: <strong>{bonusTotal.toLocaleString('ru-RU')}</strong>
+                      </p>
+                    )}
+                  </div>
+                );
+              })()
+            ) : editState.expenseItems.length === 0 ? (
               <p className="text-sm text-slate-400 italic">Нет записей</p>
             ) : (
               <div className="space-y-1.5">
@@ -853,14 +885,14 @@ export default function RevenueListPage() {
           {/* Аванс — может быть выдан другому сотруднику этой аптеки, не обязательно тому, кто на смене; можно добавить несколько за день */}
           <div className="rounded border border-slate-300 p-3 mb-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Аванс сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
+              <label className="label mb-0">Зарплата сотруднику <span className="text-slate-400 font-normal">— необязательно</span></label>
               <button type="button" onClick={addAvansItem}
                 className="text-sm text-slate-700 hover:text-slate-900 font-medium">
-                + Добавить аванс
+                + Добавить зарплату
               </button>
             </div>
             {editState.avansItems.length === 0 ? (
-              <p className="text-sm text-slate-400 italic">Нет авансов</p>
+              <p className="text-sm text-slate-400 italic">Нет зарплат</p>
             ) : (
               <div className="space-y-2">
                 {editState.avansItems.map((item) => (
@@ -869,7 +901,7 @@ export default function RevenueListPage() {
                       <AmountInput
                         value={item.amount}
                         onChange={(value) => updateAvansItem(item.id, 'amount', value)}
-                        placeholder="Сумма аванса"
+                        placeholder="Сумма зарплаты"
                         className="input"
                       />
                     </div>
@@ -880,7 +912,7 @@ export default function RevenueListPage() {
                         onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
                         disabled={editPharmacyEmployees.length === 0}
                       >
-                        <option value="">— кому выдан аванс —</option>
+                        <option value="">— кому выдана зарплата —</option>
                         {editPharmacyEmployees.map((emp) => (
                           <option key={emp.id} value={emp.id}>{emp.name}</option>
                         ))}
@@ -1224,7 +1256,7 @@ export default function RevenueListPage() {
                   <th className="th text-right">Каспи</th>
                   <th className="th text-right">Доп. доходы</th>
                   <th className="th text-right">Бонусы</th>
-                  <th className="th text-right">Авансы</th>
+                  <th className="th text-right">Зарплаты</th>
                   <th className="th text-right">Доплаты</th>
                   <th className="th text-right">Выручка</th>
                   <th className="th text-right">Расходы</th>
@@ -1394,7 +1426,7 @@ export default function RevenueListPage() {
                   <span>Бонусы: <strong className="text-red-600">{fmt(totalBonuses)}</strong></span>
                 )}
                 {totalAdvances > 0 && (
-                  <span>Авансы: <strong className="text-red-600">{fmt(totalAdvances)}</strong></span>
+                  <span>Зарплаты: <strong className="text-red-600">{fmt(totalAdvances)}</strong></span>
                 )}
                 {totalSurcharges > 0 && (
                   <span>Доплаты: <strong className="text-red-600">{fmt(totalSurcharges)}</strong></span>
@@ -1460,7 +1492,7 @@ export default function RevenueListPage() {
                   return (
                     <div key={item.id} className="flex gap-2 items-baseline">
                       <span className="font-semibold shrink-0 text-red-600">−{fmt(item.amount)}</span>
-                      <span className="text-slate-700">Аванс</span>
+                      <span className="text-slate-700">Зарплата</span>
                       <span className="text-slate-400">→ {recipient?.name ?? 'сотрудник не указан'}</span>
                     </div>
                   );
