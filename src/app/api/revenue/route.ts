@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy } from '@/lib/revenue-validation';
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
@@ -133,19 +133,8 @@ export async function POST(request: NextRequest) {
         .map((i) => Number(i.employeeId))
     ),
   ];
-  if (recipientEmployeeIds.length > 0) {
-    const links = await prisma.employeePharmacy.findMany({
-      where: { employeeId: { in: recipientEmployeeIds }, pharmacyId: Number(pharmacyId) },
-      select: { employeeId: true },
-    });
-    const linkedIds = new Set(links.map((l) => l.employeeId));
-    if (recipientEmployeeIds.some((id) => !linkedIds.has(id))) {
-      return NextResponse.json(
-        { error: 'Аванс/доплату можно записать только сотруднику выбранной аптеки' },
-        { status: 400 }
-      );
-    }
-  }
+  const recipientError = await validateRecipientPharmacy(recipientEmployeeIds, Number(pharmacyId));
+  if (recipientError) return NextResponse.json({ error: recipientError }, { status: 400 });
 
   const totalExpenses = items
     .reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)

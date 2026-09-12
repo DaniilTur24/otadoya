@@ -76,6 +76,33 @@ export async function validateUniqueShift(
   return null;
 }
 
+/**
+ * Получатель аванса/доплаты (employeeAdvance/employeeSurcharge) должен работать в аптеке этой
+ * записи — кроме office: офисные сотрудники получают деньги из кассы любой аптеки, а не только
+ * своей, поэтому привязка через EmployeePharmacy для них не проверяется.
+ */
+export async function validateRecipientPharmacy(
+  recipientEmployeeIds: number[],
+  pharmacyId: number,
+): Promise<string | null> {
+  if (recipientEmployeeIds.length === 0) return null;
+  const recipients = await prisma.employee.findMany({
+    where: { id: { in: recipientEmployeeIds } },
+    select: { id: true, employeeType: true },
+  });
+  const idsNeedingLink = recipients.filter((r) => r.employeeType !== 'office').map((r) => r.id);
+  if (idsNeedingLink.length === 0) return null;
+  const links = await prisma.employeePharmacy.findMany({
+    where: { employeeId: { in: idsNeedingLink }, pharmacyId },
+    select: { employeeId: true },
+  });
+  const linkedIds = new Set(links.map((l) => l.employeeId));
+  if (idsNeedingLink.some((id) => !linkedIds.has(id))) {
+    return 'Аванс/доплату можно записать только сотруднику выбранной аптеки';
+  }
+  return null;
+}
+
 export function validateNonNegativeAmounts(amounts: Record<string, unknown>): string | null {
   for (const [key, value] of Object.entries(amounts)) {
     if (value != null && Number(value) < 0) {

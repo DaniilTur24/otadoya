@@ -194,15 +194,33 @@ export default function RevenueListPage() {
   // "Пятидневщик, у которого блокируется смена" — сейчас это только seller. manager_trading
   // с тем же флагом может совмещать оба источника (см. canGetRevenueShift).
   const isEditFiveDayEmployee = Boolean(editSelectedEmployee && !canGetRevenueShift(editSelectedEmployee));
-  // Аванс/доплату можно назначить только сотруднику, привязанному к аптеке этой записи
+  // Аванс/доплату можно назначить только сотруднику, привязанному к аптеке этой записи —
+  // кроме office: они получают деньги из кассы любой аптеки (см. дозагрузку ниже).
   const editPharmacyEmployees = editState
-    ? employees.filter((e) => e.pharmacies.some((p) => p.id === Number(editState.pharmacyId)))
+    ? employees.filter((e) => e.employeeType === 'office' || e.pharmacies.some((p) => p.id === Number(editState.pharmacyId)))
     : [];
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
     fetch('/api/employees?isActive=true').then((r) => r.json()).then(setEmployees);
   }, []);
+
+  // Общий список employees (загруженный выше без pharmacyId) для заведующего уже ограничен
+  // его аптеками на сервере, поэтому не содержит office-сотрудников без привязки к его аптекам.
+  // При открытии/смене аптеки в форме редактирования дозагружаем сотрудников именно этой
+  // аптеки — сервер сам подмешивает в ответ всех office (см. /api/employees).
+  useEffect(() => {
+    if (!editState?.pharmacyId) return;
+    fetch(`/api/employees?isActive=true&pharmacyId=${editState.pharmacyId}`)
+      .then((r) => r.json())
+      .then((fetched: Employee[]) => {
+        setEmployees((prev) => {
+          const known = new Set(prev.map((e) => e.id));
+          const additions = fetched.filter((e) => !known.has(e.id));
+          return additions.length > 0 ? [...prev, ...additions] : prev;
+        });
+      });
+  }, [editState?.pharmacyId]);
 
   const load = useCallback(async () => {
     setLoading(true);
