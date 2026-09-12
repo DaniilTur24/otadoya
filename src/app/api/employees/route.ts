@@ -44,13 +44,15 @@ export async function GET(request: NextRequest) {
       if (!allowedIds.includes(pharmacyId)) {
         return NextResponse.json({ error: 'Аптека вне зоны ответственности' }, { status: 403 });
       }
-      where.pharmacies = { some: { pharmacyId } };
+      // office сотрудники получают зарплату/доплату из кассы любой аптеки, а не только
+      // своей — поэтому показываем их независимо от привязки через EmployeePharmacy.
+      where.OR = [{ pharmacies: { some: { pharmacyId } } }, { employeeType: 'office' }];
     } else {
       where.pharmacies = { some: { pharmacyId: { in: allowedIds } } };
     }
   } else if (pharmacyIdParam) {
-    // Admin/bookkeeper могут фильтровать по конкретной аптеке
-    where.pharmacies = { some: { pharmacyId: Number(pharmacyIdParam) } };
+    // Admin/bookkeeper могут фильтровать по конкретной аптеке; office — исключение, см. выше.
+    where.OR = [{ pharmacies: { some: { pharmacyId: Number(pharmacyIdParam) } } }, { employeeType: 'office' }];
   }
 
   const employees = await prisma.employee.findMany({

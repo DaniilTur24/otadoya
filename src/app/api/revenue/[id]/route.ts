@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy } from '@/lib/revenue-validation';
 import { isMonthClosed } from '@/lib/closed-month';
 import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 
@@ -190,19 +190,8 @@ export async function PUT(
           .map((i: { employeeId?: number | null }) => Number(i.employeeId))
       ),
     ];
-    if (recipientEmployeeIds.length > 0) {
-      const links = await prisma.employeePharmacy.findMany({
-        where: { employeeId: { in: recipientEmployeeIds }, pharmacyId: targetPharmacyId },
-        select: { employeeId: true },
-      });
-      const linkedIds = new Set(links.map((l) => l.employeeId));
-      if (recipientEmployeeIds.some((empId) => !linkedIds.has(empId))) {
-        return NextResponse.json(
-          { error: 'Аванс/доплату можно записать только сотруднику выбранной аптеки' },
-          { status: 400 }
-        );
-      }
-    }
+    const recipientError = await validateRecipientPharmacy(recipientEmployeeIds, targetPharmacyId);
+    if (recipientError) return NextResponse.json({ error: recipientError }, { status: 400 });
 
     data.additionalExpenses = filled
       .reduce((s: number, i: { amount: string }) => s + (parseFloat(i.amount) || 0), 0)

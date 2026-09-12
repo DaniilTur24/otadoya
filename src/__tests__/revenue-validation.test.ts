@@ -4,15 +4,19 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     employee: {
       findUnique: vi.fn(),
+      findMany: vi.fn(),
     },
     attendanceShift: {
       findFirst: vi.fn(),
+    },
+    employeePharmacy: {
+      findMany: vi.fn(),
     },
   },
 }));
 
 import { prisma } from '@/lib/prisma';
-import { validateShiftEmployeeType, validateNoAttendanceOnDate } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateNoAttendanceOnDate, validateRecipientPharmacy } from '@/lib/revenue-validation';
 
 describe('validateShiftEmployeeType', () => {
   it('allows a plain seller to get a five_day shift (fiveDayViaAttendance off by default)', async () => {
@@ -92,5 +96,47 @@ describe('validateNoAttendanceOnDate', () => {
   it('skips the check when there is no shiftType', async () => {
     vi.mocked(prisma.attendanceShift.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 });
     expect(await validateNoAttendanceOnDate(1, new Date('2026-06-15'), null)).toBeNull();
+  });
+});
+
+describe('validateRecipientPharmacy', () => {
+  it('allows a recipient linked to the target pharmacy', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 1, employeeType: 'seller' }]);
+    vi.mocked(prisma.employeePharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ employeeId: 1 }]);
+    expect(await validateRecipientPharmacy([1], 5)).toBeNull();
+  });
+
+  it('blocks a recipient not linked to the target pharmacy', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 1, employeeType: 'seller' }]);
+    vi.mocked(prisma.employeePharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const error = await validateRecipientPharmacy([1], 5);
+    expect(error).toBe('Аванс/доплату можно записать только сотруднику выбранной аптеки');
+  });
+
+  it('allows an office employee regardless of pharmacy link — they draw pay from any pharmacy register', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 1, employeeType: 'office' }]);
+    const employeePharmacyFindMany = prisma.employeePharmacy.findMany as ReturnType<typeof vi.fn>;
+    employeePharmacyFindMany.mockResolvedValue([]);
+    const callsBefore = employeePharmacyFindMany.mock.calls.length;
+    expect(await validateRecipientPharmacy([1], 5)).toBeNull();
+    // office employees skip the link check entirely — no new query is made for them
+    expect(employeePharmacyFindMany.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('still checks the link for a non-office recipient in a mixed batch with an office employee', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 1, employeeType: 'office' },
+      { id: 2, employeeType: 'seller' },
+    ]);
+    vi.mocked(prisma.employeePharmacy.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const error = await validateRecipientPharmacy([1, 2], 5);
+    expect(error).toBe('Аванс/доплату можно записать только сотруднику выбранной аптеки');
+  });
+
+  it('skips all checks when there are no recipients', async () => {
+    const findMany = prisma.employee.findMany as ReturnType<typeof vi.fn>;
+    const callsBefore = findMany.mock.calls.length;
+    expect(await validateRecipientPharmacy([], 5)).toBeNull();
+    expect(findMany.mock.calls.length).toBe(callsBefore);
   });
 });

@@ -47,14 +47,14 @@ beforeEach(() => {
 });
 
 describe('GET /api/employees — фильтрация по аптеке для заведующего', () => {
-  it('заведующий с несколькими аптеками: запрос с pharmacyId фильтрует только по этой аптеке', async () => {
+  it('заведующий с несколькими аптеками: запрос с pharmacyId фильтрует только по этой аптеке (плюс office из любой)', async () => {
     findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 1 }, { pharmacyId: 2 }]);
 
     const res = await GET(makeRequest('http://localhost/api/employees?isActive=true&pharmacyId=2', { role: 'manager', userId: 5 }));
 
     expect((res as { status: number }).status).toBe(200);
     const where = findManyEmployees.mock.calls[findManyEmployees.mock.calls.length - 1][0].where;
-    expect(where.pharmacies).toEqual({ some: { pharmacyId: 2 } });
+    expect(where.OR).toEqual([{ pharmacies: { some: { pharmacyId: 2 } } }, { employeeType: 'office' }]);
   });
 
   it('заведующий не может запросить сотрудников чужой аптеки — 403', async () => {
@@ -73,6 +73,14 @@ describe('GET /api/employees — фильтрация по аптеке для �
 
     const where = findManyEmployees.mock.calls[findManyEmployees.mock.calls.length - 1][0].where;
     expect(where.pharmacies).toEqual({ some: { pharmacyId: { in: [1, 2] } } });
+  });
+
+  it('админ/бухгалтер: запрос с pharmacyId тоже подмешивает office из любой аптеки', async () => {
+    const res = await GET(makeRequest('http://localhost/api/employees?isActive=true&pharmacyId=2', { role: 'bookkeeper' }));
+
+    expect((res as { status: number }).status).toBe(200);
+    const where = findManyEmployees.mock.calls[findManyEmployees.mock.calls.length - 1][0].where;
+    expect(where.OR).toEqual([{ pharmacies: { some: { pharmacyId: 2 } } }, { employeeType: 'office' }]);
   });
 });
 
