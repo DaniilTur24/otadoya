@@ -79,10 +79,6 @@ const MANAGER_EXPENSE_KEYS = new Set([
 
 let nextId = 1;
 
-function formatShiftDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-}
-
 function emptyItem(): ExpenseItem {
   return { id: nextId++, amount: '', category: '', comment: '' };
 }
@@ -122,8 +118,6 @@ export default function NewRevenuePage() {
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
   const [avansItems, setAvansItems] = useState<AvansItem[]>([]);
   const [doplataItems, setDoplataItems] = useState<DoplataItem[]>([]);
-  const [previousFullDay, setPreviousFullDay] = useState<{ date: string } | null>(null);
-  const [isContinuation, setIsContinuation] = useState(true);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -172,30 +166,6 @@ export default function NewRevenuePage() {
       .then((data) => setSelectedMonthClosed(data.isClosed === true))
       .catch(() => setSelectedMonthClosed(false));
   }, [form.date]);
-
-  // Суточная смена заканчивается утром следующего дня, а касса снимается по календарным дням —
-  // выручка второго дня заносится отдельной записью. Без этого вопроса она засчиталась бы как
-  // вторая суточная смена и задвоила оплату оклада (см. isShiftContinuation).
-  useEffect(() => {
-    if (form.shiftType !== 'full_day' || !form.employeeId || !form.date) {
-      setPreviousFullDay(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/revenue/previous-shift?employeeId=${form.employeeId}&date=${form.date}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled) return;
-        if (d?.hasPreviousFullDay) {
-          setPreviousFullDay({ date: d.previousDate });
-          setIsContinuation(true);
-        } else {
-          setPreviousFullDay(null);
-        }
-      })
-      .catch(() => { if (!cancelled) setPreviousFullDay(null); });
-    return () => { cancelled = true; };
-  }, [form.shiftType, form.employeeId, form.date]);
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -414,7 +384,7 @@ export default function NewRevenuePage() {
         kaspiRevenue: form.kaspiRevenue || '0',
         employeeId: form.employeeId ? Number(form.employeeId) : null,
         employeeName,
-        shiftType: (previousFullDay && isContinuation ? 'full_day_cont' : form.shiftType) || null,
+        shiftType: form.shiftType || null,
         expenseItems: allExpenseItems,
         generalComment: form.generalComment || null,
       }),
@@ -571,42 +541,6 @@ export default function NewRevenuePage() {
               </p>
             )}
           </div>
-
-          {previousFullDay && (
-            <div className="sm:col-span-2 rounded-md border border-slate-300 bg-slate-50 p-3">
-              <p className="text-sm font-medium text-slate-900">
-                У этого сотрудника суточная смена с {formatShiftDate(previousFullDay.date)}
-              </p>
-              <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
-                <input
-                  type="radio"
-                  checked={isContinuation}
-                  onChange={() => setIsContinuation(true)}
-                  className="mt-1"
-                />
-                <span>
-                  Это продолжение той же смены
-                  <span className="block text-xs text-slate-500">
-                    Выручка добавится к смене от {formatShiftDate(previousFullDay.date)}, отдельная смена не начисляется
-                  </span>
-                </span>
-              </label>
-              <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
-                <input
-                  type="radio"
-                  checked={!isContinuation}
-                  onChange={() => setIsContinuation(false)}
-                  className="mt-1"
-                />
-                <span>
-                  Это новая суточная смена
-                  <span className="block text-xs text-slate-500">
-                    Сотрудник вышел на вторые сутки подряд — начислится ещё одна смена
-                  </span>
-                </span>
-              </label>
-            </div>
-          )}
         </div>
 
         {/* Выручка */}

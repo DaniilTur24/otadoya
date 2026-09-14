@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/prisma';
 export { SHIFT_TYPE_LABELS } from '@/lib/shift-types';
-import { isShiftContinuation } from '@/lib/shift-types';
 export { EMPLOYEE_TYPE_LABELS } from '@/lib/employee-types';
 import { MANAGER_BONUS_SHARE_PERCENT, USER_LINKED_TYPES } from '@/lib/employee-types';
 import { roundMoney } from '@/lib/money';
@@ -218,9 +217,6 @@ async function computePooledShiftAverages(
     } else if (e.shiftType === 'full_day') {
       fullDayRevenue += revenue;
       fullDayCount++;
-    } else if (isShiftContinuation(e.shiftType)) {
-      // Второй календарный день той же смены: выручка входит в среднюю за смену, счётчик — нет.
-      fullDayRevenue += revenue;
     }
   }
 
@@ -512,9 +508,6 @@ async function calculateTradingEmployeeSalary(
   // Смены группируются по аптеке — у каждой аптеки своя настройка, считать премию
   // от личной выручки сотрудника или от средней выручки аптеки за смену (см. ниже).
   const byPharmacy = new Map<number, { dayCount: number; dayRevenue: number; fullDayCount: number; fullDayRevenue: number }>();
-  // Выручка вторых суток копится отдельно и раздаётся по аптекам только после цикла — до конца
-  // цикла неизвестно, есть ли в этом месяце сама смена, к которой она относится (см. ниже).
-  const continuationRevenue = new Map<number, { total: number; forPremium: number }>();
 
   for (const e of entries) {
     const revenue = Number(e.cashRevenue) + Number(e.terminalRevenue) + Number(e.kaspiRevenue ?? 0);
@@ -535,24 +528,10 @@ async function calculateTradingEmployeeSalary(
       revenueFullDayShifts += revenue;
       grp.fullDayCount++;
       grp.fullDayRevenue += revenueForPremium;
-    } else if (isShiftContinuation(e.shiftType)) {
-      const acc = continuationRevenue.get(e.pharmacyId) ?? { total: 0, forPremium: 0 };
-      acc.total += revenue;
-      acc.forPremium += revenueForPremium;
-      continuationRevenue.set(e.pharmacyId, acc);
     }
     // 'five_day' в записи выручки — устаревший способ, зарплату он больше не даёт вообще:
     // пятидневка сотрудника считается только через табель (fiveDayViaAttendance), см. ниже.
     revenueTotal += revenue;
-  }
-
-  for (const [phId, acc] of continuationRevenue) {
-    const grp = byPharmacy.get(phId);
-    // Смена началась в прошлом месяце (сутки с 31-го на 1-е): сама смена и её порог посчитаны
-    // там, и без этой проверки выручка второго дня дала бы здесь премию без порога вообще.
-    if (!grp || grp.fullDayCount === 0) continue;
-    revenueFullDayShifts += acc.total;
-    grp.fullDayRevenue += acc.forPremium;
   }
 
   const fiveDayShiftsCount = fiveDayViaAttendance ? attendanceFiveDayCount : 0;
