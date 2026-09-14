@@ -55,28 +55,6 @@ const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
     !['retailRevenue', 'kaspiRevenue', 'wholesaleRevenue'].includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
-// Заведующие видят не весь список статей, а только те, что реально касаются их аптеки —
-// остальные (зарплаты офиса, налоги, юрлица и т.п.) им недоступны для выбора.
-// «Выручка Каспи» сюда не входит — она уже вводится отдельным полем формы, а не статьёй.
-const MANAGER_EXPENSE_KEYS = new Set([
-  'terminalRent',
-  'procedureRent',
-  'goodsExpenses',
-  'pharmaBonus',
-  'charity',
-  'stationery',
-  'utilities',
-  'otherExpenses',
-  'householdExpenses',
-  'advertising',
-  'repairs',
-  'rentExpenses',
-  'standardKaspibot',
-  'communications',
-  'equipment',
-  'cleaning',
-]);
-
 let nextId = 1;
 
 function emptyItem(): ExpenseItem {
@@ -189,7 +167,7 @@ export default function NewRevenuePage() {
   }
 
   function addExpenseItem() {
-    setExpenseItems((items) => [...items, emptyItem()]);
+    setExpenseItems((items) => [...items, isManager ? { ...emptyItem(), category: 'pharmaBonus' } : emptyItem()]);
   }
 
   function removeExpenseItem(id: number) {
@@ -238,15 +216,9 @@ export default function NewRevenuePage() {
   // с тем же флагом может совмещать оба источника (см. canGetRevenueShift), поэтому не
   // подходит под этот флаг: селектор смены остаётся включён.
   const isFiveDayEmployee = Boolean(selectedEmployee && !canGetRevenueShift(selectedEmployee));
-  // Заведующие видят те же поля ввода строк, что и бухгалтер/админ, но статья ограничена
-  // списком MANAGER_EXPENSE_KEYS — остальные статьи им не нужны и не показываются.
+  // Заведующие видят только «Бонусы» без выбора категории — полный список статей расхода
+  // (аренда, коммуналка и т.п.) им не нужен и путает; бухгалтер/админ видят его как раньше.
   const isManager = role === 'manager';
-  const expenseOptions = isManager
-    ? EXPENSE_OPTIONS.filter((opt) => MANAGER_EXPENSE_KEYS.has(opt.key))
-    : EXPENSE_OPTIONS;
-  const incomeOptions = isManager
-    ? INCOME_OPTIONS.filter((opt) => MANAGER_EXPENSE_KEYS.has(opt.key))
-    : INCOME_OPTIONS;
 
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),
@@ -588,24 +560,53 @@ export default function NewRevenuePage() {
           </div>
         )}
 
-        {/* Дополнительные расходы — заведующие видят тот же список полей, но статья
-            ограничена MANAGER_EXPENSE_KEYS; бухгалтер/админ видят полный список статей */}
+        {/* Дополнительные расходы — заведующие видят только «Бонусы» (категория зафиксирована,
+            без выбора статьи); бухгалтер/админ видят полный список статей, как и раньше */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="label mb-0">Дополнительные статьи</label>
+            <label className="label mb-0">{isManager ? 'Бонусы' : 'Дополнительные статьи'}</label>
             <button
               type="button"
               onClick={addExpenseItem}
               className="text-sm text-slate-700 hover:text-slate-900 font-medium flex items-center gap-1"
             >
-              + Добавить строку
+              {isManager ? '+ Добавить бонус' : '+ Добавить строку'}
             </button>
           </div>
 
           {expenseItems.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-1">
-              Нет записей — нажмите «+ Добавить строку»
+              {isManager ? 'Нет бонусов — нажмите «+ Добавить бонус»' : 'Нет записей — нажмите «+ Добавить строку»'}
             </p>
+          ) : isManager ? (
+            <div className="space-y-2">
+              {expenseItems.map((item, idx) => (
+                <div key={item.id} className="flex gap-2 items-center">
+                  <AmountInput
+                    value={item.amount}
+                    onChange={(value) => updateExpenseItem(item.id, 'amount', value)}
+                    placeholder="Сумма бонуса"
+                    className="input flex-1"
+                    autoFocus={idx === expenseItems.length - 1}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeExpenseItem(item.id)}
+                    className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0"
+                    title="Удалить"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+
+              {expenseItems.length > 1 && (
+                <div className="text-sm text-slate-600 pt-1">
+                  Итого:{' '}
+                  <strong>{totalExpenses.toLocaleString('ru-RU')}</strong>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="hidden sm:grid gap-2 text-xs text-slate-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
@@ -645,12 +646,12 @@ export default function NewRevenuePage() {
                     >
                       <option value="">— статья —</option>
                       <optgroup label="Расходы">
-                        {expenseOptions.map((opt) => (
+                        {EXPENSE_OPTIONS.map((opt) => (
                           <option key={opt.key} value={opt.key}>{opt.label}</option>
                         ))}
                       </optgroup>
                       <optgroup label="Доходы">
-                        {incomeOptions.map((opt) => (
+                        {INCOME_OPTIONS.map((opt) => (
                           <option key={opt.key} value={opt.key}>{opt.label}</option>
                         ))}
                       </optgroup>
@@ -683,12 +684,12 @@ export default function NewRevenuePage() {
                     >
                       <option value="">— статья —</option>
                       <optgroup label="Расходы">
-                        {expenseOptions.map((opt) => (
+                        {EXPENSE_OPTIONS.map((opt) => (
                           <option key={opt.key} value={opt.key}>{opt.label}</option>
                         ))}
                       </optgroup>
                       <optgroup label="Доходы">
-                        {incomeOptions.map((opt) => (
+                        {INCOME_OPTIONS.map((opt) => (
                           <option key={opt.key} value={opt.key}>{opt.label}</option>
                         ))}
                       </optgroup>
