@@ -167,12 +167,15 @@ export default function RevenueListPage() {
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [editPreviousFullDay, setEditPreviousFullDay] = useState<{ date: string } | null>(null);
   const [editIsContinuation, setEditIsContinuation] = useState(false);
+  const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
   // Две суточные смены подряд у одного сотрудника — обычно признак того, что выручка второго
   // календарного дня одной смены записана как отдельная смена (двойная оплата оклада). Бывает и
   // по-настоящему, поэтому не запрет, а пометка для бухгалтера при подтверждении.
   const consecutiveFullDayIds = useMemo(() => {
     const byEmployee = new Map<number, { id: number; day: number }[]>();
-    for (const e of entries) {
+    // Обе таблицы вместе: у бухгалтера pending-записи живут только в панели модерации и в
+    // entries не попадают, а пара часто состоит как раз из подтверждённой и ещё не проверенной.
+    for (const e of [...entries, ...pendingEntries]) {
       if (e.shiftType !== 'full_day' || e.employeeId == null) continue;
       const d = new Date(e.date);
       const day = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
@@ -188,8 +191,7 @@ export default function RevenueListPage() {
       }
     }
     return flagged;
-  }, [entries]);
-  const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
+  }, [entries, pendingEntries]);
   const [role, setRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1176,6 +1178,14 @@ export default function RevenueListPage() {
                           <td className="td text-slate-600">{entry.employeeName}</td>
                           <td className="td">
                             {entry.shiftType ? (SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType) : '—'}
+                            {consecutiveFullDayIds.has(entry.id) && (
+                              <span
+                                className="block mt-0.5 text-xs px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-800"
+                                title="У сотрудника суточные смены на соседние даты. Если это одна смена через полночь, нажмите «Изменить» и отметьте эту запись как продолжение суток — иначе оклад начислится дважды."
+                              >
+                                Двое суток подряд
+                              </span>
+                            )}
                           </td>
                           <td className="td text-right text-green-700">{fmt(entry.cashRevenue)}</td>
                           <td className="td text-right text-green-700">{fmt(entry.terminalRevenue)}</td>
