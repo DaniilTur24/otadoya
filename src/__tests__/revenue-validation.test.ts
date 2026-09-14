@@ -9,6 +9,9 @@ vi.mock('@/lib/prisma', () => ({
     attendanceShift: {
       findFirst: vi.fn(),
     },
+    dailyRevenueEntry: {
+      findFirst: vi.fn(),
+    },
     employeePharmacy: {
       findMany: vi.fn(),
     },
@@ -16,7 +19,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 import { prisma } from '@/lib/prisma';
-import { validateShiftEmployeeType, validateNoAttendanceOnDate, validateRecipientPharmacy } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateNoAttendanceOnDate, validateUniqueShift, validateRecipientPharmacy } from '@/lib/revenue-validation';
 
 describe('validateShiftEmployeeType', () => {
   it('allows a plain seller to get a five_day shift (fiveDayViaAttendance off by default)', async () => {
@@ -138,5 +141,39 @@ describe('validateRecipientPharmacy', () => {
     const callsBefore = findMany.mock.calls.length;
     expect(await validateRecipientPharmacy([], 5)).toBeNull();
     expect(findMany.mock.calls.length).toBe(callsBefore);
+  });
+});
+
+describe('продолжение суточной смены', () => {
+  it('validateNoAttendanceOnDate пропускает продолжение даже при отмеченном табеле', async () => {
+    // Сутки начались накануне и уже оплачены — утро второго дня не мешает пятидневке по табелю.
+    vi.mocked(prisma.attendanceShift.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 });
+    expect(await validateNoAttendanceOnDate(1, new Date('2026-06-15'), 'full_day_cont')).toBeNull();
+  });
+
+  it('validateUniqueShift ищет конфликт продолжения только среди продолжений', async () => {
+    const findFirst = vi.mocked(prisma.dailyRevenueEntry.findFirst as ReturnType<typeof vi.fn>);
+    findFirst.mockResolvedValue(null);
+
+    await validateUniqueShift(1, new Date('2026-06-15'), 'full_day_cont');
+
+    const where = findFirst.mock.calls[findFirst.mock.calls.length - 1][0].where;
+    expect(where.shiftType).toBe('full_day_cont');
+  });
+
+  it('validateUniqueShift для обычной смены игнорирует продолжения', async () => {
+    const findFirst = vi.mocked(prisma.dailyRevenueEntry.findFirst as ReturnType<typeof vi.fn>);
+    findFirst.mockResolvedValue(null);
+
+    await validateUniqueShift(1, new Date('2026-06-15'), 'day');
+
+    const where = findFirst.mock.calls[findFirst.mock.calls.length - 1][0].where;
+    expect(where.shiftType).toEqual({ not: null, notIn: ['full_day_cont'] });
+  });
+
+  it('validateUniqueShift блокирует второе продолжение на ту же дату', async () => {
+    vi.mocked(prisma.dailyRevenueEntry.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 5 });
+    const error = await validateUniqueShift(1, new Date('2026-06-15'), 'full_day_cont');
+    expect(error).toBe('У этого сотрудника уже отмечено продолжение суточной смены на эту дату');
   });
 });

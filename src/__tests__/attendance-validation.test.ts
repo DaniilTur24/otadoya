@@ -23,3 +23,16 @@ describe('validateNoShiftOnDate', () => {
     expect(error).toBe('На эту дату у сотрудника уже назначена смена в записи выручки — нельзя также отметить табель');
   });
 });
+
+describe('validateNoShiftOnDate — продолжение суточной смены', () => {
+  it('исключает продолжение суток из запроса: дату оно не занимает', async () => {
+    // Сотрудник сдал сутки утром 2-го и в тот же день вышел на пятидневку — табель должен встать.
+    const findFirst = vi.mocked(prisma.dailyRevenueEntry.findFirst as ReturnType<typeof vi.fn>);
+    findFirst.mockResolvedValue(null);
+
+    await validateNoShiftOnDate(1, new Date('2026-06-15'));
+
+    const where = findFirst.mock.calls[findFirst.mock.calls.length - 1][0].where;
+    expect(where.shiftType).toEqual({ not: null, notIn: ['full_day_cont'] });
+  });
+});
