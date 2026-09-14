@@ -23,6 +23,28 @@ const INCOME_OPTIONS = MONTHLY_REPORT_ROWS.filter(
     !['retailRevenue', 'kaspiRevenue', 'wholesaleRevenue'].includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
+// Заведующие видят не весь список статей, а только те, что реально касаются их аптеки —
+// остальные (зарплаты офиса, налоги, юрлица и т.п.) им недоступны для выбора.
+// «Выручка Каспи» сюда не входит — она уже вводится отдельным полем формы, а не статьёй.
+const MANAGER_EXPENSE_KEYS = new Set([
+  'terminalRent',
+  'procedureRent',
+  'goodsExpenses',
+  'pharmaBonus',
+  'charity',
+  'stationery',
+  'utilities',
+  'otherExpenses',
+  'householdExpenses',
+  'advertising',
+  'repairs',
+  'rentExpenses',
+  'standardKaspibot',
+  'communications',
+  'equipment',
+  'cleaning',
+]);
+
 interface Pharmacy { id: number; name: string }
 interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean; pharmacies: Pharmacy[] }
 
@@ -373,7 +395,7 @@ export default function RevenueListPage() {
   }
 
   function addExpenseItem() {
-    setEditState((s) => s ? { ...s, expenseItems: [...s.expenseItems, isManager ? { ...newItem(), category: 'pharmaBonus' } : newItem()] } : s);
+    setEditState((s) => s ? { ...s, expenseItems: [...s.expenseItems, newItem()] } : s);
   }
   function removeExpenseItem(id: number) {
     setEditState((s) => s ? { ...s, expenseItems: s.expenseItems.filter((i) => i.id !== id) } : s);
@@ -609,9 +631,15 @@ export default function RevenueListPage() {
     ? editState.expenseItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
     : 0;
 
-  // Заведующие видят только «Бонусы» (категория зафиксирована, без выбора статьи);
-  // бухгалтер/админ видят полный список статей, как и раньше.
+  // Заведующие видят тот же список полей, что и бухгалтер/админ, но статья ограничена
+  // списком MANAGER_EXPENSE_KEYS — остальные статьи им не нужны и не показываются.
   const isManager = role === 'manager';
+  const expenseOptions = isManager
+    ? EXPENSE_OPTIONS.filter((opt) => MANAGER_EXPENSE_KEYS.has(opt.key))
+    : EXPENSE_OPTIONS;
+  const incomeOptions = isManager
+    ? INCOME_OPTIONS.filter((opt) => MANAGER_EXPENSE_KEYS.has(opt.key))
+    : INCOME_OPTIONS;
 
   const avansTotal = editState
     ? editState.avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
@@ -795,44 +823,17 @@ export default function RevenueListPage() {
             </div>
           )}
 
-          {/* Дополнительные статьи — заведующие видят только «Бонусы» (категория зафиксирована,
-              без выбора статьи); бухгалтер/админ видят полный список статей, как и раньше */}
+          {/* Дополнительные статьи — заведующие видят тот же список полей, но статья
+              ограничена MANAGER_EXPENSE_KEYS; бухгалтер/админ видят полный список статей */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">{isManager ? 'Бонусы' : 'Дополнительные статьи'}</label>
+              <label className="label mb-0">Дополнительные статьи</label>
               <button type="button" onClick={addExpenseItem}
                 className="text-sm text-slate-700 hover:text-slate-900 font-medium">
-                {isManager ? '+ Добавить бонус' : '+ Добавить строку'}
+                + Добавить строку
               </button>
             </div>
-            {isManager ? (
-              (() => {
-                const bonusItems = editState.expenseItems.filter((i) => i.category === 'pharmaBonus');
-                const bonusTotal = bonusItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
-                return bonusItems.length === 0 ? (
-                  <p className="text-sm text-slate-400 italic">Нет бонусов</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {bonusItems.map((item) => (
-                      <div key={item.id} className="flex gap-2 items-center">
-                        <AmountInput placeholder="Сумма бонуса"
-                          className="input flex-1" value={item.amount}
-                          onChange={(value) => updateExpenseItem(item.id, 'amount', value)} />
-                        <button type="button" onClick={() => removeExpenseItem(item.id)}
-                          className="text-slate-300 hover:text-red-500 transition-colors text-xl leading-none shrink-0">
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    {bonusItems.length > 1 && (
-                      <p className="text-sm text-slate-600 pt-1">
-                        Итого: <strong>{bonusTotal.toLocaleString('ru-RU')}</strong>
-                      </p>
-                    )}
-                  </div>
-                );
-              })()
-            ) : editState.expenseItems.length === 0 ? (
+            {editState.expenseItems.length === 0 ? (
               <p className="text-sm text-slate-400 italic">Нет записей</p>
             ) : (
               <div className="space-y-1.5">
@@ -852,12 +853,12 @@ export default function RevenueListPage() {
                         onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}>
                         <option value="">— статья —</option>
                         <optgroup label="Расходы">
-                          {EXPENSE_OPTIONS.map((opt) => (
+                          {expenseOptions.map((opt) => (
                             <option key={opt.key} value={opt.key}>{opt.label}</option>
                           ))}
                         </optgroup>
                         <optgroup label="Доходы">
-                          {INCOME_OPTIONS.map((opt) => (
+                          {incomeOptions.map((opt) => (
                             <option key={opt.key} value={opt.key}>{opt.label}</option>
                           ))}
                         </optgroup>
