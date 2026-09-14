@@ -34,6 +34,10 @@ export async function GET(request: NextRequest) {
     where: {
       employeeId,
       shiftType: SHIFT_TYPES.full_day,
+      // pending здесь нужен: пара суток часто целиком ждёт подтверждения, и именно тогда её
+      // выгоднее поправить. А вот отклонённая вчерашняя смена — не смена: пометив сегодняшнюю
+      // запись продолжением, за неё не начислили бы ни оклад, ни премию.
+      status: { not: 'rejected' },
       date: { gte: prevStart, lte: prevEnd },
     },
     select: { id: true, date: true, pharmacy: { select: { name: true } } },

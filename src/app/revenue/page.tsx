@@ -177,6 +177,8 @@ export default function RevenueListPage() {
     // entries не попадают, а пара часто состоит как раз из подтверждённой и ещё не проверенной.
     for (const e of [...entries, ...pendingEntries]) {
       if (e.shiftType !== 'full_day' || e.employeeId == null) continue;
+      // Отклонённая запись смены не даёт — парой она быть не может.
+      if (e.status === 'rejected') continue;
       const d = new Date(e.date);
       const day = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
       const list = byEmployee.get(e.employeeId) ?? [];
