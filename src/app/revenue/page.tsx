@@ -1,16 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/lib/monthly-report-fields';
-import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS, isShiftContinuation } from '@/lib/shift-types';
+import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
-
-function formatShiftDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-}
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
@@ -165,30 +161,6 @@ export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
-  const [editPreviousFullDay, setEditPreviousFullDay] = useState<{ date: string } | null>(null);
-  const [editIsContinuation, setEditIsContinuation] = useState(false);
-  // Две суточные смены подряд у одного сотрудника — обычно признак того, что выручка второго
-  // календарного дня одной смены записана как отдельная смена (двойная оплата оклада). Бывает и
-  // по-настоящему, поэтому не запрет, а пометка для бухгалтера при подтверждении.
-  const consecutiveFullDayIds = useMemo(() => {
-    const byEmployee = new Map<number, { id: number; day: number }[]>();
-    for (const e of entries) {
-      if (e.shiftType !== 'full_day' || e.employeeId == null) continue;
-      const d = new Date(e.date);
-      const day = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
-      const list = byEmployee.get(e.employeeId) ?? [];
-      list.push({ id: e.id, day });
-      byEmployee.set(e.employeeId, list);
-    }
-    const flagged = new Set<number>();
-    for (const list of byEmployee.values()) {
-      const days = new Set(list.map((x) => x.day));
-      for (const { id, day } of list) {
-        if (days.has(day - 1) || days.has(day + 1)) flagged.add(id);
-      }
-    }
-    return flagged;
-  }, [entries]);
   const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
   const [role, setRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
@@ -334,34 +306,9 @@ export default function RevenueListPage() {
     load();
   }
 
-  // Тот же вопрос, что и при внесении выручки: если у сотрудника накануне была суточная смена,
-  // эта запись может быть её вторым календарным днём. Здесь это ещё и способ починить записи,
-  // внесённые до появления продолжения суток — переключить их, не пересоздавая.
-  const editShiftType = editState?.shiftType;
-  const editEmployeeId = editState?.employeeId;
-  const editDate = editState?.date;
-  useEffect(() => {
-    const isFullDay = editShiftType === 'full_day' || editShiftType === 'full_day_cont';
-    if (!isFullDay || !editEmployeeId || !editDate) {
-      setEditPreviousFullDay(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/revenue/previous-shift?employeeId=${editEmployeeId}&date=${editDate}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled) return;
-        setEditPreviousFullDay(d?.hasPreviousFullDay ? { date: d.previousDate } : null);
-      })
-      .catch(() => { if (!cancelled) setEditPreviousFullDay(null); });
-    return () => { cancelled = true; };
-  }, [editShiftType, editEmployeeId, editDate]);
-
   function startEdit(entry: RevenueEntry) {
     setEditingId(entry.id);
     setSaveError('');
-    setEditPreviousFullDay(null);
-    setEditIsContinuation(isShiftContinuation(entry.shiftType));
     // Форма появляется прямо под этой записью — если для неё (или для другой) было открыто
     // окно модерации, закрываем его, чтобы под одной строкой не было двух развёрнутых блоков.
     setModerating(null);
@@ -670,9 +617,7 @@ export default function RevenueListPage() {
         generalComment: editState.generalComment || null,
         employeeId: editState.employeeId ? Number(editState.employeeId) : null,
         employeeName,
-        shiftType: (editPreviousFullDay && editIsContinuation
-          ? 'full_day_cont'
-          : isShiftContinuation(editState.shiftType) ? 'full_day' : editState.shiftType) || null,
+        shiftType: editState.shiftType || null,
         expenseItems: allExpenseItems,
       }),
     });
@@ -829,10 +774,7 @@ export default function RevenueListPage() {
             </div>
             <div>
               <label className="label">Тип смены</label>
-              {/* Продолжение суток — это по-прежнему «Суточная» в списке: продолжение или новые
-                  сутки выбирается радиокнопкой ниже, как и в форме внесения выручки. */}
-              <select className="input"
-                value={isShiftContinuation(editState.shiftType) ? 'full_day' : editState.shiftType}
+              <select className="input" value={editState.shiftType}
                 onChange={(e) => updateField('shiftType', e.target.value)}
                 disabled={isEditFiveDayEmployee}>
                 <option value="">— не указан —</option>
@@ -848,34 +790,6 @@ export default function RevenueListPage() {
                 <p className="mt-1 text-xs text-amber-600">Без типа смены зарплата не рассчитается</p>
               )}
             </div>
-
-            {editPreviousFullDay && (
-              <div className="col-span-2 rounded-md border border-slate-300 bg-slate-50 p-3">
-                <p className="text-sm font-medium text-slate-900">
-                  У этого сотрудника суточная смена с {formatShiftDate(editPreviousFullDay.date)}
-                </p>
-                <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
-                  <input type="radio" className="mt-1" checked={editIsContinuation}
-                    onChange={() => setEditIsContinuation(true)} />
-                  <span>
-                    Это продолжение той же смены
-                    <span className="block text-xs text-slate-500">
-                      Выручка добавится к смене от {formatShiftDate(editPreviousFullDay.date)}, отдельная смена не начисляется
-                    </span>
-                  </span>
-                </label>
-                <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
-                  <input type="radio" className="mt-1" checked={!editIsContinuation}
-                    onChange={() => setEditIsContinuation(false)} />
-                  <span>
-                    Это новая суточная смена
-                    <span className="block text-xs text-slate-500">
-                      Сотрудник вышел на вторые сутки подряд — начислится ещё одна смена
-                    </span>
-                  </span>
-                </label>
-              </div>
-            )}
           </div>
 
           {/* Выручка */}
@@ -1458,14 +1372,6 @@ export default function RevenueListPage() {
                                 : 'bg-slate-100 text-slate-800'
                             }`}>
                               {SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType}
-                            </span>
-                          )}
-                          {consecutiveFullDayIds.has(entry.id) && (
-                            <span
-                              className="ml-1 text-xs px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-800"
-                              title="У сотрудника суточные смены на соседние даты. Если это одна смена через полночь, вторую запись нужно отметить как продолжение суток — иначе оклад начислится дважды."
-                            >
-                              Двое суток подряд
                             </span>
                           )}
                         </td>

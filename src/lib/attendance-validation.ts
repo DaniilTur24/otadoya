@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma';
-import { SHIFT_TYPES } from '@/lib/shift-types';
 
 /**
  * Симметричная проверка к validateNoAttendanceOnDate (revenue-validation.ts): не даёт отметить
@@ -10,13 +9,7 @@ export async function validateNoShiftOnDate(employeeId: number, date: Date): Pro
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
   const existing = await prisma.dailyRevenueEntry.findFirst({
-    where: {
-      employeeId,
-      // Продолжение суток дату не занимает: смена началась накануне и уже оплачена, а утро
-      // второго дня не мешает человеку выйти в этот же день на пятидневку по табелю.
-      shiftType: { not: null, notIn: [SHIFT_TYPES.full_day_cont] },
-      date: { gte: dayStart, lte: dayEnd },
-    },
+    where: { employeeId, shiftType: { not: null }, date: { gte: dayStart, lte: dayEnd } },
   });
   if (existing) {
     return 'На эту дату у сотрудника уже назначена смена в записи выручки — нельзя также отметить табель';

@@ -4,7 +4,6 @@ import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api
 import { canMarkAttendance } from '@/lib/employee-types';
 import { isYearMonthClosed } from '@/lib/closed-month';
 import { validateNotFutureDate, validateEmployeePharmacyLink } from '@/lib/attendance-validation';
-import { SHIFT_TYPES } from '@/lib/shift-types';
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -104,8 +103,7 @@ export async function PUT(request: NextRequest) {
     const monthShifts = await prisma.dailyRevenueEntry.findMany({
       where: {
         employeeId: Number(employeeId),
-        // Продолжение суток дату не занимает — см. validateNoShiftOnDate.
-        shiftType: { not: null, notIn: [SHIFT_TYPES.full_day_cont] },
+        shiftType: { not: null },
         date: { gte: monthStart, lte: monthEnd },
       },
       select: { date: true },

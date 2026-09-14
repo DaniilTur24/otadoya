@@ -116,7 +116,7 @@ export async function PUT(
     return NextResponse.json({ error: `Некорректный статус: ${status}` }, { status: 400 });
   }
 
-  if (shiftType && !['day', 'full_day', 'full_day_cont', 'five_day'].includes(shiftType)) {
+  if (shiftType && !['day', 'full_day', 'five_day'].includes(shiftType)) {
     return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
   }
 

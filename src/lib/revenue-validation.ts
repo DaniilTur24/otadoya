@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/prisma';
 import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
-import { isShiftContinuation, SHIFT_TYPES } from '@/lib/shift-types';
 
 /**
  * Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не должны
@@ -38,9 +37,6 @@ export async function validateNoAttendanceOnDate(
   shiftType: string | null,
 ): Promise<string | null> {
   if (!employeeId || !shiftType) return null;
-  // Продолжение суток — это утро уже оплаченной смены, а не новая смена: сдав сутки, человек в
-  // тот же день может выйти на пятидневку, и отметка табеля на эту дату законна.
-  if (isShiftContinuation(shiftType)) return null;
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
   const existing = await prisma.attendanceShift.findFirst({
@@ -66,24 +62,16 @@ export async function validateUniqueShift(
   if (!employeeId || !shiftType) return null;
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
-  // Продолжение суток занимает дату наравне только с другим продолжением: оно не мешает обычной
-  // смене в тот же день (сдал сутки утром — вечером вышел на дневную), но два продолжения на одну
-  // дату у одного человека — это явно задвоенная запись.
-  const isContinuation = isShiftContinuation(shiftType);
   const existing = await prisma.dailyRevenueEntry.findFirst({
     where: {
       employeeId,
-      shiftType: isContinuation
-        ? SHIFT_TYPES.full_day_cont
-        : { not: null, notIn: [SHIFT_TYPES.full_day_cont] },
+      shiftType: { not: null },
       date: { gte: dayStart, lte: dayEnd },
       ...(excludeId ? { id: { not: excludeId } } : {}),
     },
   });
   if (existing) {
-    return isContinuation
-      ? 'У этого сотрудника уже отмечено продолжение суточной смены на эту дату'
-      : 'У этого сотрудника уже есть смена на эту дату — нельзя назначить вторую';
+    return 'У этого сотрудника уже есть смена на эту дату — нельзя назначить вторую';
   }
   return null;
 }
