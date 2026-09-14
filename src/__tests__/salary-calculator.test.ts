@@ -1467,3 +1467,60 @@ describe('getEmployeeMonthlyAdvances', () => {
     expect(where.entry.status).toBe('approved');
   });
 });
+
+// ─── продолжение суточной смены (full_day_cont) ──────────────────────────────
+
+describe('продолжение суточной смены', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockBonuses(0);
+    mockCalendar(null);
+  });
+
+  it('не задваивает оклад: сутки через полночь оплачиваются как одна смена', async () => {
+    mockShifts([
+      { shiftType: 'full_day', cashRevenue: 180000, terminalRevenue: 95000, kaspiRevenue: 40000 },
+      { shiftType: 'full_day_cont', cashRevenue: 60000, terminalRevenue: 30000, kaspiRevenue: 12000 },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2025);
+    expect(result!.fullDayShiftsCount).toBe(1);
+    expect(result!.salaryFromFullDayShifts).toBeCloseTo(150000 / 10, 5);
+  });
+
+  it('считает премию по выручке обоих дней с порогом на одну смену', async () => {
+    mockShifts([
+      { shiftType: 'full_day', cashRevenue: 180000, terminalRevenue: 95000, kaspiRevenue: 40000 },
+      { shiftType: 'full_day_cont', cashRevenue: 60000, terminalRevenue: 30000, kaspiRevenue: 12000 },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2025);
+    // Премия без kaspi: (180000+95000) + (60000+30000) = 365000, порог 300000 × 1 смена
+    expect(result!.totalRevenuePremium).toBeCloseTo((365000 - 300000) * 0.015, 5);
+  });
+
+  it('включает выручку второго дня в общую выручку сотрудника', async () => {
+    mockShifts([
+      { shiftType: 'full_day', cashRevenue: 180000, terminalRevenue: 95000, kaspiRevenue: 40000 },
+      { shiftType: 'full_day_cont', cashRevenue: 60000, terminalRevenue: 30000, kaspiRevenue: 12000 },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2025);
+    expect(result!.revenueTotal).toBe(315000 + 102000);
+  });
+
+  it('не даёт премию без порога, когда сама смена осталась в прошлом месяце', async () => {
+    // Сутки с 31 августа на 1 сентября: в сентябре есть только продолжение. Без защиты его
+    // выручка дала бы премию с порогом 0 — то есть 1.5% со всей суммы.
+    mockShifts([
+      { shiftType: 'full_day_cont', cashRevenue: 60000, terminalRevenue: 30000, kaspiRevenue: 12000 },
+    ]);
+
+    const result = await calculateEmployeeMonthlySalary(1, 9, 2025);
+    expect(result!.fullDayShiftsCount).toBe(0);
+    expect(result!.salaryFromFullDayShifts).toBe(0);
+    expect(result!.totalRevenuePremium).toBe(0);
+    // Сама выручка при этом никуда не пропадает — она есть в записи и в общей сумме.
+    expect(result!.revenueTotal).toBe(102000);
+  });
+});
