@@ -175,6 +175,9 @@ export default function RevenueListPage() {
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
   const [filterEmployee, setFilterEmployee] = useState('');
+  // '' — статус по умолчанию (для admin/bookkeeper это approved/rejected, pending скрыт —
+  // см. load(); чтобы явно посмотреть pending с фильтрами по аптеке/датам, нужно выбрать статус)
+  const [filterStatus, setFilterStatus] = useState('');
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
@@ -259,8 +262,14 @@ export default function RevenueListPage() {
     const [allRes, pendingRes] = await Promise.all([fetchAll, fetchPending]);
 
     let data: RevenueEntry[] = await allRes.json();
-    // Для admin/bookkeeper pending записи показываются только в панели модерации, не в основной таблице
-    if (isModeratorRole) data = data.filter((e) => e.status !== 'pending');
+    // Для admin/bookkeeper pending по умолчанию скрыт из основной таблицы (он уже виден в панели
+    // модерации выше) — но если бухгалтер явно выбрал статус в фильтре (например 'pending', чтобы
+    // сверить остаток по конкретной аптеке/периоду), показываем ровно этот статус.
+    if (filterStatus) {
+      data = data.filter((e) => e.status === filterStatus);
+    } else if (isModeratorRole) {
+      data = data.filter((e) => e.status !== 'pending');
+    }
 
     if (filterFrom) data = data.filter((e) => e.date >= filterFrom);
     if (filterTo)   data = data.filter((e) => e.date <= filterTo + 'T23:59:59');
@@ -274,7 +283,7 @@ export default function RevenueListPage() {
       setPendingEntries([]);
     }
     setLoading(false);
-  }, [filterPharmacy, filterFrom, filterTo]);
+  }, [filterPharmacy, filterFrom, filterTo, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1195,7 +1204,7 @@ export default function RevenueListPage() {
 
       {/* Фильтры */}
       <div className="card p-3 mb-4">
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
           <div>
             <label className="label">Дата с</label>
             <input type="date" className="input" value={filterFrom}
@@ -1228,8 +1237,18 @@ export default function RevenueListPage() {
             </select>
           </div>
           <div>
+            <label className="label">Статус</label>
+            <select className="input" value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}>
+              <option value="">Все</option>
+              <option value="pending">На проверке</option>
+              <option value="approved">Подтверждена</option>
+              <option value="rejected">Отклонена</option>
+            </select>
+          </div>
+          <div>
             <button className="btn-warning w-full" onClick={() => {
-              setFilterFrom(''); setFilterTo(''); setFilterPharmacy(''); setFilterEmployee('');
+              setFilterFrom(''); setFilterTo(''); setFilterPharmacy(''); setFilterEmployee(''); setFilterStatus('');
             }}>
               Сбросить
             </button>
