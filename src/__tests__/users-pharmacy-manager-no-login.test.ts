@@ -17,6 +17,7 @@ vi.mock('@/lib/prisma', () => ({
     employeePharmacy: { findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     dailyRevenueEntry: { count: vi.fn() },
     attendanceShift: { count: vi.fn() },
+    dailyExpenseItem: { count: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -32,6 +33,8 @@ const countRevenue = prisma.dailyRevenueEntry.count as unknown as ReturnType<typ
 const countAttendance = prisma.attendanceShift.count as unknown as ReturnType<typeof vi.fn>;
 const findManyEmployeePharmacy = prisma.employeePharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const deleteEmployee = prisma.employee.delete as unknown as ReturnType<typeof vi.fn>;
+const updateEmployee = prisma.employee.update as unknown as ReturnType<typeof vi.fn>;
+const countExpenseItems = prisma.dailyExpenseItem.count as unknown as ReturnType<typeof vi.fn>;
 const transaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 function makeGetRequest(): NextRequest {
@@ -188,6 +191,9 @@ describe('PUT/DELETE /api/users/[id] — менеджер без логина а
 
   it('DELETE удаляет Employee напрямую по -id, не трогая User', async () => {
     findFirstEmployee.mockResolvedValue({ id: 5, employeeType: 'pharmacy_manager' });
+    countRevenue.mockResolvedValue(0);
+    countAttendance.mockResolvedValue(0);
+    countExpenseItems.mockResolvedValue(0);
 
     const res = await DELETE(
       makeDeleteRequest('http://localhost/api/users/-5'),
@@ -196,5 +202,26 @@ describe('PUT/DELETE /api/users/[id] — менеджер без логина а
 
     expect(res.status).toBe(200);
     expect(deleteEmployee).toHaveBeenCalledWith({ where: { id: 5 } });
+  });
+
+  // Менеджер без логина — тоже Employee с табелем и авансами; жёсткое удаление стёрло бы их
+  // (QA раунд 4, №1), поэтому при истории — деактивация, как и для аккаунта с логином.
+  it('DELETE по -id деактивирует менеджера с табелем/авансами вместо удаления', async () => {
+    findFirstEmployee.mockResolvedValue({ id: 5, employeeType: 'pharmacy_manager' });
+    countRevenue.mockResolvedValue(0);
+    countAttendance.mockResolvedValue(0);
+    countExpenseItems.mockResolvedValue(1);
+    deleteEmployee.mockClear();
+    updateEmployee.mockResolvedValue({ id: 5, isActive: false });
+
+    const res = await DELETE(
+      makeDeleteRequest('http://localhost/api/users/-5'),
+      makeParams(-5)
+    ) as unknown as { status: number; body: { deactivated?: boolean } };
+
+    expect(res.status).toBe(200);
+    expect(res.body.deactivated).toBe(true);
+    expect(updateEmployee).toHaveBeenCalledWith({ where: { id: 5 }, data: { isActive: false } });
+    expect(deleteEmployee).not.toHaveBeenCalled();
   });
 });

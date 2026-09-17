@@ -80,6 +80,18 @@ export function canMarkAttendance(employee: { employeeType: string; fiveDayViaAt
   return FIVE_DAY_VIA_ATTENDANCE_TYPES.has(employee.employeeType) && Boolean(employee.fiveDayViaAttendance);
 }
 
+/**
+ * Типы, чей табельный оклад делится на норму рабочих дней месяца (baseSalary / workingDays ×
+ * отмеченные дни): manager_fixed, pharmacy_manager, office и продавец на пятидневке через табель.
+ * У них отметка сверх нормы — это переплата сверх оклада, а не «ещё одна смена по ставке»
+ * (cleaner, seller_five_day_fixed и manager_trading платятся фиксированной ставкой за смену и
+ * нормы не имеют — см. useFixedFiveDayRate в salary-calculator.ts).
+ */
+export function isCalendarProratedEmployee(employee: { employeeType: string; fiveDayViaAttendance?: boolean | null }): boolean {
+  if (['manager_fixed', 'pharmacy_manager', 'office'].includes(employee.employeeType)) return true;
+  return employee.employeeType === 'seller' && Boolean(employee.fiveDayViaAttendance);
+}
+
 // Типы, у которых есть фиксированная доплата и два независимых переключателя —
 // managerBonusShareEnabled (10%-доля от бонусов аптеки) и ladderPremiumEnabled
 // (лестничная премия по выручке аптеки), в любой комбинации

@@ -240,9 +240,14 @@ export default function UsersPage() {
     setSaving(false);
   }
 
+  // Сервер сам решает: без истории — удаляет, с табелем/сменами/авансами — деактивирует
+  // (аккаунт и карточку), чтобы не стереть табель и выданные деньги. Показываем, что он выбрал.
   async function deleteManager(id: number) {
-    if (!confirm('Удалить аккаунт? Записи выручки и табеля останутся.')) return;
-    await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    if (!confirm('Удалить аккаунт? Если у него уже есть табель, смены или авансы — он будет деактивирован, а не удалён.')) return;
+    const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) alert(d.error || 'Ошибка удаления');
+    else if (d.deactivated) alert(d.message);
     load();
   }
 
@@ -263,10 +268,16 @@ export default function UsersPage() {
 
   async function deleteSelected() {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Удалить ${selectedIds.size} выбранных аккаунтов? Записи выручки и табеля останутся.`)) return;
-    await Promise.all(
-      Array.from(selectedIds).map((id) => fetch(`/api/users/${id}`, { method: 'DELETE' }))
+    if (!confirm(`Удалить ${selectedIds.size} выбранных аккаунтов? Те, у кого уже есть табель, смены или авансы, будут деактивированы, а не удалены.`)) return;
+    const results = await Promise.all(
+      Array.from(selectedIds).map((id) =>
+        fetch(`/api/users/${id}`, { method: 'DELETE' }).then((r) => r.json().catch(() => ({})))
+      )
     );
+    const deactivatedCount = results.filter((d) => d?.deactivated).length;
+    if (deactivatedCount > 0) {
+      alert(`${deactivatedCount} из ${results.length} — деактивированы, а не удалены: у них есть табель, смены или авансы`);
+    }
     load();
   }
 
@@ -530,7 +541,7 @@ export default function UsersPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {managers.map((m) => (
-                <tr key={m.id} className="hover:bg-slate-50">
+                <tr key={m.id} className={m.isActive ? 'hover:bg-slate-50' : 'hover:bg-slate-50 text-slate-400'}>
                   <td className="td">
                     <input
                       type="checkbox"
@@ -539,7 +550,12 @@ export default function UsersPage() {
                       onChange={() => toggleSelect(m.id)}
                     />
                   </td>
-                  <td className="td font-medium">{m.displayName}</td>
+                  <td className="td font-medium">
+                    {m.displayName}
+                    {!m.isActive && (
+                      <span className="ml-2 text-xs font-normal px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">неактивен</span>
+                    )}
+                  </td>
                   <td className="td text-slate-500 font-mono text-sm">
                     {m.accountType === 'employee' ? <span className="text-slate-300">нет доступа</span> : m.username}
                   </td>

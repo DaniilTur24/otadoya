@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { MONTHLY_EXPENSE_KEYS, MONTHLY_REPORT_ROWS } from '@/lib/monthly-report-fields';
-import { calculateEmployeeMonthlySalary } from '@/lib/salary-calculator';
+import { calculateEmployeeMonthlySalary, hasMonthActivity } from '@/lib/salary-calculator';
 
 type Row = Record<string, number>;
 type SystemData = Record<number, Row>;
@@ -33,7 +33,9 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
     }),
     prisma.monthlyReportOverride.findMany({ where: { year, month } }),
     prisma.pharmacyPdfReport.findMany({ where: { year, month, status: 'confirmed' } }),
-    prisma.employee.findMany({ where: { isActive: true }, include: { pharmacies: true } }),
+    // Все сотрудники, не только активные: деактивированный после увольнения продавец должен
+    // остаться в расходах за месяц, в котором он ещё работал (фильтр — hasMonthActivity ниже).
+    prisma.employee.findMany({ include: { pharmacies: true } }),
   ]);
 
   const systemData: SystemData = {};
@@ -93,6 +95,7 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
         if (activePharmacyIds.length === 0) return;
         const result = await calculateEmployeeMonthlySalary(emp.id, month, year);
         if (!result) return;
+        if (!emp.isActive && !hasMonthActivity(result)) return;
         const contribution = (result.totalSalary + result.totalAdvances - result.totalBonuses) / activePharmacyIds.length;
         for (const pid of activePharmacyIds) {
           if (systemData[pid]) systemData[pid].officeSalary += contribution;
@@ -108,6 +111,7 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
         if (!systemData[pid]) continue;
         const result = await calculateEmployeeMonthlySalary(emp.id, month, year, pid);
         if (!result) continue;
+        if (!emp.isActive && !hasMonthActivity(result)) continue;
         const grossAccrued = result.totalSalary + result.totalAdvances - result.totalBonuses;
         // baseSalary и allowance не привязаны к конкретной аптеке (в отличие от сменной части,
         // лестничной премии и доли бонуса — calculateEmployeeMonthlySalary уже считает их только

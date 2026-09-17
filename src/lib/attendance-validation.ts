@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { isCalendarProratedEmployee } from '@/lib/employee-types';
 
 /**
  * Симметричная проверка к validateNoAttendanceOnDate (revenue-validation.ts): не даёт отметить
@@ -9,7 +10,7 @@ export async function validateNoShiftOnDate(employeeId: number, date: Date): Pro
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
   const existing = await prisma.dailyRevenueEntry.findFirst({
-    where: { employeeId, shiftType: { not: null }, date: { gte: dayStart, lte: dayEnd } },
+    where: { employeeId, shiftType: { not: null }, status: { not: 'rejected' }, date: { gte: dayStart, lte: dayEnd } },
   });
   if (existing) {
     return 'На эту дату у сотрудника уже назначена смена в записи выручки — нельзя также отметить табель';
@@ -43,6 +44,38 @@ export async function validateEmployeePharmacyLink(employeeId: number, pharmacyI
   });
   if (!link) {
     return 'Сотрудник не привязан к этой аптеке — отметить табель нельзя';
+  }
+  return null;
+}
+
+/**
+ * Табель сверх производственного календаря для типов с окладом «по норме» (см.
+ * isCalendarProratedEmployee): 28 отметок при норме 22 → 200 000 / 22 × 28 = 254 545 ₸, +27% к
+ * окладу. Раньше это только подсвечивалось в табеле жёлтым текстом и оставалось на совести того,
+ * кто заметит до закрытия месяца (QA раунд 3 №7 / раунд 4 №13). Теперь новая отметка сверх нормы
+ * не принимается: переработка фиксируется часами (overtimeHours), а не лишним днём оклада.
+ * Если календарь за месяц не заполнен — ограничения нет (это ловит calendarMissing при закрытии).
+ */
+export async function validateWithinWorkingCalendar(
+  employee: { id: number; employeeType: string; fiveDayViaAttendance?: boolean | null },
+  year: number,
+  month: number,
+  newMarksCount: number,
+): Promise<string | null> {
+  if (newMarksCount <= 0 || !isCalendarProratedEmployee(employee)) return null;
+  const calendar = await prisma.workingCalendar.findFirst({ where: { year, month }, select: { workingDays: true } });
+  if (!calendar) return null;
+  const existing = await prisma.attendanceShift.count({
+    where: {
+      employeeId: employee.id,
+      date: { gte: new Date(year, month - 1, 1), lte: new Date(year, month, 0, 23, 59, 59, 999) },
+    },
+  });
+  if (existing + newMarksCount > calendar.workingDays) {
+    return (
+      `Норма за месяц — ${calendar.workingDays} рабочих дн., уже отмечено ${existing}. ` +
+      `Отметить сверх нормы нельзя — оклад уже выплачен полностью; переработку укажите часами в отметке дня`
+    );
   }
   return null;
 }

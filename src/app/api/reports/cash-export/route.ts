@@ -16,10 +16,13 @@ export async function GET(request: NextRequest) {
 
   const where: Record<string, unknown> = {};
   if (pharmacyId) where.pharmacyId = Number(pharmacyId);
-  // Без явного статуса в фильтре — как и в основной таблице /revenue для admin/bookkeeper —
-  // pending не подмешивается в общий срез, чтобы экспорт совпадал с тем, что видно на экране.
-  if (status) where.status = status;
-  else where.status = { not: 'pending' };
+  // Отчёт по кассе — это сверка реальных наличных. В неё входят только подтверждённые и не
+  // исключённые из отчёта записи: раньше по умолчанию брались все, кроме pending, и отклонённые
+  // (устаревший статус) вместе с исключёнными дублями попадали в «ИТОГО ЗА ПЕРИОД» — сверка
+  // сходилась с несуществующими операциями (QA раунд 4, №3). Явный ?status= (например, pending,
+  // чтобы посмотреть, что ещё не проверено) по-прежнему уважается.
+  where.status = status || 'approved';
+  where.excludedFromReport = false;
   if (from || to) {
     const date: Record<string, Date> = {};
     if (from) date.gte = new Date(`${from}T00:00:00`);

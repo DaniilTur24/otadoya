@@ -83,6 +83,8 @@ interface SalaryResult {
   salaryFromFiveDayShifts: number;
   workingCalendarDays: number | null;
   shiftRateMissing: boolean;
+  ladderConfigMissing?: boolean;
+  ladderConfigMissingPharmacies?: string[];
   revenuePremiumDayShifts: number;
   revenuePremiumFullDayShifts: number;
   totalRevenuePremium: number;
@@ -727,9 +729,15 @@ export default function EmployeeDetailPage() {
                             : 'Премия по выручке аптеки'}
                         </span>
                         {salary.ladderPremiumEnabled ? (
-                          <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
-                            {fmt(salary.managerLadderPremium)} ₸
-                          </span>
+                          salary.ladderConfigMissing ? (
+                            <span className="font-medium text-right text-amber-600">
+                              {fmt(salary.managerLadderPremium)} ₸ — не заполнена лестница у: {(salary.ladderConfigMissingPharmacies ?? []).join(', ')}
+                            </span>
+                          ) : (
+                            <span className={`font-medium text-right ${salary.managerLadderPremium < 0 ? 'text-red-600' : ''}`}>
+                              {fmt(salary.managerLadderPremium)} ₸
+                            </span>
+                          )
                         ) : (
                           <span className="text-right text-slate-400">Выключено</span>
                         )}

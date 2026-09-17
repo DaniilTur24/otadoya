@@ -23,3 +23,13 @@ describe('validateNoShiftOnDate', () => {
     expect(error).toBe('На эту дату у сотрудника уже назначена смена в записи выручки — нельзя также отметить табель');
   });
 });
+
+describe('validateNoShiftOnDate — отклонённые записи не считаются сменой', () => {
+  it('ищет только не-rejected смены (устаревший статус не должен занимать день)', async () => {
+    const findFirst = prisma.dailyRevenueEntry.findFirst as ReturnType<typeof vi.fn>;
+    findFirst.mockResolvedValue(null);
+    await validateNoShiftOnDate(1, new Date('2026-06-15'));
+    const where = findFirst.mock.calls[findFirst.mock.calls.length - 1][0].where;
+    expect(where.status).toEqual({ not: 'rejected' });
+  });
+});

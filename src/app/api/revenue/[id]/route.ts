@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories } from '@/lib/revenue-validation';
 import { isMonthClosed } from '@/lib/closed-month';
 import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 
@@ -34,6 +35,16 @@ function serialize(entry: Record<string, unknown>) {
 }
 
 const PROTECTED_CATEGORIES = ['employeeAdvance', 'employeeSurcharge'];
+
+// Перенос записи на дату/сотрудника, у которого там уже есть смена: validateUniqueShift — это
+// findFirst без блокировки, последнее слово за частичным уникальным индексом в БД
+// (миграция 20260917120000_unique_revenue_shift_per_employee_day).
+function isDuplicateShift(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
+function duplicateShiftResponse() {
+  return NextResponse.json({ error: 'У этого сотрудника уже есть смена на эту дату — нельзя назначить вторую' }, { status: 409 });
+}
 
 export async function DELETE(
   request: NextRequest,
@@ -111,14 +122,16 @@ export async function PUT(
     bookkeeperComment, status, excludedFromReport,
   } = body;
 
-  const VALID_STATUSES = ['pending', 'approved', 'rejected'];
+  // 'rejected' больше не выставляется нигде: отклонённая запись «прощала» аванс, выданный из
+  // неё наличными (computeAdvances считает только approved), и запирала день для заведующей
+  // (validateUniqueShift). Неверную запись бухгалтер правит или удаляет (QA раунд 4, №2/№9).
+  const VALID_STATUSES = ['pending', 'approved'];
   if (status && !VALID_STATUSES.includes(status)) {
     return NextResponse.json({ error: `Некорректный статус: ${status}` }, { status: 400 });
   }
 
-  if (shiftType && !['day', 'full_day', 'five_day'].includes(shiftType)) {
-    return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
-  }
+  const shiftTypeError = validateShiftTypeValue(shiftType);
+  if (shiftTypeError) return NextResponse.json({ error: shiftTypeError }, { status: 400 });
 
   // Дата могла измениться — нужно проверить закрытость и НОВОГО месяца, а не только старого,
   // иначе запись из открытого месяца можно перенести датой в уже закрытый и она начнёт незаметно
@@ -173,12 +186,24 @@ export async function PUT(
   // только по approved-записям). excludedFromReport по той же причине — тоже решение бухгалтера.
   const requestRole = getRequestRole(request);
   const canSetReviewFields = requestRole === 'admin' || requestRole === 'bookkeeper';
-  if (status && canSetReviewFields) data.status = status;
+  if (status && canSetReviewFields) {
+    data.status = status;
+    // Подтверждение через редактирование — тот же журнал, что и у /approve: раньше здесь
+    // approvedAt/approvedById не писались, и подтверждённые записи оставались без «кто/когда».
+    if (status === 'approved' && existing.status !== 'approved') {
+      data.approvedAt = new Date();
+      const approvedById = getRequestUserId(request);
+      if (approvedById) data.approvedById = approvedById;
+    }
+  }
   if (excludedFromReport !== undefined && canSetReviewFields) data.excludedFromReport = excludedFromReport;
 
   // Если переданы строки расходов — пересохраняем их и пересчитываем сумму
   if (Array.isArray(expenseItems)) {
     const filled = expenseItems.filter((i: { amount: string }) => parseFloat(i.amount) > 0);
+
+    const categoryError = validateExpenseItemCategories(filled);
+    if (categoryError) return NextResponse.json({ error: categoryError }, { status: 400 });
 
     // Авансы и доплаты привязываются к конкретному сотруднику — проверяем, что он работает в этой аптеке
     const targetPharmacyId = pharmacyId != null ? Number(pharmacyId) : existing.pharmacyId;
@@ -208,7 +233,9 @@ export async function PUT(
             .join('; ')
         : null;
 
-    const entry = await prisma.$transaction(async (tx) => {
+    let entry;
+    try {
+      entry = await prisma.$transaction(async (tx) => {
       await tx.dailyExpenseItem.deleteMany({ where: { entryId: id } });
 
       if (filled.length > 0) {
@@ -228,17 +255,25 @@ export async function PUT(
         data,
         include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
       });
-    });
+      });
+    } catch (err) {
+      if (isDuplicateShift(err)) return duplicateShiftResponse();
+      throw err;
+    }
 
     return NextResponse.json(serialize(entry as unknown as Record<string, unknown>));
   }
 
   // Если строки расходов не переданы — обновляем только скалярные поля
-  const entry = await prisma.dailyRevenueEntry.update({
-    where: { id },
-    data,
-    include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
-  });
-
-  return NextResponse.json(serialize(entry as unknown as Record<string, unknown>));
+  try {
+    const entry = await prisma.dailyRevenueEntry.update({
+      where: { id },
+      data,
+      include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
+    });
+    return NextResponse.json(serialize(entry as unknown as Record<string, unknown>));
+  } catch (err) {
+    if (isDuplicateShift(err)) return duplicateShiftResponse();
+    throw err;
+  }
 }

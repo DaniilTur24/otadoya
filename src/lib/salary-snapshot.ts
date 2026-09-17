@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { calculateEmployeeMonthlySalary, type MonthlySalaryResult } from '@/lib/salary-calculator';
+import { calculateEmployeeMonthlySalary, hasMonthActivity, type MonthlySalaryResult } from '@/lib/salary-calculator';
 
 /**
  * Зарплата нигде не хранится — она пересчитывается из ТЕКУЩИХ настроек (оклад, рабочий
@@ -43,15 +43,18 @@ const SNAPSHOT_VERSION = 2;
  */
 export async function buildEmployeeSalarySnapshot(year: number, month: number): Promise<StoredSalary[]> {
   const employees = await prisma.employee.findMany({
-    where: { isActive: true },
-    select: { id: true, pharmacies: { select: { pharmacyId: true } } },
+    select: { id: true, isActive: true, pharmacies: { select: { pharmacyId: true } } },
     orderBy: { id: 'asc' },
   });
 
   const stored: StoredSalary[] = [];
   for (const emp of employees) {
     const overall = await calculateEmployeeMonthlySalary(emp.id, month, year);
-    if (overall) stored.push({ ...overall, pharmacyId: null });
+    if (!overall) continue;
+    // Деактивированные — только с операциями в этом месяце: их карточка за него тоже должна
+    // замереть, а без операций им нечего фиксировать.
+    if (!emp.isActive && !hasMonthActivity(overall)) continue;
+    stored.push({ ...overall, pharmacyId: null });
 
     for (const { pharmacyId } of emp.pharmacies) {
       const scoped = await calculateEmployeeMonthlySalary(emp.id, month, year, pharmacyId);

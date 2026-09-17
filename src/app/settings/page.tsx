@@ -41,10 +41,15 @@ export default function SettingsPage() {
     load();
   }
 
+  // Сервер сам решает: без истории — удаляет, с выручкой/табелем/расходами/сотрудниками —
+  // деактивирует, чтобы ничего не стереть. Показываем, что он выбрал.
   async function remove(id: number, name: string) {
-    if (!confirm(`Удалить аптеку «${name}»?\n\nВсе связанные данные (выручка, расходы) также будут удалены.`)) return;
-    await fetch(`/api/pharmacies/${id}`, { method: 'DELETE' });
-    setPharmacies((ps) => ps.filter((p) => p.id !== id));
+    if (!confirm(`Удалить аптеку «${name}»?\n\nЕсли у неё уже есть выручка, табель, расходы или сотрудники — она будет деактивирована, а не удалена.`)) return;
+    const res = await fetch(`/api/pharmacies/${id}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(d.error || 'Ошибка удаления'); return; }
+    if (d.deactivated) alert(d.message);
+    load();
   }
 
   function toggleSelect(id: number) {
@@ -64,12 +69,18 @@ export default function SettingsPage() {
 
   async function removeSelected() {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Удалить ${selectedIds.size} выбранных аптек?\n\nВсе связанные данные (выручка, расходы) также будут удалены.`)) return;
-    await Promise.all(
-      Array.from(selectedIds).map((id) => fetch(`/api/pharmacies/${id}`, { method: 'DELETE' }))
+    if (!confirm(`Удалить ${selectedIds.size} выбранных аптек?\n\nТе, у кого уже есть выручка, табель, расходы или сотрудники, будут деактивированы, а не удалены.`)) return;
+    const results = await Promise.all(
+      Array.from(selectedIds).map((id) =>
+        fetch(`/api/pharmacies/${id}`, { method: 'DELETE' }).then((r) => r.json().catch(() => ({})))
+      )
     );
-    setPharmacies((ps) => ps.filter((p) => !selectedIds.has(p.id)));
+    const deactivatedCount = results.filter((d) => d?.deactivated).length;
+    if (deactivatedCount > 0) {
+      alert(`${deactivatedCount} из ${results.length} — деактивированы, а не удалены: у них есть история`);
+    }
     setSelectedIds(new Set());
+    load();
   }
 
   return (

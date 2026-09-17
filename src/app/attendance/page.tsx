@@ -351,7 +351,12 @@ export default function AttendancePage() {
     setBusy(true);
     setError('');
     try {
-      const current = new Set(markedDays(emp.id));
+      // Сервер реконсилирует только отметки аптеки этой строки — отправляем ровно их, иначе дни,
+      // отмеченные в другой аптеке, ушли бы как «новые» и упёрлись бы в конфликт (см. bulk/route.ts).
+      const rowPharmacy = pharmacyForRow(emp);
+      const current = new Set(
+        markedDays(emp.id).filter((d) => (recordMap.get(`${emp.id}-${d}`)?.pharmacyId ?? null) === rowPharmacy)
+      );
       if (mark) rangeDays.forEach((d) => current.add(d));
       else rangeDays.forEach((d) => current.delete(d));
 
@@ -360,7 +365,7 @@ export default function AttendancePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           employeeId: emp.id,
-          pharmacyId: pharmacyForRow(emp),
+          pharmacyId: rowPharmacy,
           year, month,
           dates: [...current].map((d) => dateStr(year, month, d)),
         }),

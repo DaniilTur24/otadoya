@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
 import { canMarkAttendance } from '@/lib/employee-types';
 import { isYearMonthClosed } from '@/lib/closed-month';
-import { validateNotFutureDate, validateEmployeePharmacyLink } from '@/lib/attendance-validation';
+import { validateNotFutureDate, validateEmployeePharmacyLink, validateWithinWorkingCalendar } from '@/lib/attendance-validation';
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -75,20 +75,36 @@ export async function PUT(request: NextRequest) {
   const desired = new Set(dates as string[]);
   const pid = pharmacyId ? Number(pharmacyId) : null;
 
-  const existing = await prisma.attendanceShift.findMany({
+  // Реконсиляция — только в рамках аптеки этой строки табеля (pid). Раньше сверялся весь месяц
+  // сотрудника целиком: заведующая видит отметки только своих аптек, поэтому её «полный список»
+  // не содержал отметок, поставленных в другой аптеке, и сервер их удалял; а у админа отметки
+  // другой аптеки молча переназначались на pid через upsert. Сотрудник, работающий в двух
+  // аптеках (уборщица), терял смены без следа (QA раунд 4, №4). Теперь: отметки других аптек
+  // не трогаем, а дату, уже занятую в другой аптеке, не переназначаем, а сообщаем.
+  const allExisting = await prisma.attendanceShift.findMany({
     where: { employeeId: Number(employeeId), date: { gte: monthStart, lte: monthEnd } },
+    include: { pharmacy: { select: { name: true } } },
   });
+  const existing = allExisting.filter((s) => s.pharmacyId === pid);
   const existingByKey = new Map(existing.map((s) => [dateKey(s.date), s]));
+  const otherPharmacyByKey = new Map(allExisting.filter((s) => s.pharmacyId !== pid).map((s) => [dateKey(s.date), s]));
 
   const toDeleteIds = existing.filter((s) => !desired.has(dateKey(s.date))).map((s) => s.id);
-  const toUpsert = [...desired].filter((d) => {
-    const current = existingByKey.get(d);
-    return !current || current.pharmacyId !== pid;
-  });
+  const toCreate = [...desired].filter((d) => !existingByKey.has(d));
+
+  const conflict = toCreate.find((d) => otherPharmacyByKey.has(d));
+  if (conflict) {
+    const other = otherPharmacyByKey.get(conflict)!;
+    const where = other.pharmacy?.name ? `в аптеке «${other.pharmacy.name}»` : 'без аптеки (офис)';
+    return NextResponse.json(
+      { error: `На дату ${conflict} у сотрудника уже есть отметка табеля ${where} — сначала снимите её там` },
+      { status: 409 }
+    );
+  }
 
   // seller_five_day_fixed может получать и смену в выручке, и отметку табеля, но не обе на одну
   // дату — проверяем только реально новые даты табеля (уже существующие переотмечать не мешает).
-  const newDates = new Set([...desired].filter((d) => !existingByKey.has(d)));
+  const newDates = new Set(toCreate);
 
   // Запрет будущих дат — только для реально новых отметок (снять уже существующую отметку или
   // переназначить её аптеку можно в любом случае, это не создаёт новый табель наперёд).
@@ -104,6 +120,7 @@ export async function PUT(request: NextRequest) {
       where: {
         employeeId: Number(employeeId),
         shiftType: { not: null },
+        status: { not: 'rejected' },
         date: { gte: monthStart, lte: monthEnd },
       },
       select: { date: true },
@@ -117,15 +134,22 @@ export async function PUT(request: NextRequest) {
     }
   }
 
+  // Норма считается после снятия: снял 3 дня и отметил 3 других — итог тот же, нарушения нет.
+  const netNewMarks = newDates.size - toDeleteIds.length;
+  const overCalendarError = await validateWithinWorkingCalendar(employee, Number(year), Number(month), netNewMarks);
+  if (overCalendarError) {
+    return NextResponse.json({ error: overCalendarError }, { status: 409 });
+  }
+
   await prisma.$transaction([
     ...(toDeleteIds.length > 0 ? [prisma.attendanceShift.deleteMany({ where: { id: { in: toDeleteIds } } })] : []),
-    ...toUpsert.map((d) =>
-      prisma.attendanceShift.upsert({
-        where: { employeeId_date: { employeeId: Number(employeeId), date: new Date(d) } },
-        update: { pharmacyId: pid },
-        create: { employeeId: Number(employeeId), date: new Date(d), pharmacyId: pid },
-      })
-    ),
+    ...(toCreate.length > 0
+      ? [
+          prisma.attendanceShift.createMany({
+            data: toCreate.map((d) => ({ employeeId: Number(employeeId), date: new Date(d), pharmacyId: pid })),
+          }),
+        ]
+      : []),
   ]);
 
   const shifts = await prisma.attendanceShift.findMany({

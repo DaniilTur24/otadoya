@@ -12,7 +12,7 @@ vi.mock('next/server', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    employee: { findUnique: vi.fn() },
+    employee: { findUnique: vi.fn(), findMany: vi.fn() },
     employeePharmacy: { findMany: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
@@ -28,6 +28,7 @@ vi.mock('@/lib/revenue-delete-impact', () => ({
   computeRevenueDeleteImpact: vi.fn(),
 }));
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 import { POST } from '@/app/api/revenue/route';
@@ -484,5 +485,204 @@ describe('DELETE /api/revenue/[id] — защита авансов/доплат 
     const res = await DELETE(makeDeleteRequest('http://localhost/api/revenue/1'), makeParams(1)) as unknown as { status: number };
 
     expect(res.status).toBe(200);
+  });
+});
+
+// QA раунд 4, №2/№9: статус 'rejected' больше не выставляется — отклонённая запись «прощала»
+// выданный из неё аванс и запирала день для заведующей. Неверную запись правят или удаляют.
+describe('PUT /api/revenue/[id] — статус rejected больше недоступен', () => {
+  const makeParams = (id = 1) => ({ params: Promise.resolve({ id: String(id) }) });
+  it('отвечает 400 на status: rejected даже от бухгалтера', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'pending', submittedById: 5, date: new Date('2026-06-26'),
+    });
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { status: 'rejected' }, { role: 'bookkeeper' }),
+      makeParams(1)
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Некорректный статус/);
+    expect(updateRevenueEntry).not.toHaveBeenCalled();
+  });
+});
+
+// QA раунд 4, №7: validateUniqueShift — findFirst без блокировки, два одновременных POST её
+// проходят оба. Последнее слово за частичным уникальным индексом в БД — второй insert падает
+// с P2002, и это должно быть 409 «уже есть смена», а не 500 и не вторая оплачиваемая смена.
+describe('POST/PUT /api/revenue — гонка на дубль смены (P2002 из БД)', () => {
+  const makeParams = (id = 1) => ({ params: Promise.resolve({ id: String(id) }) });
+  function p2002() {
+    const err = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: 'test',
+    });
+    return err;
+  }
+
+  it('POST: P2002 при создании → 409 с понятным текстом', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller', fiveDayViaAttendance: false });
+    transaction.mockImplementation(async () => { throw p2002(); });
+
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', { ...baseBody, employeeId: 7, shiftType: 'day' })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/уже есть смена на эту дату/);
+  });
+
+  it('PUT (без строк расходов): P2002 при переносе на занятую дату → 409', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'), employeeId: 7, shiftType: 'day',
+    });
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller', fiveDayViaAttendance: false });
+    updateRevenueEntry.mockRejectedValue(p2002());
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { date: '2026-06-27' }),
+      makeParams(1)
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/уже есть смена на эту дату/);
+  });
+
+  it('PUT (со строками расходов): P2002 внутри транзакции → 409', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'), employeeId: 7, shiftType: 'day',
+    });
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller', fiveDayViaAttendance: false });
+    transaction.mockImplementation(async () => { throw p2002(); });
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { date: '2026-06-27', expenseItems: [] }),
+      makeParams(1)
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(409);
+  });
+
+  it('другие ошибки БД не маскируются под 409', async () => {
+    findUniqueEmployee.mockResolvedValue({ employeeType: 'seller', fiveDayViaAttendance: false });
+    transaction.mockImplementation(async () => { throw new Error('connection lost'); });
+
+    await expect(
+      POST(makeRequest('POST', 'http://localhost/api/revenue', { ...baseBody, employeeId: 7, shiftType: 'day' }))
+    ).rejects.toThrow('connection lost');
+  });
+});
+
+// QA раунд 4, №12/№17: сервер принимал любую категорию строки расхода (в т.ч. 'retailRevenue' —
+// прибавлялась к выручке аптеки в отчёте) и устаревший shiftType 'five_day' (не оплачивается,
+// но занимал день). Теперь — только то, что предлагает форма.
+describe('POST/PUT /api/revenue — валидация категории строки расхода и типа смены', () => {
+  const makeParams = (id = 1) => ({ params: Promise.resolve({ id: String(id) }) });
+
+  it('POST: 400 на категорию retailRevenue', async () => {
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', {
+        ...baseBody,
+        expenseItems: [{ amount: '500000', category: 'retailRevenue', comment: '' }],
+      })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Недопустимая статья расхода/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it.each(['repairs', 'pharmaBonus', 'terminalRent', 'employeeAdvance'])('POST: категория %s допустима', async (category) => {
+    (prisma.employee.findMany as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 5, employeeType: 'seller' }]);
+    findManyEmployeePharmacy.mockResolvedValue([{ employeeId: 5 }]);
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', {
+        ...baseBody,
+        expenseItems: [{ amount: '1000', category, comment: '', employeeId: 5 }],
+      })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
+  });
+
+  it('POST: пустая категория допустима (уходит в «Прочие расходы»)', async () => {
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', {
+        ...baseBody,
+        expenseItems: [{ amount: '1000', category: '', comment: 'такси' }],
+      })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
+  });
+
+  it('POST: 400 на shiftType five_day', async () => {
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', { ...baseBody, employeeId: 7, shiftType: 'five_day' })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Недопустимый тип смены/);
+  });
+
+  it('PUT: 400 на недопустимую категорию', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', {
+        expenseItems: [{ amount: '100', category: 'coefficient', comment: '' }],
+      }),
+      makeParams(1)
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(400);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('PUT: 400 на shiftType five_day', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+
+    const res = await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { shiftType: 'five_day' }),
+      makeParams(1)
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(400);
+  });
+
+  // QA раунд 4, №16: подтверждение через редактирование должно оставлять тот же след, что /approve.
+  it('PUT: бухгалтер ставит status approved → пишутся approvedAt/approvedById', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'pending', submittedById: 5, date: new Date('2026-06-26'),
+    });
+
+    await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { status: 'approved' }, { role: 'bookkeeper', userId: 9 }),
+      makeParams(1)
+    );
+
+    const data = updateRevenueEntry.mock.calls[updateRevenueEntry.mock.calls.length - 1][0].data;
+    expect(data.status).toBe('approved');
+    expect(data.approvedAt).toBeInstanceOf(Date);
+    expect(data.approvedById).toBe(9);
+  });
+
+  it('PUT: повторное approved у уже подтверждённой записи не перезаписывает approvedAt', async () => {
+    findUniqueRevenueEntry.mockResolvedValue({
+      id: 1, pharmacyId: 1, status: 'approved', submittedById: null, date: new Date('2026-06-26'),
+    });
+
+    await PUT(
+      makeRequest('PUT', 'http://localhost/api/revenue/1', { status: 'approved', cashRevenue: 1 }, { role: 'bookkeeper', userId: 9 }),
+      makeParams(1)
+    );
+
+    const data = updateRevenueEntry.mock.calls[updateRevenueEntry.mock.calls.length - 1][0].data;
+    expect(data.approvedAt).toBeUndefined();
   });
 });

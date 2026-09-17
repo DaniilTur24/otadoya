@@ -669,6 +669,39 @@ describe('calculateAllEmployeesSalaries', () => {
     expect(result[0].employeeName).toBe('Работник');
   });
 
+  // QA раунд 4, №11: деактивированный сотрудник — только с операциями в месяце; неактивный
+  // заведующий без операций больше не попадает по признаку «manager-like».
+  it('includes a deactivated seller who still had shifts this month', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 3, name: 'Уволенный', baseSalary: 120000, isActive: false },
+    ]);
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 3, name: 'Уволенный', baseSalary: 120000, pharmacies: [] });
+    vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { shiftType: 'day', cashRevenue: 5000, terminalRevenue: 0, kaspiRevenue: 0 },
+    ]);
+    vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({ _sum: { amount: 0 } });
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const result = await calculateAllEmployeesSalaries(1, 2025);
+    expect(result.map((r) => r.employeeName)).toEqual(['Уволенный']);
+  });
+
+  it('excludes a deactivated manager_trading with no activity even though managers are normally always included', async () => {
+    vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 4, name: 'Бывшая заведующая', baseSalary: 200000, isActive: false },
+    ]);
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 4, name: 'Бывшая заведующая', baseSalary: 200000, employeeType: 'manager_trading', pharmacies: [], allowance: 30000,
+    });
+    vi.mocked(prisma.dailyRevenueEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({ _sum: { amount: 0 } });
+    vi.mocked(prisma.workingCalendar.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+    const result = await calculateAllEmployeesSalaries(1, 2025);
+    expect(result).toHaveLength(0);
+  });
+
   it('includes a fiveDayViaAttendance seller even with zero revenue entries this month', async () => {
     vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: 6, name: 'Продавец на пятидневке', baseSalary: 150000, isActive: true },

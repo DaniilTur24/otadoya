@@ -15,9 +15,10 @@ vi.mock('@/lib/prisma', () => ({
     employee: { findUnique: vi.fn() },
     employeePharmacy: { findFirst: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
-    attendanceShift: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
+    attendanceShift: { findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn(), count: vi.fn() },
     user: { findUnique: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
+    workingCalendar: { findFirst: vi.fn() },
     dailyRevenueEntry: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -29,6 +30,8 @@ import { PUT } from '@/app/api/attendance/bulk/route';
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findFirstEmployeePharmacy = prisma.employeePharmacy.findFirst as unknown as ReturnType<typeof vi.fn>;
 const findManyShifts = prisma.attendanceShift.findMany as unknown as ReturnType<typeof vi.fn>;
+const createManyShifts = prisma.attendanceShift.createMany as unknown as ReturnType<typeof vi.fn>;
+const deleteManyShifts = prisma.attendanceShift.deleteMany as unknown as ReturnType<typeof vi.fn>;
 const findManyUserPharmacy = prisma.userPharmacy.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueUser = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -53,6 +56,10 @@ beforeEach(() => {
   // проверяют другое поведение, а не эту проверку конкретно (см. отдельный describe ниже).
   findFirstEmployeePharmacy.mockReset().mockResolvedValue({ employeeId: 28, pharmacyId: 2 });
   findManyShifts.mockReset().mockResolvedValue([]);
+  (prisma.workingCalendar.findFirst as unknown as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(null);
+  (prisma.attendanceShift.count as unknown as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(0);
+  createManyShifts.mockReset().mockImplementation((args: unknown) => ({ op: 'createMany', args }));
+  deleteManyShifts.mockReset().mockImplementation((args: unknown) => ({ op: 'deleteMany', args }));
   findManyUserPharmacy.mockReset().mockResolvedValue([]);
   findUniqueUser.mockReset().mockResolvedValue({ isActive: true });
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
@@ -112,8 +119,11 @@ describe('PUT /api/attendance/bulk', () => {
 
     expect(transaction).toHaveBeenCalledTimes(1);
     const ops = transaction.mock.calls[0][0];
-    // удалить id=2 (06-06 снята) + создать/обновить 06-05 (тот же pharmacyId — пропускается) и 06-07 (новая)
-    expect(ops.length).toBeGreaterThanOrEqual(2);
+    // удалить id=2 (06-06 снята) + создать 06-07 (новая); 06-05 уже есть в этой аптеке — не трогается
+    expect(ops).toEqual([
+      { op: 'deleteMany', args: { where: { id: { in: [2] } } } },
+      { op: 'createMany', args: { data: [{ employeeId: 28, date: new Date('2026-06-07'), pharmacyId: 2 }] } },
+    ]);
   });
 
   it('заведующий без доступа к аптеке получает 403', async () => {
@@ -211,6 +221,123 @@ describe('PUT /api/attendance/bulk — конфликт с сменой в за�
       makeRequest({ employeeId: 30, year: 2026, month: 6, dates: ['2026-06-12'] })
     ) as unknown as { status: number };
 
+    expect(res.status).toBe(200);
+  });
+});
+
+// Раньше реконсилировался весь месяц сотрудника: заведующая видит только отметки своих аптек,
+// её «полный список» не содержал чужих отметок — и сервер их удалял; у админа чужие отметки
+// молча переназначались на аптеку строки через upsert. Уборщица на двух аптеках теряла смены
+// без следа (QA раунд 4, №4). Теперь чужие отметки не трогаются, а конфликт по дате — ошибка.
+describe('PUT /api/attendance/bulk — отметки других аптек неприкосновенны', () => {
+  const otherPharmacyMarks = [
+    { id: 11, date: new Date('2026-06-01'), pharmacyId: 3, pharmacy: { name: 'Северная' } },
+    { id: 12, date: new Date('2026-06-02'), pharmacyId: 3, pharmacy: { name: 'Северная' } },
+  ];
+
+  it('не удаляет отметки другой аптеки, которых нет в присланном списке', async () => {
+    findManyShifts.mockResolvedValue([
+      ...otherPharmacyMarks,
+      { id: 21, date: new Date('2026-06-15'), pharmacyId: 2, pharmacy: { name: 'Центральная' } },
+    ]);
+
+    // Заведующая «Центральной» (аптека 2) видит только свои отметки и шлёт только их + новую дату
+    findManyUserPharmacy.mockResolvedValue([{ pharmacyId: 2 }]);
+    const res = await PUT(
+      makeRequest(
+        { employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-16'] },
+        { role: 'manager', userId: 5 }
+      )
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    const ops = transaction.mock.calls[transaction.mock.calls.length - 1][0];
+    // снимается только 06-15 (своя аптека, не в списке); 06-01/06-02 «Северной» остаются
+    expect(ops).toEqual([
+      { op: 'deleteMany', args: { where: { id: { in: [21] } } } },
+      { op: 'createMany', args: { data: [{ employeeId: 28, date: new Date('2026-06-16'), pharmacyId: 2 }] } },
+    ]);
+  });
+
+  it('не переназначает отметку другой аптеки на свою — отвечает 409 с названием аптеки', async () => {
+    findManyShifts.mockResolvedValue(otherPharmacyMarks);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-01', '2026-06-16'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/2026-06-01/);
+    expect(res.body.error).toMatch(/Северная/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('офисная отметка без аптеки (pharmacyId: null) тоже считается чужой для строки с аптекой', async () => {
+    findManyShifts.mockResolvedValue([{ id: 31, date: new Date('2026-06-03'), pharmacyId: null, pharmacy: null }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-03'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/без аптеки/);
+  });
+
+  it('снятие диапазона у своей аптеки не задевает отметки соседней', async () => {
+    findManyShifts.mockResolvedValue([
+      ...otherPharmacyMarks,
+      { id: 21, date: new Date('2026-06-15'), pharmacyId: 2, pharmacy: { name: 'Центральная' } },
+      { id: 22, date: new Date('2026-06-16'), pharmacyId: 2, pharmacy: { name: 'Центральная' } },
+    ]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: [] })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    const ops = transaction.mock.calls[transaction.mock.calls.length - 1][0];
+    expect(ops).toEqual([{ op: 'deleteMany', args: { where: { id: { in: [21, 22] } } } }]);
+  });
+});
+
+describe('PUT /api/attendance/bulk — норма производственного календаря', () => {
+  const calendar = prisma.workingCalendar.findFirst as unknown as ReturnType<typeof vi.fn>;
+  const countShifts = prisma.attendanceShift.count as unknown as ReturnType<typeof vi.fn>;
+
+  it('409, если новые отметки выводят за норму', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'manager_fixed' });
+    calendar.mockResolvedValue({ workingDays: 22 });
+    countShifts.mockResolvedValue(20);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-01', '2026-06-02', '2026-06-03'] })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/Норма за месяц/);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('снятие и добавление в одном запросе считается по итогу: 22 отмечено, −1 +1 → ок', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'manager_fixed' });
+    calendar.mockResolvedValue({ workingDays: 22 });
+    countShifts.mockResolvedValue(22);
+    findManyShifts.mockResolvedValue([{ id: 1, date: new Date('2026-06-05'), pharmacyId: 2, pharmacy: { name: 'A' } }]);
+
+    const res = await PUT(
+      makeRequest({ employeeId: 28, pharmacyId: 2, year: 2026, month: 6, dates: ['2026-06-06'] })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+  });
+
+  it('только снятие отметок нормой не ограничивается', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'office' });
+    calendar.mockResolvedValue({ workingDays: 20 });
+    countShifts.mockResolvedValue(28);
+    findManyShifts.mockResolvedValue([{ id: 1, date: new Date('2026-06-05'), pharmacyId: null, pharmacy: null }]);
+
+    const res = await PUT(makeRequest({ employeeId: 28, year: 2026, month: 6, dates: [] })) as unknown as { status: number };
     expect(res.status).toBe(200);
   });
 });

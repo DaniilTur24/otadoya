@@ -64,6 +64,35 @@ export async function DELETE(
   if (auth) return auth;
 
   const id = Number((await params).id);
+  const existing = await prisma.pharmacy.findUnique({ where: { id }, select: { id: true } });
+  if (!existing) return NextResponse.json({ error: 'Не найдено' }, { status: 404 });
+
+  // Раньше удаление шло без проверок: при записях выручки падало необработанным исключением
+  // (связь без onDelete → Restrict), а PDF-отчёты, ручные правки отчёта, привязки сотрудников
+  // и заведующих, табель и строки импорта каскадом стирались молча (QA раунд 4, №18).
+  // Если у аптеки есть любая история — деактивируем, как сотрудников и заведующих.
+  const [revenue, attendance, expenses, imported, pdf, overrides, employeeLinks, userLinks, files] = await Promise.all([
+    prisma.dailyRevenueEntry.count({ where: { pharmacyId: id } }),
+    prisma.attendanceShift.count({ where: { pharmacyId: id } }),
+    prisma.extractedExpenseEntry.count({ where: { pharmacyId: id } }),
+    prisma.importedReportValue.count({ where: { pharmacyId: id } }),
+    prisma.pharmacyPdfReport.count({ where: { pharmacyId: id } }),
+    prisma.monthlyReportOverride.count({ where: { pharmacyId: id } }),
+    prisma.employeePharmacy.count({ where: { pharmacyId: id } }),
+    prisma.userPharmacy.count({ where: { pharmacyId: id } }),
+    prisma.uploadedFile.count({ where: { pharmacyId: id } }),
+  ]);
+  const historyCount = revenue + attendance + expenses + imported + pdf + overrides + employeeLinks + userLinks + files;
+
+  if (historyCount > 0) {
+    await prisma.pharmacy.update({ where: { id }, data: { isActive: false } });
+    return NextResponse.json({
+      ok: true,
+      deactivated: true,
+      message: 'У аптеки есть записи выручки, табель, расходы или привязанные сотрудники — она деактивирована, а не удалена, чтобы не стереть историю',
+    });
+  }
+
   await prisma.pharmacy.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

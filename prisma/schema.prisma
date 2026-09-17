@@ -181,6 +181,10 @@ model DailyRevenueEntry {
 
   @@index([employeeId])
   @@index([submittedById])
+  // Плюс частичный UNIQUE (employee_id, date) WHERE shift_type IS NOT NULL AND status <> 'rejected' —
+  // объявлен только в миграции 20260917120000_unique_revenue_shift_per_employee_day (Prisma не
+  // поддерживает partial unique в схеме). Не удалять при `migrate dev`/`db push` — это защита от
+  // двойной оплаты смены при одновременных запросах.
   @@map("daily_revenue_entries")
 }
 

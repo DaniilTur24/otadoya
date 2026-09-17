@@ -145,7 +145,17 @@ const STATUS_CLASSES: Record<string, string> = {
   rejected: 'bg-red-100 text-red-800',
 };
 
-function summarizeEntries(list: RevenueEntry[]) {
+// Итоги и «наличными на руках» — только по подтверждённым и не исключённым записям.
+// Отклонённые (устаревший статус, новых больше не бывает — кнопка «Отклонить» убрана) и
+// исключённые из отчёта записи остаются видны в таблице как история, но денег за ними нет:
+// раньше они попадали в сумму «на руках», и сверка кассы сходилась с несуществующими операциями
+// (QA раунд 4, находка №3).
+function countsTowardsTotals(e: RevenueEntry): boolean {
+  return e.status === 'approved' && !e.excludedFromReport;
+}
+
+function summarizeEntries(all: RevenueEntry[]) {
+  const list = all.filter(countsTowardsTotals);
   const totalRevenue    = list.reduce((s, e) => s + e.totalRevenue, 0);
   const totalCash       = list.reduce((s, e) => s + e.cashRevenue, 0);
   const totalIncomes    = list.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
@@ -293,22 +303,6 @@ export default function RevenueListPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bookkeeperComment: moderateComment || null }),
-    });
-    setModerating(null);
-    setModerateComment('');
-    load();
-  }
-
-  async function rejectEntry(id: number) {
-    if (!moderateComment.trim()) {
-      alert('Укажите причину отклонения');
-      return;
-    }
-    if (!confirm('Отклонить запись?')) return;
-    await fetch(`/api/revenue/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookkeeperComment: moderateComment }),
     });
     setModerating(null);
     setModerateComment('');
@@ -1346,16 +1340,16 @@ export default function RevenueListPage() {
                               <input
                                 type="text"
                                 className="input flex-1"
-                                placeholder="Комментарий бухгалтера (обязателен при отклонении)"
+                                placeholder="Комментарий бухгалтера (необязательно)"
                                 value={moderateComment}
                                 onChange={(e) => setModerateComment(e.target.value)}
                               />
+                              {/* «Отклонить» убрано: отклонённая запись прощала выданный из неё аванс
+                                  и запирала день для заведующей. Неверную запись бухгалтер правит
+                                  («Изменить») или удаляет («Удалить»). */}
                               <div className="flex gap-2 shrink-0">
                                 <button className="btn-success text-sm" onClick={() => approveEntry(entry.id)}>
                                   Подтвердить
-                                </button>
-                                <button className="btn-danger text-sm" onClick={() => rejectEntry(entry.id)}>
-                                  Отклонить
                                 </button>
                               </div>
                             </div>
@@ -1395,7 +1389,7 @@ export default function RevenueListPage() {
               summarizeEntries(visibleEntries);
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
-                <span className="text-slate-500">Итого по выбранным записям:</span>
+                <span className="text-slate-500">Итого по подтверждённым записям:</span>
                 <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
                 {totalIncomes > 0 && (
                   <span>Доп. доходы: <strong className="text-green-700">{fmt(totalIncomes)}</strong></span>
