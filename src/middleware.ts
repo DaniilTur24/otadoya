@@ -19,6 +19,7 @@ const BOOKKEEPER_ALLOWED = [
   // на уровне route-хендлера (requireAdminOrBookkeeper), но без пути в этом списке
   // middleware отклонял запрос раньше, чем он туда доходил.
   '/api/working-calendar',
+  '/api/reports/cash-export',
 ];
 
 const MANAGER_ALLOWED = [

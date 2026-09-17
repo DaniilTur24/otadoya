@@ -1117,6 +1117,22 @@ export default function RevenueListPage() {
             </button>
           </div>
         </div>
+        {(role === 'admin' || role === 'bookkeeper') && (
+          <div className="mt-3 flex justify-end">
+            <a
+              className="btn-secondary text-sm"
+              href={`/api/reports/cash-export?${new URLSearchParams({
+                ...(filterPharmacy ? { pharmacyId: filterPharmacy } : {}),
+                ...(filterFrom ? { from: filterFrom } : {}),
+                ...(filterTo ? { to: filterTo } : {}),
+                ...(filterStatus ? { status: filterStatus } : {}),
+              }).toString()}`}
+              title="Отчёт по кассе (приход/расход/остаток) за выбранный период, аптеку и статус — без учёта фильтра по сотруднику"
+            >
+              Скачать Excel (отчёт по кассе)
+            </a>
+          </div>
+        )}
       </div>
 
       {/* Таблица записей */}
