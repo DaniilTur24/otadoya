@@ -8,8 +8,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const HEADER_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-const PENDING_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
-const TOTAL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+const DAY_TOTAL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+const PERIOD_TOTAL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
 const THIN_BORDER: Partial<ExcelJS.Borders> = {
   top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
   bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
@@ -20,6 +20,10 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 function formatDate(dateKey: string): string {
   const [y, m, d] = dateKey.split('-');
   return `${d}.${m}.${y}`;
+}
+
+function statusesLabel(statuses: string[]): string {
+  return statuses.map((s) => STATUS_LABELS[s] ?? s).join(' / ');
 }
 
 export interface CashReportMeta {
@@ -53,10 +57,10 @@ export async function buildCashReportWorkbook(
     sheet.columns = [
       { width: 12 },
       { width: 22 },
-      { width: 36 },
+      { width: 38 },
       { width: 14 },
       { width: 14 },
-      { width: 16 },
+      { width: 14 },
       { width: 16 },
     ];
 
@@ -74,11 +78,11 @@ export async function buildCashReportWorkbook(
 
     const headerRow = sheet.addRow([
       'Дата',
-      'Сотрудник',
-      'Статья / комментарий',
-      'Приход (нал)',
+      'Сотрудник(и)',
+      'Статья расхода / комментарий',
+      'Приход',
       'Расход',
-      'Остаток (к сдаче)',
+      'Сальдо',
       'Статус',
     ]);
     headerRow.eachCell((cell) => {
@@ -87,55 +91,62 @@ export async function buildCashReportWorkbook(
       cell.border = THIN_BORDER;
     });
 
-    for (const row of section.rows) {
-      const isPending = row.status === 'pending';
-      const firstRowIndex = sheet.rowCount + 1;
+    for (const day of section.days) {
+      let balance = day.cashRevenue;
 
-      const mainRow = sheet.addRow([
-        formatDate(row.date),
-        row.employeeName,
-        row.expenseLines.length === 0 ? '—' : '',
-        row.cashRevenue,
+      const revenueRow = sheet.addRow([
+        formatDate(day.date),
+        day.employeeNames.join(', '),
+        'Выручка нал.',
+        day.cashRevenue,
         '',
-        '',
-        STATUS_LABELS[row.status] ?? row.status,
+        balance,
+        statusesLabel(day.statuses),
       ]);
-      mainRow.getCell(4).numFmt = '#,##0';
+      revenueRow.getCell(3).font = { color: { argb: 'FF64748B' } };
+      revenueRow.getCell(4).numFmt = '#,##0';
+      revenueRow.getCell(6).numFmt = '#,##0';
+      revenueRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
 
-      const cashLines = row.expenseLines.filter((l) => l.affectsCash);
-      for (const line of cashLines) {
+      for (const line of day.expenseLines) {
+        if (line.affectsCash) balance -= line.amount;
+
         const label = [line.categoryLabel, line.recipientName ? `— ${line.recipientName}` : null, line.comment]
           .filter(Boolean)
           .join(' ');
-        const lineRow = sheet.addRow(['', '', label, '', line.amount, '', '']);
+        const lineRow = sheet.addRow(['', '', label, '', line.amount, balance, '']);
         lineRow.getCell(5).numFmt = '#,##0';
-      }
+        lineRow.getCell(6).numFmt = '#,##0';
 
-      const nonCashLines = row.expenseLines.filter((l) => !l.affectsCash);
-      for (const line of nonCashLines) {
-        const label = [line.categoryLabel, line.recipientName ? `— ${line.recipientName}` : null, line.comment, '(не из кассы)']
-          .filter(Boolean)
-          .join(' ');
-        const lineRow = sheet.addRow(['', '', label, '', '', '', '']);
-        lineRow.font = { italic: true, color: { argb: 'FF94A3B8' } };
-      }
-
-      const resultRow = sheet.addRow(['', '', '', '', '', row.cashNet, '']);
-      resultRow.getCell(6).numFmt = '#,##0';
-      resultRow.font = { bold: true };
-
-      const lastRowIndex = sheet.rowCount;
-      if (isPending) {
-        for (let r = firstRowIndex; r <= lastRowIndex; r++) {
-          sheet.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
-            cell.fill = PENDING_FILL;
-          });
+        if (!line.affectsCash) {
+          const italicGray = { italic: true, color: { argb: 'FF94A3B8' } };
+          lineRow.getCell(3).font = italicGray;
+          lineRow.getCell(3).value = `${label} (не из кассы)`;
+          lineRow.getCell(5).font = italicGray;
         }
+        lineRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
       }
+
+      const dayTotalRow = sheet.addRow([
+        `Итого за ${formatDate(day.date)}`,
+        '',
+        '',
+        day.cashRevenue,
+        day.cashExpensesTotal,
+        day.cashNet,
+        '',
+      ]);
+      dayTotalRow.eachCell({ includeEmpty: true }, (cell) => {
+        cell.fill = DAY_TOTAL_FILL;
+        cell.font = { bold: true };
+        cell.border = THIN_BORDER;
+      });
+      dayTotalRow.getCell(4).numFmt = '#,##0';
+      dayTotalRow.getCell(5).numFmt = '#,##0';
+      dayTotalRow.getCell(6).numFmt = '#,##0';
     }
 
-    sheet.addRow([]);
-    const totalRow = sheet.addRow([
+    const periodTotalRow = sheet.addRow([
       'ИТОГО ЗА ПЕРИОД',
       '',
       '',
@@ -144,14 +155,14 @@ export async function buildCashReportWorkbook(
       section.totalCashNet,
       '',
     ]);
-    totalRow.eachCell((cell) => {
+    periodTotalRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.fill = PERIOD_TOTAL_FILL;
       cell.font = { bold: true };
-      cell.fill = TOTAL_FILL;
       cell.border = THIN_BORDER;
     });
-    totalRow.getCell(4).numFmt = '#,##0';
-    totalRow.getCell(5).numFmt = '#,##0';
-    totalRow.getCell(6).numFmt = '#,##0';
+    periodTotalRow.getCell(4).numFmt = '#,##0';
+    periodTotalRow.getCell(5).numFmt = '#,##0';
+    periodTotalRow.getCell(6).numFmt = '#,##0';
   }
 
   if (sections.length === 0) {

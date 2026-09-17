@@ -24,15 +24,12 @@ export interface CashReportExpenseLine {
   affectsCash: boolean;
 }
 
-export interface CashReportRow {
-  entryId: number;
+export interface CashReportDay {
   date: string; // YYYY-MM-DD
-  employeeName: string;
-  status: string;
-  cashRevenue: number;
-  terminalRevenue: number;
-  kaspiRevenue: number;
-  expenseLines: CashReportExpenseLine[];
+  employeeNames: string[]; // все сотрудники, у кого были смены в этот день (одна смена = одно имя)
+  statuses: string[]; // статусы записей дня (обычно один; несколько — если смешаны approved/pending)
+  cashRevenue: number; // сумма нал. выручки всех смен дня
+  expenseLines: CashReportExpenseLine[]; // расходы всех смен дня, построчно, в порядке записей
   cashExpensesTotal: number;
   cashNet: number;
 }
@@ -40,7 +37,7 @@ export interface CashReportRow {
 export interface CashReportPharmacySection {
   pharmacyId: number;
   pharmacyName: string;
-  rows: CashReportRow[];
+  days: CashReportDay[];
   totalCashRevenue: number;
   totalCashExpenses: number;
   totalCashNet: number;
@@ -67,8 +64,8 @@ function toDateKey(date: string | Date): string {
   return typeof date === 'string' ? date.slice(0, 10) : date.toISOString().slice(0, 10);
 }
 
-export function buildCashReportRow(entry: CashReportSourceEntry): CashReportRow {
-  const expenseLines: CashReportExpenseLine[] = entry.expenseItems.map((item) => ({
+function buildExpenseLines(entry: CashReportSourceEntry): CashReportExpenseLine[] {
+  return entry.expenseItems.map((item) => ({
     category: item.category,
     categoryLabel: categoryLabel(item.category),
     amount: item.amount,
@@ -76,50 +73,59 @@ export function buildCashReportRow(entry: CashReportSourceEntry): CashReportRow 
     recipientName: item.employee?.name ?? null,
     affectsCash: !EXCLUDED_FROM_CASH.has(item.category ?? ''),
   }));
+}
 
-  const cashExpensesTotal = expenseLines
-    .filter((l) => l.affectsCash)
-    .reduce((sum, l) => sum + l.amount, 0);
+// Несколько смен/записей за один календарный день (по одной аптеке) сводятся в один день —
+// бухгалтер сверяет кассу за день целиком, а не по отдельности за каждую смену.
+export function buildCashReportDay(entries: CashReportSourceEntry[]): CashReportDay {
+  const sorted = [...entries].sort((a, b) => a.id - b.id);
+
+  const employeeNames = [...new Set(sorted.map((e) => e.employeeName))];
+  const statuses = [...new Set(sorted.map((e) => e.status))];
+  const cashRevenue = sorted.reduce((sum, e) => sum + e.cashRevenue, 0);
+  const expenseLines = sorted.flatMap(buildExpenseLines);
+  const cashExpensesTotal = expenseLines.filter((l) => l.affectsCash).reduce((sum, l) => sum + l.amount, 0);
 
   return {
-    entryId: entry.id,
-    date: toDateKey(entry.date),
-    employeeName: entry.employeeName,
-    status: entry.status,
-    cashRevenue: entry.cashRevenue,
-    terminalRevenue: entry.terminalRevenue,
-    kaspiRevenue: entry.kaspiRevenue,
+    date: toDateKey(sorted[0].date),
+    employeeNames,
+    statuses,
+    cashRevenue,
     expenseLines,
     cashExpensesTotal,
-    cashNet: entry.cashRevenue - cashExpensesTotal,
+    cashNet: cashRevenue - cashExpensesTotal,
   };
 }
 
 export function buildCashReport(entries: CashReportSourceEntry[]): CashReportPharmacySection[] {
-  const byPharmacy = new Map<number, CashReportPharmacySection>();
+  const byPharmacy = new Map<number, { pharmacyName: string; byDate: Map<string, CashReportSourceEntry[]> }>();
 
-  const sorted = [...entries].sort((a, b) => toDateKey(a.date).localeCompare(toDateKey(b.date)) || a.id - b.id);
-
-  for (const entry of sorted) {
-    let section = byPharmacy.get(entry.pharmacy.id);
-    if (!section) {
-      section = {
-        pharmacyId: entry.pharmacy.id,
-        pharmacyName: entry.pharmacy.name,
-        rows: [],
-        totalCashRevenue: 0,
-        totalCashExpenses: 0,
-        totalCashNet: 0,
-      };
-      byPharmacy.set(entry.pharmacy.id, section);
+  for (const entry of entries) {
+    let pharmacyGroup = byPharmacy.get(entry.pharmacy.id);
+    if (!pharmacyGroup) {
+      pharmacyGroup = { pharmacyName: entry.pharmacy.name, byDate: new Map() };
+      byPharmacy.set(entry.pharmacy.id, pharmacyGroup);
     }
-
-    const row = buildCashReportRow(entry);
-    section.rows.push(row);
-    section.totalCashRevenue += row.cashRevenue;
-    section.totalCashExpenses += row.cashExpensesTotal;
-    section.totalCashNet += row.cashNet;
+    const dateKey = toDateKey(entry.date);
+    const dayEntries = pharmacyGroup.byDate.get(dateKey) ?? [];
+    dayEntries.push(entry);
+    pharmacyGroup.byDate.set(dateKey, dayEntries);
   }
 
-  return [...byPharmacy.values()].sort((a, b) => a.pharmacyName.localeCompare(b.pharmacyName, 'ru'));
+  const sections: CashReportPharmacySection[] = [...byPharmacy.entries()].map(([pharmacyId, group]) => {
+    const days = [...group.byDate.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([, dayEntries]) => buildCashReportDay(dayEntries));
+
+    return {
+      pharmacyId,
+      pharmacyName: group.pharmacyName,
+      days,
+      totalCashRevenue: days.reduce((sum, d) => sum + d.cashRevenue, 0),
+      totalCashExpenses: days.reduce((sum, d) => sum + d.cashExpensesTotal, 0),
+      totalCashNet: days.reduce((sum, d) => sum + d.cashNet, 0),
+    };
+  });
+
+  return sections.sort((a, b) => a.pharmacyName.localeCompare(b.pharmacyName, 'ru'));
 }
