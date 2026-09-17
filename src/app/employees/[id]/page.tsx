@@ -339,7 +339,7 @@ export default function EmployeeDetailPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="label">Имя *</label>
             <input
@@ -428,7 +428,7 @@ export default function EmployeeDetailPage() {
           </label>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="label">Фиксированная доплата (₸/мес)</label>
             <AmountInput
@@ -571,7 +571,7 @@ export default function EmployeeDetailPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="label">Месяц</label>
             <select

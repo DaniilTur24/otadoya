@@ -1042,6 +1042,82 @@ export default function RevenueListPage() {
     );
   }
 
+  // Снимает пометку "не учитывается" с записи (общая функция для таблицы и карточек).
+  async function includeInReport(entry: RevenueEntry) {
+    const d = new Date(entry.date);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const { isClosed } = await fetch(`/api/months/close?year=${year}&month=${month}`).then((r) => r.json());
+    if (isClosed) {
+      alert('Месяц закрыт. Чтобы включить эту запись в отчёт, сначала откройте месяц в разделе «Закрытие месяца».');
+      return;
+    }
+    await fetch(`/api/revenue/${entry.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excludedFromReport: false }),
+    });
+    load();
+  }
+
+  // Общие для десктоп-таблицы и мобильных карточек производные значения строки —
+  // считаем один раз на запись, чтобы не дублировать формулы в обоих рендерах.
+  function getEntryDerived(entry: RevenueEntry) {
+    return {
+      bonuses: pharmaBonusSum(entry.expenseItems),
+      advances: advanceSum(entry.expenseItems),
+      surcharges: surchargeSum(entry.expenseItems),
+      incomes: incomeItemsSum(entry.expenseItems),
+      expenses: expenseItemsSum(entry.expenseItems),
+      isEditingThis: editingId === entry.id,
+      isModeratingThis: moderating === entry.id,
+      canModerate: (role === 'admin' || role === 'bookkeeper') && entry.status === 'pending',
+    };
+  }
+
+  // Панель подтверждения/отклонения pending-записи — используется и в десктоп-таблице
+  // (внутри colSpan-строки), и в мобильной карточке (напрямую).
+  function renderModeratePanel(entry: RevenueEntry) {
+    return (
+      <>
+        {entry.expenseItems.length > 0 && (
+          <div className="mb-3 text-sm">
+            <p className="font-medium text-slate-700 mb-1">Расходы:</p>
+            <ul className="space-y-0.5">
+              {entry.expenseItems.map((item) => (
+                <li key={item.id} className="text-slate-600 flex gap-2">
+                  <span className="text-red-600">{fmt(item.amount)}</span>
+                  <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
+                  {item.comment && <span className="text-slate-400">— {item.comment}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {entry.generalComment && (
+          <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
+        )}
+        <div className="flex flex-col sm:flex-row gap-2 items-start">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="Комментарий бухгалтера (обязателен при отклонении)"
+            value={moderateComment}
+            onChange={(e) => setModerateComment(e.target.value)}
+          />
+          <div className="flex gap-2 shrink-0 w-full sm:w-auto">
+            <button className="btn-success text-sm flex-1 sm:flex-none" onClick={() => approveEntry(entry.id)}>
+              Подтвердить
+            </button>
+            <button className="btn-danger text-sm flex-1 sm:flex-none" onClick={() => rejectEntry(entry.id)}>
+              Отклонить
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -1152,7 +1228,7 @@ export default function RevenueListPage() {
               </button>
             </div>
           )}
-          <div className="overflow-x-auto" ref={tableScrollRef} onScroll={handleTableScroll}>
+          <div className="hidden md:block overflow-x-auto" ref={tableScrollRef} onScroll={handleTableScroll}>
             <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
@@ -1182,14 +1258,8 @@ export default function RevenueListPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {visibleEntries.map((entry) => {
-                  const bonuses    = pharmaBonusSum(entry.expenseItems);
-                  const advances   = advanceSum(entry.expenseItems);
-                  const surcharges = surchargeSum(entry.expenseItems);
-                  const incomes  = incomeItemsSum(entry.expenseItems);
-                  const expenses = expenseItemsSum(entry.expenseItems);
-                  const isEditingThis = editingId === entry.id;
-                  const isModeratingThis = moderating === entry.id;
-                  const canModerate = (role === 'admin' || role === 'bookkeeper') && entry.status === 'pending';
+                  const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
+                    getEntryDerived(entry);
                   const rowBg = isEditingThis
                     ? 'bg-slate-100'
                     : entry.status === 'pending'
@@ -1248,22 +1318,7 @@ export default function RevenueListPage() {
                               <button
                                 className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
                                 title="Нажмите чтобы включить в отчёт за этот месяц"
-                                onClick={async () => {
-                                  const d = new Date(entry.date);
-                                  const year = d.getFullYear();
-                                  const month = d.getMonth() + 1;
-                                  const { isClosed } = await fetch(`/api/months/close?year=${year}&month=${month}`).then((r) => r.json());
-                                  if (isClosed) {
-                                    alert('Месяц закрыт. Чтобы включить эту запись в отчёт, сначала откройте месяц в разделе «Закрытие месяца».');
-                                    return;
-                                  }
-                                  await fetch(`/api/revenue/${entry.id}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ excludedFromReport: false }),
-                                  });
-                                  load();
-                                }}
+                                onClick={() => includeInReport(entry)}
                               >
                                 не учитывается
                               </button>
@@ -1325,40 +1380,7 @@ export default function RevenueListPage() {
                       {isModeratingThis && !isEditingThis && (
                         <tr key={`${entry.id}-moderate`} className="bg-amber-50/60">
                           <td colSpan={15} className="px-4 py-3">
-                            {entry.expenseItems.length > 0 && (
-                              <div className="mb-3 text-sm">
-                                <p className="font-medium text-slate-700 mb-1">Расходы:</p>
-                                <ul className="space-y-0.5">
-                                  {entry.expenseItems.map((item) => (
-                                    <li key={item.id} className="text-slate-600 flex gap-2">
-                                      <span className="text-red-600">{fmt(item.amount)}</span>
-                                      <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
-                                      {item.comment && <span className="text-slate-400">— {item.comment}</span>}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-                            {entry.generalComment && (
-                              <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
-                            )}
-                            <div className="flex flex-col sm:flex-row gap-2 items-start">
-                              <input
-                                type="text"
-                                className="input flex-1"
-                                placeholder="Комментарий бухгалтера (обязателен при отклонении)"
-                                value={moderateComment}
-                                onChange={(e) => setModerateComment(e.target.value)}
-                              />
-                              <div className="flex gap-2 shrink-0">
-                                <button className="btn-success text-sm" onClick={() => approveEntry(entry.id)}>
-                                  Подтвердить
-                                </button>
-                                <button className="btn-danger text-sm" onClick={() => rejectEntry(entry.id)}>
-                                  Отклонить
-                                </button>
-                              </div>
-                            </div>
+                            {renderModeratePanel(entry)}
                           </td>
                         </tr>
                       )}
@@ -1374,6 +1396,123 @@ export default function RevenueListPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Мобильная версия — карточки вместо таблицы, та же информация и те же действия,
+              просто без горизонтальной прокрутки по 13 колонкам. */}
+          <div className="md:hidden divide-y divide-slate-200">
+            {visibleEntries.map((entry) => {
+              const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
+                getEntryDerived(entry);
+              const cardBg = isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-amber-50/40' : '';
+
+              if (isEditingThis) {
+                return (
+                  <div key={entry.id} className={`p-3 ${cardBg}`}>
+                    {renderEditForm()}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={entry.id} className={`p-3 ${cardBg}`}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      {canManageEntry(entry) && (
+                        <input
+                          type="checkbox"
+                          className="rounded mt-1 shrink-0"
+                          checked={selectedIds.has(entry.id)}
+                          onChange={() => toggleSelect(entry.id)}
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{fmtDate(entry.date)}</div>
+                        <div className="text-sm text-slate-500 truncate">{entry.pharmacy.name}</div>
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+                      STATUS_CLASSES[entry.status] ?? 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {STATUS_LABELS[entry.status] ?? entry.status}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm mb-2">
+                    <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Нал.</span><span className="text-green-700 font-medium">{fmt(entry.cashRevenue)}</span></div>
+                    <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Терм.</span><span className="text-green-700 font-medium">{fmt(entry.terminalRevenue)}</span></div>
+                    {entry.kaspiRevenue > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Каспи</span><span className="text-green-700 font-medium">{fmt(entry.kaspiRevenue)}</span></div>
+                    )}
+                    {incomes > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доп. доходы</span><span className="text-green-700 font-medium">{fmt(incomes)}</span></div>
+                    )}
+                    <div className="flex justify-between col-span-2 pt-1 mt-1 border-t border-slate-100">
+                      <span className="text-slate-600 font-medium">Выручка</span>
+                      <span className="text-green-700 font-semibold">{fmt(entry.totalRevenue)}</span>
+                    </div>
+                    {bonuses > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Бонусы</span><span className="text-red-600">{fmt(bonuses)}</span></div>
+                    )}
+                    {advances > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Зарплаты</span><span className="text-red-600">{fmt(advances)}</span></div>
+                    )}
+                    {surcharges > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доплаты</span><span className="text-red-600">{fmt(surcharges)}</span></div>
+                    )}
+                    {expenses > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Расходы</span><span className="text-red-600">{fmt(expenses)}</span></div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap text-sm mb-2">
+                    <span className="text-slate-500 truncate">{entry.employeeName}</span>
+                    {entry.shiftType && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                        entry.shiftType === 'full_day' ? 'bg-slate-200 text-slate-800' : 'bg-slate-100 text-slate-800'
+                      }`}>
+                        {SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType}
+                      </span>
+                    )}
+                    {entry.excludedFromReport && (
+                      <button
+                        className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+                        title="Нажмите чтобы включить в отчёт за этот месяц"
+                        onClick={() => includeInReport(entry)}
+                      >
+                        не учитывается
+                      </button>
+                    )}
+                  </div>
+
+                  {entry.generalComment && !isModeratingThis && (
+                    <p className="text-sm text-slate-500 italic mb-2">{entry.generalComment}</p>
+                  )}
+
+                  {isModeratingThis ? (
+                    <div className="mt-2 pt-2 border-t border-amber-200">
+                      {renderModeratePanel(entry)}
+                      <button
+                        className="btn-secondary text-xs mt-2 w-full"
+                        onClick={() => { setModerating(null); setModerateComment(''); }}
+                      >
+                        Закрыть
+                      </button>
+                    </div>
+                  ) : canManageEntry(entry) ? (
+                    <div className="flex gap-2 pt-2 border-t border-slate-100">
+                      {canModerate && (
+                        <button className="btn-warning text-sm flex-1" onClick={() => { setModerating(entry.id); setModerateComment(''); }}>
+                          Проверить
+                        </button>
+                      )}
+                      <button className="btn-secondary text-sm flex-1" onClick={() => startEdit(entry)}>Изменить</button>
+                      <button className="btn-danger text-sm flex-1" onClick={() => deleteEntry(entry.id)}>Удалить</button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
 
           {/* Плавающий горизонтальный скроллбар — прилипает к низу окна, пока таблица на экране,

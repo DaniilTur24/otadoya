@@ -177,7 +177,7 @@ export default function TransactionRulesSettingsPage() {
             <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} required />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Где искать</label>
               <select className="input" value={form.sourceField} onChange={(e) => set('sourceField', e.target.value)}>
@@ -232,12 +232,12 @@ export default function TransactionRulesSettingsPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Приоритет</label>
               <input className="input" type="number" value={form.priority} onChange={(e) => set('priority', e.target.value)} />
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700 mt-7">
+            <label className="flex items-center gap-2 text-sm text-slate-700 sm:mt-7">
               <input
                 type="checkbox"
                 className="w-4 h-4 accent-slate-700"
