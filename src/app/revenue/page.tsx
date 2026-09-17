@@ -6,6 +6,7 @@ import { MONTHLY_REPORT_ROWS, MONTHLY_EXPENSE_KEYS, monthlyFieldType } from '@/l
 import { SHIFT_OPTIONS, SHIFT_TYPE_LABELS } from '@/lib/shift-types';
 import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
 import { AmountInput } from '@/components/AmountInput';
+import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
@@ -1068,15 +1069,12 @@ export default function RevenueListPage() {
       {/* Фильтры */}
       <div className="card p-3 mb-4">
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
-          <div>
-            <label className="label">Дата с</label>
-            <input type="date" className="input" value={filterFrom}
-              onChange={(e) => setFilterFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Дата по</label>
-            <input type="date" className="input" value={filterTo}
-              onChange={(e) => setFilterTo(e.target.value)} />
+          <div className="sm:col-span-2">
+            <DateRangeFilter
+              from={filterFrom}
+              to={filterTo}
+              onChange={(from, to) => { setFilterFrom(from); setFilterTo(to); }}
+            />
           </div>
           <div>
             <label className="label">Аптека</label>
