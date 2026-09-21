@@ -20,6 +20,8 @@ const BOOKKEEPER_ALLOWED = [
   // middleware отклонял запрос раньше, чем он туда доходил.
   '/api/working-calendar',
   '/api/reports/cash-export',
+  // Остаток в кассе и инкассация на /revenue — заводит их бухгалтер, заведующий не видит
+  '/api/cash-balance',
 ];
 
 const MANAGER_ALLOWED = [

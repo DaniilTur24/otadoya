@@ -105,6 +105,20 @@ describe('buildCashReport', () => {
     expect(sections[0].days.map((d) => d.date)).toEqual(['2026-09-01', '2026-09-05']);
   });
 
+  it('attaches the running cash balance to the matching day', () => {
+    const balances = new Map([
+      [1, new Map([['2026-09-05', { openingBalance: 20_000, deposit: 90_000, closingBalance: 30_000 }]])],
+    ]);
+    const [section] = buildCashReport([entry({ date: '2026-09-05' })], balances);
+
+    expect(section.days[0].balance).toEqual({ openingBalance: 20_000, deposit: 90_000, closingBalance: 30_000 });
+  });
+
+  it('leaves the balance out for a pharmacy without a start month', () => {
+    const [section] = buildCashReport([entry({ date: '2026-09-05' })], new Map());
+    expect(section.days[0].balance).toBeUndefined();
+  });
+
   it('returns an empty list for no entries', () => {
     expect(buildCashReport([])).toEqual([]);
   });

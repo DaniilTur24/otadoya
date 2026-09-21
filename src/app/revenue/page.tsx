@@ -8,6 +8,11 @@ import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types
 import { AmountInput } from '@/components/AmountInput';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
+import {
+  EXCLUDED_FROM_GENERIC_SUMS, pharmaBonusSum, advanceSum, surchargeSum,
+  incomeItemsSum, expenseItemsSum, summarizeEntries, groupEntriesByDate,
+} from '@/lib/revenue-summary';
+import { suggestDeposit, type CashDayBalance } from '@/lib/cash-balance';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
@@ -107,29 +112,6 @@ function fmtDate(s: string) {
   return new Date(s).toLocaleDateString('ru-RU');
 }
 
-function pharmaBonusSum(items: ExpenseItem[]) {
-  return items.filter((i) => i.category === 'pharmaBonus').reduce((s, i) => s + i.amount, 0);
-}
-function advanceSum(items: ExpenseItem[]) {
-  return items.filter((i) => i.category === 'employeeAdvance').reduce((s, i) => s + i.amount, 0);
-}
-function surchargeSum(items: ExpenseItem[]) {
-  return items.filter((i) => i.category === 'employeeSurcharge').reduce((s, i) => s + i.amount, 0);
-}
-const EXCLUDED_FROM_GENERIC_SUMS = new Set(['pharmaBonus', 'employeeAdvance', 'employeeSurcharge']);
-// Статьи с rowType 'income' — доходные, прибавляются к выручке
-function incomeItemsSum(items: ExpenseItem[]) {
-  return items
-    .filter((i) => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? '') && monthlyFieldType(i.category) === 'income')
-    .reduce((s, i) => s + i.amount, 0);
-}
-// Остальные статьи (expense / neutral) — расходы
-function expenseItemsSum(items: ExpenseItem[]) {
-  return items
-    .filter((i) => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? '') && monthlyFieldType(i.category) !== 'income')
-    .reduce((s, i) => s + i.amount, 0);
-}
-
 const ROW_LABEL: Record<string, string> = Object.fromEntries(
   MONTHLY_REPORT_ROWS.filter((r) => !r.section).map((r) => [r.key, r.label])
 );
@@ -145,17 +127,271 @@ const STATUS_CLASSES: Record<string, string> = {
   rejected: 'bg-red-100 text-red-800',
 };
 
-function summarizeEntries(list: RevenueEntry[]) {
-  const totalRevenue    = list.reduce((s, e) => s + e.totalRevenue, 0);
-  const totalCash       = list.reduce((s, e) => s + e.cashRevenue, 0);
-  const totalIncomes    = list.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
-  const totalBonuses    = list.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
-  const totalAdvances   = list.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
-  const totalSurcharges = list.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
-  const totalExpenses   = list.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
-  const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
-  const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
-  return { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet };
+interface CashBalanceResponse {
+  configured: boolean;
+  openingDate?: string;
+  openingBalance: number;
+  days: CashDayBalance[];
+  comments?: Record<string, string>;
+}
+
+// Движение наличных за день, как в карточке счёта: остаток с прошлого дня, выручка,
+// выдачи, взнос в банк и остаток на завтра. Взнос вводит только бухгалтер.
+function CashDayRow({
+  balance,
+  hiddenFromTable,
+  onSaveDeposit,
+}: {
+  balance: CashDayBalance;
+  /** Деньги, прошедшие через кассу в записях, которых в таблице сейчас не видно. */
+  hiddenFromTable: number;
+  onSaveDeposit: (amount: number) => Promise<void>;
+}) {
+  const [value, setValue] = useState(balance.deposit ? String(balance.deposit) : '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(balance.deposit ? String(balance.deposit) : '');
+  }, [balance.deposit]);
+
+  const suggested = suggestDeposit(balance.balanceBeforeDeposit);
+
+  const parsed = value ? parseFloat(value) : 0;
+  const changed = Number.isFinite(parsed) && parsed !== balance.deposit;
+
+  // Взнос сохраняется только по явному действию — кнопкой или Enter. Автосохранение
+  // по потере фокуса здесь уже приводило к записям, которых никто не вводил: поле теряет
+  // фокус и когда строка просто исчезает из-за смены фильтра.
+  async function commit() {
+    if (saving || !changed) return;
+    setSaving(true);
+    await onSaveDeposit(parsed);
+    setSaving(false);
+  }
+
+  async function applySuggested() {
+    if (saving) return;
+    setSaving(true);
+    setValue(String(suggested));
+    await onSaveDeposit(suggested);
+    setSaving(false);
+  }
+
+  return (
+    <tr className="bg-sky-50 border-b-2 border-slate-300">
+      <td colSpan={15} className="px-3 py-3">
+        <div className="max-w-xl text-sm">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Касса</div>
+
+          <CashLine label="Остаток с прошлого дня" value={fmt(balance.openingBalance)} />
+          <CashLine label="+ Выручка наличными" value={fmt(balance.cashRevenue)} valueClass="text-green-700" />
+          <CashLine label="− Выдано из кассы" value={fmt(balance.cashExpenses)} valueClass="text-red-600" />
+          <CashLine label="= В кассе на конец дня" value={fmt(balance.balanceBeforeDeposit)} strong />
+
+          <div className="flex items-center gap-2 py-1 border-t border-sky-200 mt-1 pt-1.5">
+            <span className="text-slate-600 w-52 shrink-0">− Сдано в банк</span>
+            <AmountInput
+              className="input w-36 py-0.5 text-sm text-right"
+              placeholder="0"
+              value={value}
+              onChange={setValue}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              }}
+            />
+            {saving ? (
+              <span className="text-xs text-slate-400">сохранение…</span>
+            ) : changed ? (
+              <button type="button" className="btn-primary text-xs py-0.5 px-2" onClick={commit}>
+                Сохранить
+              </button>
+            ) : (
+              suggested > 0 && suggested !== balance.deposit && (
+                <button
+                  type="button"
+                  className={`text-xs underline whitespace-nowrap ${
+                    balance.unconfirmed !== 0
+                      ? 'text-amber-700 hover:text-amber-900'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title={
+                    balance.unconfirmed !== 0
+                      ? 'Внимание: сумма посчитана с учётом записей на проверке. Если их отклонить, в кассе окажется меньше.'
+                      : 'Подставить весь остаток кассы. Сумму можно поправить.'
+                  }
+                  // Не даём полю потерять фокус по нажатию: иначе onBlur успевал записать
+                  // старое значение параллельно с этим сохранением.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={applySuggested}
+                >
+                  сдать всё: {fmt(suggested)}
+                </button>
+              )
+            )}
+          </div>
+
+          <div className="border-t border-sky-200 mt-1 pt-1.5">
+            <CashLine
+              label="= Остаток на завтра"
+              value={fmt(balance.closingBalance)}
+              valueClass={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700'}
+              strong
+            />
+            {balance.unconfirmed !== 0 && (
+              <>
+                <CashLine
+                  label="в т. ч. не подтверждено"
+                  value={fmt(balance.unconfirmed)}
+                  valueClass="text-amber-700"
+                />
+                <CashLine
+                  label="остаток без них"
+                  value={fmt(balance.closingBalance - balance.unconfirmed)}
+                  valueClass="text-slate-500"
+                />
+              </>
+            )}
+          </div>
+
+          {balance.unconfirmed !== 0 && (
+            <p className="text-xs text-amber-700 mt-1.5">
+              В остатке учтены записи на проверке — накопительно, вместе с прошлыми днями.
+              Подтверждение ничего не изменит, а отклонение уменьшит остаток на {fmt(balance.unconfirmed)}
+              {' '}и сдвинет все последующие дни.
+            </p>
+          )}
+
+          {hiddenFromTable !== 0 && (
+            <p className="text-xs text-slate-500 mt-1">
+              В таблице выше показаны не все записи этого дня: фильтр скрывает {fmt(hiddenFromTable)} движения по кассе.
+            </p>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// Строка кассового столбика: подпись слева, сумма в колонке справа, примечание за ней.
+function CashLine({
+  label, value, valueClass, strong, note,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  strong?: boolean;
+  note?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-2 py-0.5">
+      <span className="text-slate-600 w-52 shrink-0">{label}</span>
+      <span className={`w-36 text-right tabular-nums ${strong ? 'font-semibold' : ''} ${valueClass ?? 'text-slate-900'}`}>
+        {value}
+      </span>
+      {note && <span className="text-xs text-amber-700">{note}</span>}
+    </div>
+  );
+}
+
+// Одна метрика в строке дня: подпись слева, число справа в колонке фиксированной ширины,
+// чтобы числа выстраивались друг под другом и день с днём можно было сравнивать взглядом.
+function DayMetric({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <span className="w-44 shrink-0 flex justify-between gap-2">
+      <span className="text-slate-500">{label}</span>
+      <strong className={className ?? 'text-slate-900'}>{value}</strong>
+    </span>
+  );
+}
+
+// Заголовок дня. Сам день виден всегда, смены внутри раскрываются по клику — иначе
+// за месяц набирается столько строк, что итоги в них тонут.
+function DaySummaryRow({
+  dateKey, entries, balance, expanded, showPharmacy, showCash, onToggle,
+}: {
+  dateKey: string;
+  entries: RevenueEntry[];
+  balance: CashDayBalance | undefined;
+  expanded: boolean;
+  /** При фильтре по одной аптеке её название в каждой строке — лишний шум. */
+  showPharmacy: boolean;
+  /** Держим место под «В кассе», только если остаток вообще считается в этом срезе. */
+  showCash: boolean;
+  onToggle: () => void;
+}) {
+  const s = summarizeEntries(entries);
+  const pharmacyNames = [...new Set(entries.map((e) => e.pharmacy.name))];
+  const hasPending = entries.some((e) => e.status === 'pending');
+
+  return (
+    <tr
+      className={`border-y border-slate-300 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 hover:bg-slate-200/60'}`}
+      onClick={onToggle}
+    >
+      <td colSpan={15} className="px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm">
+          <span className="w-32 shrink-0 font-semibold text-slate-900 flex items-center gap-1.5">
+            <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
+            {fmtDate(dateKey)}
+          </span>
+          {showPharmacy && (
+            <span className="w-40 shrink-0 text-slate-500 truncate" title={pharmacyNames.join(', ')}>
+              {pharmacyNames.length === 1 ? pharmacyNames[0] : `${pharmacyNames.length} аптеки`}
+            </span>
+          )}
+
+          <DayMetric label="Выручка" value={fmt(s.totalRevenue)} className="text-green-700" />
+          <DayMetric
+            label="Наличными"
+            value={fmt(s.cashNet)}
+            className={s.cashNet >= 0 ? 'text-slate-900' : 'text-red-700'}
+          />
+          {balance ? (
+            <DayMetric
+              label="В кассе"
+              value={fmt(balance.closingBalance)}
+              className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700'}
+            />
+          ) : showCash ? (
+            <span className="w-44 shrink-0" />
+          ) : null}
+
+          <span className="text-xs text-slate-400">
+            {entries.length === 1 ? '1 смена' : `${entries.length} смен`}
+          </span>
+          {hasPending && <span className="text-xs text-amber-700">есть записи на проверке</span>}
+          {balance && balance.deposit > 0 && (
+            <span className="text-xs text-slate-500">сдано в банк {fmt(balance.deposit)}</span>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// Итог по колонкам — виден только когда день раскрыт, чтобы числа стояли ровно
+// под теми же колонками, что и у смен выше.
+function DayTotalRow({ entries }: { entries: RevenueEntry[] }) {
+  const s = summarizeEntries(entries);
+
+  return (
+    <tr className="bg-slate-50 border-t border-slate-300 font-semibold text-slate-900">
+      <td className="td text-right text-slate-500 font-normal text-xs" colSpan={3}>
+        Итого за день
+      </td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalCash)}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalTerminal)}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalKaspi > 0 ? fmt(s.totalKaspi) : '—'}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalIncomes > 0 ? fmt(s.totalIncomes) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalBonuses > 0 ? fmt(s.totalBonuses) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalAdvances > 0 ? fmt(s.totalAdvances) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalSurcharges > 0 ? fmt(s.totalSurcharges) : '—'}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalRevenue)}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalExpenses > 0 ? fmt(s.totalExpenses) : '—'}</td>
+      <td className="td" colSpan={2} />
+      <td className="td bg-slate-50 border-l border-slate-300 sticky right-0 z-10" />
+    </tr>
+  );
 }
 
 export default function RevenueListPage() {
@@ -182,6 +418,13 @@ export default function RevenueListPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
   const editSnapshotRef = useRef<string | null>(null);
+
+  // Остаток в кассе считается только по одной аптеке: у каждой свой ящик, и общий
+  // «остаток по всем аптекам» смысла не имеет. Грузится отдельно от записей, потому что
+  // остаток на начало периода зависит от всей истории до него, а не от видимых строк.
+  const [cashBalance, setCashBalance] = useState<CashBalanceResponse | null>(null);
+  // Дни свёрнуты по умолчанию: за месяц набирается слишком много строк, чтобы читать их подряд.
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
   const [tooltipEntry, setTooltipEntry] = useState<RevenueEntry | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
@@ -267,8 +510,10 @@ export default function RevenueListPage() {
     // сверить остаток по конкретной аптеке/периоду), показываем ровно этот статус.
     if (filterStatus) {
       data = data.filter((e) => e.status === filterStatus);
-    } else if (isModeratorRole) {
-      data = data.filter((e) => e.status !== 'pending');
+    } else {
+      // По умолчанию — подтверждённые и на проверке: ровно то, что считает касса.
+      // Отклонённая запись недействительна, денег по ней не было, поэтому её тут нет.
+      data = data.filter((e) => e.status !== 'rejected');
     }
 
     if (filterFrom) data = data.filter((e) => e.date >= filterFrom);
@@ -286,6 +531,42 @@ export default function RevenueListPage() {
   }, [filterPharmacy, filterFrom, filterTo, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadCashBalance = useCallback(async () => {
+    const isModeratorRole = role === 'admin' || role === 'bookkeeper';
+    if (!filterPharmacy || !isModeratorRole) {
+      setCashBalance(null);
+      return;
+    }
+    const params = new URLSearchParams({ pharmacyId: filterPharmacy });
+    if (filterFrom) params.set('from', filterFrom);
+    if (filterTo) params.set('to', filterTo);
+
+    const res = await fetch(`/api/cash-balance?${params}`);
+    if (!res.ok) { setCashBalance(null); return; }
+    setCashBalance(await res.json());
+  }, [filterPharmacy, filterFrom, filterTo, role]);
+
+  useEffect(() => { loadCashBalance(); }, [loadCashBalance]);
+
+  function toggleDay(dateKey: string) {
+    setExpandedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
+  }
+
+  async function saveCashMovement(date: string, amount: number) {
+    await fetch('/api/cash-balance', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pharmacyId: Number(filterPharmacy), date, amount }),
+    });
+    // Взнос меняет остаток не только своего дня, но и всех следующих — перечитываем целиком.
+    await loadCashBalance();
+  }
 
   async function approveEntry(id: number) {
     if (!confirm('Подтвердить запись?')) return;
@@ -1133,6 +1414,23 @@ export default function RevenueListPage() {
         )}
       </div>
 
+      {/* Почему не видно остатка в кассе */}
+      {(role === 'admin' || role === 'bookkeeper') && !loading && (
+        filterPharmacy && cashBalance && !cashBalance.configured ? (
+          <div className="mb-3 px-3 py-2 rounded border border-amber-200 bg-amber-50 text-sm text-amber-900">
+            Остаток в кассе не считается: не задана точка отсчёта. Укажите в{' '}
+            <Link href={`/settings/pharmacies/${filterPharmacy}`} className="underline">
+              настройках аптеки
+            </Link>{' '}
+            дату и сумму, которая реально была в кассе на утро этого дня.
+          </div>
+        ) : !filterPharmacy ? (
+          <div className="mb-3 px-3 py-2 rounded border border-slate-200 bg-slate-50 text-sm text-slate-500">
+            Выберите аптеку в фильтре, чтобы видеть остаток в кассе по дням — у каждой аптеки своя касса.
+          </div>
+        ) : null
+      )}
+
       {/* Таблица записей */}
       {loading ? (
         <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
@@ -1144,6 +1442,20 @@ export default function RevenueListPage() {
         </div>
       ) : (
         <div className="card overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between text-sm">
+            <span className="text-slate-500">
+              Дни свёрнуты — нажмите на день, чтобы посмотреть смены и кассу
+            </span>
+            <button
+              className="text-slate-600 underline hover:text-slate-900 text-xs"
+              onClick={() => {
+                const allDays = groupEntriesByDate(visibleEntries).map((g) => g.dateKey);
+                setExpandedDays((prev) => (prev.size === allDays.length ? new Set() : new Set(allDays)));
+              }}
+            >
+              {expandedDays.size === groupEntriesByDate(visibleEntries).length ? 'Свернуть все' : 'Развернуть все'}
+            </button>
+          </div>
           {selectedIds.size > 0 && (
             <div className="px-4 py-2 bg-slate-100 border-b border-slate-300 flex items-center justify-between">
               <span className="text-sm text-slate-900">Выбрано: {selectedIds.size}</span>
@@ -1181,7 +1493,23 @@ export default function RevenueListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleEntries.map((entry) => {
+                {groupEntriesByDate(visibleEntries).map((group) => {
+                  const dayBalance = cashBalance?.configured
+                    ? cashBalance.days.find((d) => d.date === group.dateKey)
+                    : undefined;
+                  const isExpanded = expandedDays.has(group.dateKey);
+                  return (
+                  <React.Fragment key={group.dateKey}>
+                    <DaySummaryRow
+                      dateKey={group.dateKey}
+                      entries={group.entries}
+                      balance={dayBalance}
+                      expanded={isExpanded}
+                      showPharmacy={!filterPharmacy}
+                      showCash={Boolean(cashBalance?.configured)}
+                      onToggle={() => toggleDay(group.dateKey)}
+                    />
+                {isExpanded && group.entries.map((entry) => {
                   const bonuses    = pharmaBonusSum(entry.expenseItems);
                   const advances   = advanceSum(entry.expenseItems);
                   const surcharges = surchargeSum(entry.expenseItems);
@@ -1372,6 +1700,22 @@ export default function RevenueListPage() {
                     </React.Fragment>
                   );
                 })}
+                    {isExpanded && <DayTotalRow entries={group.entries} />}
+                    {isExpanded && dayBalance && (() => {
+                      const visible = summarizeEntries(group.entries);
+                      const visibleCashFlow =
+                        visible.totalCash - visible.totalBonuses - visible.totalAdvances - visible.totalExpenses;
+                      const balanceCashFlow = dayBalance.cashRevenue - dayBalance.cashExpenses;
+                      return (
+                        <CashDayRow
+                          balance={dayBalance}
+                          hiddenFromTable={balanceCashFlow - visibleCashFlow}
+                          onSaveDeposit={(amount) => saveCashMovement(group.dateKey, amount)}
+                        />
+                      );
+                    })()}
+                  </React.Fragment>
+                );})}
               </tbody>
             </table>
           </div>
@@ -1391,12 +1735,19 @@ export default function RevenueListPage() {
 
           {/* Итого */}
           {(() => {
-            const { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet } =
-              summarizeEntries(visibleEntries);
+            const {
+              totalRevenue, totalCash, totalTerminal, totalKaspi, totalIncomes,
+              totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet,
+            } = summarizeEntries(visibleEntries);
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
                 <span className="text-slate-500">Итого по выбранным записям:</span>
                 <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
+                <span className="text-slate-500">
+                  нал. <strong className="text-slate-700">{fmt(totalCash)}</strong>
+                  {' · '}терм. <strong className="text-slate-700">{fmt(totalTerminal)}</strong>
+                  {totalKaspi > 0 && <>{' · '}каспи <strong className="text-slate-700">{fmt(totalKaspi)}</strong></>}
+                </span>
                 {totalIncomes > 0 && (
                   <span>Доп. доходы: <strong className="text-green-700">{fmt(totalIncomes)}</strong></span>
                 )}

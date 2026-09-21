@@ -82,7 +82,7 @@ export async function buildCashReportWorkbook(
       'Статья расхода / комментарий',
       'Приход',
       'Расход',
-      'Сальдо',
+      'Остаток',
       'Статус',
     ]);
     headerRow.eachCell((cell) => {
@@ -92,15 +92,35 @@ export async function buildCashReportWorkbook(
     });
 
     for (const day of section.days) {
-      let balance = day.cashRevenue;
+      // Остаток переносится со вчера и живёт сквозь весь период — как на странице выручки.
+      // Без месяца старта у аптеки остатка нет, и колонка остаётся пустой.
+      const hasBalance = day.balance != null;
+      let balance = day.balance ? day.balance.openingBalance : 0;
+
+      if (day.balance) {
+        const openingRow = sheet.addRow([
+          formatDate(day.date),
+          '',
+          'Остаток с прошлого дня',
+          '',
+          '',
+          balance,
+          '',
+        ]);
+        openingRow.getCell(3).font = { italic: true, color: { argb: 'FF64748B' } };
+        openingRow.getCell(6).numFmt = '#,##0';
+        openingRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
+      }
+
+      balance += day.cashRevenue;
 
       const revenueRow = sheet.addRow([
-        formatDate(day.date),
+        day.balance ? '' : formatDate(day.date),
         day.employeeNames.join(', '),
         'Выручка нал.',
         day.cashRevenue,
         '',
-        balance,
+        hasBalance ? balance : '',
         statusesLabel(day.statuses),
       ]);
       revenueRow.getCell(3).font = { color: { argb: 'FF64748B' } };
@@ -114,7 +134,7 @@ export async function buildCashReportWorkbook(
         const label = [line.categoryLabel, line.recipientName ? `— ${line.recipientName}` : null, line.comment]
           .filter(Boolean)
           .join(' ');
-        const lineRow = sheet.addRow(['', '', label, '', line.amount, balance, '']);
+        const lineRow = sheet.addRow(['', '', label, '', line.amount, hasBalance ? balance : '', '']);
         lineRow.getCell(5).numFmt = '#,##0';
         lineRow.getCell(6).numFmt = '#,##0';
 
@@ -127,13 +147,23 @@ export async function buildCashReportWorkbook(
         lineRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
       }
 
+      if (day.balance && day.balance.deposit !== 0) {
+        balance -= day.balance.deposit;
+        const depositRow = sheet.addRow(['', '', 'Сдано в банк', '', day.balance.deposit, balance, '']);
+        depositRow.getCell(3).font = { bold: true };
+        depositRow.getCell(5).numFmt = '#,##0';
+        depositRow.getCell(6).numFmt = '#,##0';
+        depositRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
+      }
+
       const dayTotalRow = sheet.addRow([
         `Итого за ${formatDate(day.date)}`,
         '',
         '',
         day.cashRevenue,
-        day.cashExpensesTotal,
-        day.cashNet,
+        day.cashExpensesTotal + (day.balance?.deposit ?? 0),
+        // Дни до месяца старта остатка не имеют — там колонка пустая, как и на экране.
+        day.balance ? day.balance.closingBalance : '',
         '',
       ]);
       dayTotalRow.eachCell({ includeEmpty: true }, (cell) => {
@@ -146,13 +176,16 @@ export async function buildCashReportWorkbook(
       dayTotalRow.getCell(6).numFmt = '#,##0';
     }
 
+    const lastWithBalance = [...section.days].reverse().find((d) => d.balance);
+    const totalDeposits = section.days.reduce((sum, d) => sum + (d.balance?.deposit ?? 0), 0);
+
     const periodTotalRow = sheet.addRow([
       'ИТОГО ЗА ПЕРИОД',
       '',
       '',
       section.totalCashRevenue,
-      section.totalCashExpenses,
-      section.totalCashNet,
+      section.totalCashExpenses + totalDeposits,
+      lastWithBalance ? lastWithBalance.balance!.closingBalance : section.totalCashNet,
       '',
     ]);
     periodTotalRow.eachCell({ includeEmpty: true }, (cell) => {

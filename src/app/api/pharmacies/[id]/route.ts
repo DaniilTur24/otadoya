@@ -29,6 +29,7 @@ export async function PUT(
     managerPremiumThreshold, managerPremiumBase,
     managerPremiumStepAmount, managerPremiumStepBonus,
     poolAverageRevenuePremium,
+    cashOpeningDate,
   } = await request.json();
 
   const pharmacy = await prisma.pharmacy.update({
@@ -50,6 +51,10 @@ export async function PUT(
         managerPremiumStepBonus !== undefined ? (managerPremiumStepBonus != null ? String(managerPremiumStepBonus) : null) : undefined,
       poolAverageRevenuePremium:
         poolAverageRevenuePremium !== undefined ? Boolean(poolAverageRevenuePremium) : undefined,
+      cashOpeningDate:
+        cashOpeningDate !== undefined
+          ? (cashOpeningDate ? new Date(`${String(cashOpeningDate).slice(0, 10)}T00:00:00.000Z`) : null)
+          : undefined,
     },
   });
 

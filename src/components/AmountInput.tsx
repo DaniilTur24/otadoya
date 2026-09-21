@@ -55,6 +55,8 @@ interface AmountInputProps {
   required?: boolean;
   disabled?: boolean;
   autoFocus?: boolean;
+  onBlur?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
 const CALC_BUTTON_ROWS = [
@@ -205,7 +207,7 @@ function CalculatorPopup({
 // Рядом с полем — кнопка мини-калькулятора: открывает попап, предзаполненный текущим
 // значением поля, где можно дописать выражение (например "+100") с клавиатуры или
 // кнопками и получить результат обратно в поле.
-export function AmountInput({ value, onChange, className, disabled, ...rest }: AmountInputProps) {
+export function AmountInput({ value, onChange, className, disabled, onBlur, ...rest }: AmountInputProps) {
   const ref = useRef<HTMLInputElement>(null);
   const caretRef = useRef<number | null>(null);
   const calcButtonRef = useRef<HTMLButtonElement>(null);
@@ -231,7 +233,7 @@ export function AmountInput({ value, onChange, className, disabled, ...rest }: A
         value={formatAmount(value, !focused)}
         disabled={disabled}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => { setFocused(false); onBlur?.(); }}
         onChange={(e) => {
           const input = e.target;
           const caret = input.selectionStart ?? input.value.length;
