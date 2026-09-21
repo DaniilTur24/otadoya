@@ -683,6 +683,7 @@ export default function RevenueListPage() {
     setModerating(null);
     setModerateComment('');
     load();
+    loadCashBalance();
   }
 
   function startEdit(entry: RevenueEntry) {
@@ -874,6 +875,7 @@ export default function RevenueListPage() {
     if (!(await deleteRevenueEntry(id))) return;
     if (editingId === id) cancelEdit();
     load();
+    loadCashBalance();
   }
 
   function toggleSelect(id: number) {
@@ -901,6 +903,7 @@ export default function RevenueListPage() {
     }
     if (editingId !== null && selectedIds.has(editingId)) cancelEdit();
     load();
+    loadCashBalance();
   }
 
   async function saveEdit() {
@@ -1001,7 +1004,7 @@ export default function RevenueListPage() {
       }),
     });
 
-    if (res.ok) { cancelEdit(); load(); }
+    if (res.ok) { cancelEdit(); load(); loadCashBalance(); }
     else { const d = await res.json(); setSaveError(d.error || 'Ошибка сохранения'); }
     setSaving(false);
   }
@@ -1428,6 +1431,7 @@ export default function RevenueListPage() {
       body: JSON.stringify({ excludedFromReport: false }),
     });
     load();
+    loadCashBalance();
   }
 
   // Общие для десктоп-таблицы и мобильных карточек производные значения строки —
