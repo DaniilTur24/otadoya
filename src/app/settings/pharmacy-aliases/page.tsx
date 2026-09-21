@@ -169,6 +169,7 @@ export default function PharmacyAliasesSettingsPage() {
           </div>
 
           <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
@@ -201,6 +202,7 @@ export default function PharmacyAliasesSettingsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       </div>
