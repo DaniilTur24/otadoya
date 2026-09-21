@@ -258,6 +258,14 @@ function CashDayPanel({
                   label="в т. ч. не подтверждено"
                   value={fmt(balance.unconfirmed)}
                   valueClass="text-amber-700"
+                  note={
+                    <span
+                      className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold leading-none cursor-help shrink-0"
+                      title={`В остатке учтены записи на проверке — накопительно, вместе с прошлыми днями. Подтверждение ничего не изменит, а отклонение уменьшит остаток на ${fmt(balance.unconfirmed)} и сдвинет все последующие дни.`}
+                    >
+                      !
+                    </span>
+                  }
                 />
                 <CashLine
                   label="остаток без них"
@@ -267,14 +275,6 @@ function CashDayPanel({
               </>
             )}
           </div>
-
-          {balance.unconfirmed !== 0 && (
-            <p className="text-xs text-amber-700 mt-1.5">
-              В остатке учтены записи на проверке — накопительно, вместе с прошлыми днями.
-              Подтверждение ничего не изменит, а отклонение уменьшит остаток на {fmt(balance.unconfirmed)}
-              {' '}и сдвинет все последующие дни.
-            </p>
-          )}
 
           {hiddenFromTable !== 0 && (
             <p className="text-xs text-slate-500 mt-1">
@@ -293,7 +293,7 @@ function CashLine({
   value: string;
   valueClass?: string;
   strong?: boolean;
-  note?: string;
+  note?: React.ReactNode;
 }) {
   return (
     <div className="flex items-baseline gap-2 py-0.5">
@@ -301,7 +301,7 @@ function CashLine({
       <span className={`w-36 text-right tabular-nums ${strong ? 'font-semibold' : ''} ${valueClass ?? 'text-slate-900'}`}>
         {value}
       </span>
-      {note && <span className="text-xs text-amber-700">{note}</span>}
+      {note}
     </div>
   );
 }
