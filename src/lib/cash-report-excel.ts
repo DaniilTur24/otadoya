@@ -78,8 +78,8 @@ export async function buildCashReportWorkbook(
       'Статья расхода / комментарий',
       'Приход',
       'Расход',
-      'Сальдо',
       'Общий оборот',
+      'Сальдо',
     ]);
     headerRow.eachCell((cell) => {
       cell.fill = HEADER_FILL;
@@ -88,9 +88,11 @@ export async function buildCashReportWorkbook(
     });
 
     for (const day of section.days) {
-      // Остаток переносится со вчера и живёт сквозь весь период — как на странице выручки.
-      // Без месяца старта у аптеки остатка нет, и колонка остаётся пустой.
+      // "Общий оборот" — приход минус расход день, каждый день заново от нуля.
+      // "Сальдо" переносится со вчера и живёт сквозь весь период — как на странице выручки.
+      // Без месяца старта у аптеки сальдо нет, и эта колонка остаётся пустой.
       const hasBalance = day.balance != null;
+      let turnover = 0;
       let balance = day.balance ? day.balance.openingBalance : 0;
 
       if (day.balance) {
@@ -100,14 +102,15 @@ export async function buildCashReportWorkbook(
           'Остаток с прошлого дня',
           '',
           '',
-          balance,
           '',
+          balance,
         ]);
         openingRow.getCell(3).font = { italic: true, color: { argb: 'FF64748B' } };
-        openingRow.getCell(6).numFmt = '#,##0';
+        openingRow.getCell(7).numFmt = '#,##0';
         openingRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
       }
 
+      turnover += day.cashRevenue;
       balance += day.cashRevenue;
 
       const revenueRow = sheet.addRow([
@@ -116,23 +119,28 @@ export async function buildCashReportWorkbook(
         'Выручка нал.',
         day.cashRevenue,
         '',
+        turnover,
         hasBalance ? balance : '',
-        '',
       ]);
       revenueRow.getCell(3).font = { color: { argb: 'FF64748B' } };
       revenueRow.getCell(4).numFmt = '#,##0';
       revenueRow.getCell(6).numFmt = '#,##0';
+      revenueRow.getCell(7).numFmt = '#,##0';
       revenueRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
 
       for (const line of day.expenseLines) {
-        if (line.affectsCash) balance -= line.amount;
+        if (line.affectsCash) {
+          turnover -= line.amount;
+          balance -= line.amount;
+        }
 
         const label = [line.categoryLabel, line.recipientName ? `— ${line.recipientName}` : null, line.comment]
           .filter(Boolean)
           .join(' ');
-        const lineRow = sheet.addRow(['', '', label, '', line.amount, hasBalance ? balance : '', '']);
+        const lineRow = sheet.addRow(['', '', label, '', line.amount, turnover, hasBalance ? balance : '']);
         lineRow.getCell(5).numFmt = '#,##0';
         lineRow.getCell(6).numFmt = '#,##0';
+        lineRow.getCell(7).numFmt = '#,##0';
 
         if (!line.affectsCash) {
           const italicGray = { italic: true, color: { argb: 'FF94A3B8' } };
@@ -144,11 +152,13 @@ export async function buildCashReportWorkbook(
       }
 
       if (day.balance && day.balance.deposit !== 0) {
+        turnover -= day.balance.deposit;
         balance -= day.balance.deposit;
-        const depositRow = sheet.addRow(['', '', 'Сдано в банк', '', day.balance.deposit, balance, '']);
+        const depositRow = sheet.addRow(['', '', 'Сдано в банк', '', day.balance.deposit, turnover, balance]);
         depositRow.getCell(3).font = { bold: true };
         depositRow.getCell(5).numFmt = '#,##0';
         depositRow.getCell(6).numFmt = '#,##0';
+        depositRow.getCell(7).numFmt = '#,##0';
         depositRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
       }
 
@@ -158,9 +168,9 @@ export async function buildCashReportWorkbook(
         '',
         day.cashRevenue,
         day.cashExpensesTotal + (day.balance?.deposit ?? 0),
+        turnover,
         // Дни до месяца старта остатка не имеют — там колонка пустая, как и на экране.
         day.balance ? day.balance.closingBalance : '',
-        day.cashNet,
       ]);
       dayTotalRow.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = DAY_TOTAL_FILL;
@@ -182,8 +192,8 @@ export async function buildCashReportWorkbook(
       '',
       section.totalCashRevenue,
       section.totalCashExpenses + totalDeposits,
+      section.totalCashNet - totalDeposits,
       lastWithBalance ? lastWithBalance.balance!.closingBalance : section.totalCashNet,
-      section.totalCashNet,
     ]);
     periodTotalRow.eachCell({ includeEmpty: true }, (cell) => {
       cell.fill = PERIOD_TOTAL_FILL;
