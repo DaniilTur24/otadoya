@@ -147,6 +147,26 @@ function CashDayRow({
   hiddenFromTable: number;
   onSaveDeposit: (amount: number) => Promise<void>;
 }) {
+  return (
+    <tr className="bg-sky-50 border-b-2 border-slate-300">
+      <td colSpan={15} className="px-3 py-3">
+        <CashDayPanel balance={balance} hiddenFromTable={hiddenFromTable} onSaveDeposit={onSaveDeposit} />
+      </td>
+    </tr>
+  );
+}
+
+// Тело кассового блока без табличной обвязки — общее для десктоп-строки (CashDayRow)
+// и мобильной карточки дня, чтобы расчёт и вёрстка кассы не разъезжались.
+function CashDayPanel({
+  balance,
+  hiddenFromTable,
+  onSaveDeposit,
+}: {
+  balance: CashDayBalance;
+  hiddenFromTable: number;
+  onSaveDeposit: (amount: number) => Promise<void>;
+}) {
   const [value, setValue] = useState(balance.deposit ? String(balance.deposit) : '');
   const [saving, setSaving] = useState(false);
 
@@ -159,9 +179,6 @@ function CashDayRow({
   const parsed = value ? parseFloat(value) : 0;
   const changed = Number.isFinite(parsed) && parsed !== balance.deposit;
 
-  // Взнос сохраняется только по явному действию — кнопкой или Enter. Автосохранение
-  // по потере фокуса здесь уже приводило к записям, которых никто не вводил: поле теряет
-  // фокус и когда строка просто исчезает из-за смены фильтра.
   async function commit() {
     if (saving || !changed) return;
     setSaving(true);
@@ -178,15 +195,13 @@ function CashDayRow({
   }
 
   return (
-    <tr className="bg-sky-50 border-b-2 border-slate-300">
-      <td colSpan={15} className="px-3 py-3">
-        <div className="max-w-xl text-sm">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Касса</div>
+    <div className="max-w-xl text-sm">
+      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Касса</div>
 
-          <CashLine label="Остаток с прошлого дня" value={fmt(balance.openingBalance)} />
-          <CashLine label="+ Выручка наличными" value={fmt(balance.cashRevenue)} valueClass="text-green-700" />
-          <CashLine label="− Выдано из кассы" value={fmt(balance.cashExpenses)} valueClass="text-red-600" />
-          <CashLine label="= В кассе на конец дня" value={fmt(balance.balanceBeforeDeposit)} strong />
+      <CashLine label="Остаток с прошлого дня" value={fmt(balance.openingBalance)} />
+      <CashLine label="+ Выручка наличными" value={fmt(balance.cashRevenue)} valueClass="text-green-700" />
+      <CashLine label="− Выдано из кассы" value={fmt(balance.cashExpenses)} valueClass="text-red-600" />
+      <CashLine label="= В кассе на конец дня" value={fmt(balance.balanceBeforeDeposit)} strong />
 
           <div className="flex items-center gap-2 py-1 border-t border-sky-200 mt-1 pt-1.5">
             <span className="text-slate-600 w-52 shrink-0">− Сдано в банк</span>
@@ -267,8 +282,6 @@ function CashDayRow({
             </p>
           )}
         </div>
-      </td>
-    </tr>
   );
 }
 
@@ -391,6 +404,98 @@ function DayTotalRow({ entries }: { entries: RevenueEntry[] }) {
       <td className="td" colSpan={2} />
       <td className="td bg-slate-50 border-l border-slate-300 sticky right-0 z-10" />
     </tr>
+  );
+}
+
+// Мобильный аналог DaySummaryRow — тот же расчёт, но карточкой вместо табличной строки.
+function DaySummaryCard({
+  dateKey, entries, balance, expanded, showPharmacy, onToggle,
+}: {
+  dateKey: string;
+  entries: RevenueEntry[];
+  balance: CashDayBalance | undefined;
+  expanded: boolean;
+  showPharmacy: boolean;
+  onToggle: () => void;
+}) {
+  const s = summarizeEntries(entries);
+  const pharmacyNames = [...new Set(entries.map((e) => e.pharmacy.name))];
+  const hasPending = entries.some((e) => e.status === 'pending');
+
+  return (
+    <div
+      className={`px-3 py-2.5 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 active:bg-slate-200/60'}`}
+      onClick={onToggle}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-slate-900 flex items-center gap-1.5">
+          <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
+          {fmtDate(dateKey)}
+        </span>
+        <span className="text-xs text-slate-400 shrink-0">
+          {entries.length === 1 ? '1 смена' : `${entries.length} смен`}
+        </span>
+      </div>
+      {showPharmacy && (
+        <div className="text-xs text-slate-500 truncate mt-0.5 pl-[18px]" title={pharmacyNames.join(', ')}>
+          {pharmacyNames.length === 1 ? pharmacyNames[0] : `${pharmacyNames.length} аптеки`}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm mt-1.5 pl-[18px]">
+        <span className="text-slate-500">Выручка <strong className="text-green-700">{fmt(s.totalRevenue)}</strong></span>
+        <span className="text-slate-500">
+          Наличными <strong className={s.cashNet >= 0 ? 'text-slate-900' : 'text-red-700'}>{fmt(s.cashNet)}</strong>
+        </span>
+        {balance && (
+          <span className="text-slate-500">
+            В кассе <strong className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700'}>{fmt(balance.closingBalance)}</strong>
+          </span>
+        )}
+      </div>
+      {(hasPending || (balance && balance.deposit > 0)) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-[18px] text-xs">
+          {hasPending && <span className="text-amber-700">есть записи на проверке</span>}
+          {balance && balance.deposit > 0 && <span className="text-slate-500">сдано в банк {fmt(balance.deposit)}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Мобильный аналог DayTotalRow — те же суммы, вёрстка сеткой вместо колонок таблицы.
+function DayTotalCard({ entries }: { entries: RevenueEntry[] }) {
+  const s = summarizeEntries(entries);
+
+  return (
+    <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 text-sm">
+      <div className="text-xs text-slate-500 mb-1">Итого за день</div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Нал.</span><span className="text-green-700 font-medium">{fmt(s.totalCash)}</span></div>
+        <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Терм.</span><span className="text-green-700 font-medium">{fmt(s.totalTerminal)}</span></div>
+        {s.totalKaspi > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Каспи</span><span className="text-green-700 font-medium">{fmt(s.totalKaspi)}</span></div>
+        )}
+        {s.totalIncomes > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доп. доходы</span><span className="text-green-700 font-medium">{fmt(s.totalIncomes)}</span></div>
+        )}
+        <div className="flex justify-between col-span-2 pt-1 mt-1 border-t border-slate-200 font-semibold">
+          <span className="text-slate-700">Выручка</span>
+          <span className="text-green-700">{fmt(s.totalRevenue)}</span>
+        </div>
+        {s.totalBonuses > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Бонусы</span><span className="text-red-600">{fmt(s.totalBonuses)}</span></div>
+        )}
+        {s.totalAdvances > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Зарплаты</span><span className="text-red-600">{fmt(s.totalAdvances)}</span></div>
+        )}
+        {s.totalSurcharges > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доплаты</span><span className="text-red-600">{fmt(s.totalSurcharges)}</span></div>
+        )}
+        {s.totalExpenses > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Расходы</span><span className="text-red-600">{fmt(s.totalExpenses)}</span></div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1729,7 +1834,24 @@ export default function RevenueListPage() {
           {/* Мобильная версия — карточки вместо таблицы, та же информация и те же действия,
               просто без горизонтальной прокрутки по 13 колонкам. */}
           <div className="md:hidden divide-y divide-slate-200">
-            {visibleEntries.map((entry) => {
+            {groupEntriesByDate(visibleEntries).map((group) => {
+              const dayBalance = cashBalance?.configured
+                ? cashBalance.days.find((d) => d.date === group.dateKey)
+                : undefined;
+              const isExpanded = expandedDays.has(group.dateKey);
+              return (
+                <div key={group.dateKey}>
+                  <DaySummaryCard
+                    dateKey={group.dateKey}
+                    entries={group.entries}
+                    balance={dayBalance}
+                    expanded={isExpanded}
+                    showPharmacy={!filterPharmacy}
+                    onToggle={() => toggleDay(group.dateKey)}
+                  />
+                  {isExpanded && (
+                    <div className="divide-y divide-slate-100">
+                      {group.entries.map((entry) => {
               const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
                 getEntryDerived(entry);
               const cardBg = isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-amber-50/40' : '';
@@ -1838,6 +1960,27 @@ export default function RevenueListPage() {
                       <button className="btn-danger text-sm flex-1" onClick={() => deleteEntry(entry.id)}>Удалить</button>
                     </div>
                   ) : null}
+                </div>
+              );
+                      })}
+                    </div>
+                  )}
+                  {isExpanded && <DayTotalCard entries={group.entries} />}
+                  {isExpanded && dayBalance && (() => {
+                    const visible = summarizeEntries(group.entries);
+                    const visibleCashFlow =
+                      visible.totalCash - visible.totalBonuses - visible.totalAdvances - visible.totalExpenses;
+                    const balanceCashFlow = dayBalance.cashRevenue - dayBalance.cashExpenses;
+                    return (
+                      <div className="bg-sky-50 border-t-2 border-slate-300 px-3 py-3">
+                        <CashDayPanel
+                          balance={dayBalance}
+                          hiddenFromTable={balanceCashFlow - visibleCashFlow}
+                          onSaveDeposit={(amount) => saveCashMovement(group.dateKey, amount)}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
