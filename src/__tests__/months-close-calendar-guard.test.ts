@@ -212,3 +212,34 @@ describe('POST /api/months/close — блокировка при записях 
     expect(createClosedMonth).toHaveBeenCalled();
   });
 });
+
+// QA раунд 3 №5 / раунд 4 №14: лестница включена, порогов у аптеки нет → премия тихо 0.
+// Замораживать такой ноль нельзя — тот же класс, что календарь и ставка.
+describe('POST /api/months/close — блокировка без лестницы премии у аптеки', () => {
+  it('отклоняет закрытие и называет аптеки и сотрудников', async () => {
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 1, employeeName: 'Заведующая Айгуль', pharmacyId: null, ladderConfigMissing: true, ladderConfigMissingPharmacies: ['hi hi', 'hu hu'] },
+      { employeeId: 1, employeeName: 'Заведующая Айгуль', pharmacyId: 2, ladderConfigMissing: true, ladderConfigMissingPharmacies: ['hi hi'] },
+      { employeeId: 2, employeeName: 'Продавец Аян', pharmacyId: null, ladderConfigMissing: false, ladderConfigMissingPharmacies: [] },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/лестницу премии/);
+    expect(res.body.error).toMatch(/hi hi, hu hu/);
+    expect(res.body.error).toMatch(/Заведующая Айгуль/);
+    expect(res.body.error).not.toMatch(/Продавец Аян/);
+    expect(createClosedMonth).not.toHaveBeenCalled();
+  });
+
+  it('закрывает как обычно, когда лестница настроена или выключена', async () => {
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 1, employeeName: 'Заведующая', pharmacyId: null, ladderConfigMissing: false, ladderConfigMissingPharmacies: [] },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number };
+    expect(res.status).toBe(200);
+    expect(createClosedMonth).toHaveBeenCalled();
+  });
+});

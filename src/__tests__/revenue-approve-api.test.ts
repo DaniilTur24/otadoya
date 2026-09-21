@@ -22,6 +22,7 @@ import { prisma } from '@/lib/prisma';
 import { POST as approveRevenue } from '@/app/api/revenue/[id]/approve/route';
 import { POST as approveExpense } from '@/app/api/expenses/[id]/approve/route';
 import { POST as rejectExpense } from '@/app/api/expenses/[id]/reject/route';
+import { PUT as putExpense } from '@/app/api/expenses/[id]/route';
 
 type Mock = ReturnType<typeof vi.fn>;
 const findUniqueEntry = prisma.dailyRevenueEntry.findUnique as unknown as Mock;
@@ -118,5 +119,53 @@ describe('POST /api/expenses/[id]/approve|reject — закрытый месяц
     findUniqueExpense.mockResolvedValue(null);
     const res = await approveExpense(makeRequest('http://localhost/api/expenses/5/approve'), makeParams(5)) as unknown as { status: number };
     expect(res.status).toBe(404);
+  });
+});
+
+// QA раунд 4, №12: PUT принимал любые status/category/amount и не смотрел на закрытый месяц.
+describe('PUT /api/expenses/[id] — валидация и закрытый месяц', () => {
+  function makePut(body: unknown, role = 'admin'): NextRequest {
+    return new Request('http://localhost/api/expenses/1', {
+      method: 'PUT',
+      headers: { 'x-user-role': role, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }) as unknown as NextRequest;
+  }
+
+  it('423, если месяц операции закрыт', async () => {
+    findUniqueClosedMonth.mockResolvedValue({ id: 1 });
+    const res = await putExpense(makePut({ amount: 999 }), makeParams(1)) as unknown as { status: number };
+    expect(res.status).toBe(423);
+    expect(updateExpense).not.toHaveBeenCalled();
+  });
+
+  it('404, если строки нет', async () => {
+    findUniqueExpense.mockResolvedValue(null);
+    const res = await putExpense(makePut({ amount: 1 }), makeParams(1)) as unknown as { status: number };
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ['status', { status: 'done' }, /Некорректный статус/],
+    ['category', { category: 'salary' }, /rent или expense/],
+    ['amount (отрицательная)', { amount: -5 }, /неотрицательным/],
+    ['amount (не число)', { amount: 'abc' }, /неотрицательным/],
+  ])('400 на некорректный %s', async (_label, body, pattern) => {
+    const res = await putExpense(makePut(body), makeParams(1)) as unknown as { status: number; body: { error: string } };
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(pattern);
+    expect(updateExpense).not.toHaveBeenCalled();
+  });
+
+  it('корректная правка проходит и сохраняет только переданные поля', async () => {
+    const res = await putExpense(makePut({ category: 'rent', amount: 350000, pharmacyId: 2 }), makeParams(1)) as unknown as { status: number };
+    expect(res.status).toBe(200);
+    const data = updateExpense.mock.calls[updateExpense.mock.calls.length - 1][0].data;
+    expect(data).toEqual({ category: 'rent', amount: '350000', pharmacyId: 2 });
+  });
+
+  it('бухгалтеру недоступно (403)', async () => {
+    const res = await putExpense(makePut({ amount: 1 }, 'bookkeeper'), makeParams(1)) as unknown as { status: number };
+    expect(res.status).toBe(403);
   });
 });
