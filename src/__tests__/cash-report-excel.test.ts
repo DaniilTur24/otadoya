@@ -35,7 +35,7 @@ function section(days: CashReportDay[]): CashReportPharmacySection {
 async function rowsOf(sections: CashReportPharmacySection[]) {
   const wb = await buildCashReportWorkbook(sections, { from: null, to: null, statusFilter: null });
   const sheet = wb.worksheets[0];
-  const rows: { first: string; item: string; income: unknown; expense: unknown; balance: unknown }[] = [];
+  const rows: { first: string; item: string; income: unknown; expense: unknown; balance: unknown; turnover: unknown }[] = [];
   sheet.eachRow((row) => {
     rows.push({
       first: String(row.getCell(1).value ?? ''),
@@ -43,6 +43,7 @@ async function rowsOf(sections: CashReportPharmacySection[]) {
       income: row.getCell(4).value,
       expense: row.getCell(5).value,
       balance: row.getCell(6).value,
+      turnover: row.getCell(7).value,
     });
   });
   return rows;
@@ -100,5 +101,35 @@ describe('buildCashReportWorkbook', () => {
     // Итог дня тоже не должен подставлять сюда оборот — иначе его примут за остаток.
     const total = rows.find((r) => r.first.startsWith('Итого за'));
     expect(total?.balance).toBeFalsy();
+  });
+
+  it('показывает "Общий оборот" (приход минус расход дня, без переноса и без инкассации) только на итоговых строках', async () => {
+    const rows = await rowsOf([
+      section([
+        day({
+          date: '2026-09-01',
+          cashRevenue: 300_000,
+          expenseLines: [
+            { category: 'rentExpenses', categoryLabel: 'Аренда', amount: 50_000, comment: null, recipientName: null, affectsCash: true },
+          ],
+          balance: { openingBalance: 0, deposit: 250_000, closingBalance: 0 },
+        }),
+        day({
+          date: '2026-09-02',
+          cashRevenue: 100_000,
+          balance: { openingBalance: 0, deposit: 0, closingBalance: 100_000 },
+        }),
+      ]),
+    ]);
+
+    // На строках выручки/расхода/остатка "Общий оборот" не заполняется — только на итогах дня.
+    const revenueRow = rows.find((r) => r.item === 'Выручка нал.');
+    expect(revenueRow?.turnover).toBeFalsy();
+
+    const dayTotals = rows.filter((r) => r.first.startsWith('Итого за'));
+    expect(dayTotals.map((r) => r.turnover)).toEqual([250_000, 100_000]); // 300000-50000, 100000-0
+
+    const period = rows.find((r) => r.first === 'ИТОГО ЗА ПЕРИОД');
+    expect(period?.turnover).toBe(350_000); // сумма оборотов дней, без переноса/инкассации
   });
 });

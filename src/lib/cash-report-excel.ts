@@ -22,10 +22,6 @@ function formatDate(dateKey: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function statusesLabel(statuses: string[]): string {
-  return statuses.map((s) => STATUS_LABELS[s] ?? s).join(' / ');
-}
-
 export interface CashReportMeta {
   from: string | null;
   to: string | null;
@@ -82,8 +78,8 @@ export async function buildCashReportWorkbook(
       'Статья расхода / комментарий',
       'Приход',
       'Расход',
-      'Остаток',
-      'Статус',
+      'Сальдо',
+      'Общий оборот',
     ]);
     headerRow.eachCell((cell) => {
       cell.fill = HEADER_FILL;
@@ -121,7 +117,7 @@ export async function buildCashReportWorkbook(
         day.cashRevenue,
         '',
         hasBalance ? balance : '',
-        statusesLabel(day.statuses),
+        '',
       ]);
       revenueRow.getCell(3).font = { color: { argb: 'FF64748B' } };
       revenueRow.getCell(4).numFmt = '#,##0';
@@ -164,7 +160,7 @@ export async function buildCashReportWorkbook(
         day.cashExpensesTotal + (day.balance?.deposit ?? 0),
         // Дни до месяца старта остатка не имеют — там колонка пустая, как и на экране.
         day.balance ? day.balance.closingBalance : '',
-        '',
+        day.cashNet,
       ]);
       dayTotalRow.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = DAY_TOTAL_FILL;
@@ -174,6 +170,7 @@ export async function buildCashReportWorkbook(
       dayTotalRow.getCell(4).numFmt = '#,##0';
       dayTotalRow.getCell(5).numFmt = '#,##0';
       dayTotalRow.getCell(6).numFmt = '#,##0';
+      dayTotalRow.getCell(7).numFmt = '#,##0';
     }
 
     const lastWithBalance = [...section.days].reverse().find((d) => d.balance);
@@ -186,7 +183,7 @@ export async function buildCashReportWorkbook(
       section.totalCashRevenue,
       section.totalCashExpenses + totalDeposits,
       lastWithBalance ? lastWithBalance.balance!.closingBalance : section.totalCashNet,
-      '',
+      section.totalCashNet,
     ]);
     periodTotalRow.eachCell({ includeEmpty: true }, (cell) => {
       cell.fill = PERIOD_TOTAL_FILL;
@@ -196,6 +193,7 @@ export async function buildCashReportWorkbook(
     periodTotalRow.getCell(4).numFmt = '#,##0';
     periodTotalRow.getCell(5).numFmt = '#,##0';
     periodTotalRow.getCell(6).numFmt = '#,##0';
+    periodTotalRow.getCell(7).numFmt = '#,##0';
   }
 
   if (sections.length === 0) {
