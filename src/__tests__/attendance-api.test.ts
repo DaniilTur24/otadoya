@@ -15,8 +15,9 @@ vi.mock('@/lib/prisma', () => ({
     employee: { findUnique: vi.fn() },
     employeePharmacy: { findFirst: vi.fn() },
     userPharmacy: { findMany: vi.fn() },
-    attendanceShift: { create: vi.fn() },
+    attendanceShift: { create: vi.fn(), count: vi.fn() },
     closedMonth: { findUnique: vi.fn() },
+    workingCalendar: { findFirst: vi.fn() },
     dailyRevenueEntry: { findFirst: vi.fn() },
   },
 }));
@@ -44,6 +45,9 @@ beforeEach(() => {
   // вызывается вовсе, см. отдельный describe ниже).
   findFirstEmployeePharmacy.mockReset().mockResolvedValue({ employeeId: 28, pharmacyId: 2 });
   createShift.mockReset().mockResolvedValue({ id: 1 });
+  // По умолчанию календарь за месяц не заполнен → ограничения по норме нет (см. отдельный describe).
+  (prisma.workingCalendar.findFirst as unknown as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(null);
+  (prisma.attendanceShift.count as unknown as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(0);
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
   findFirstRevenueEntry.mockReset().mockResolvedValue(null);
 });
@@ -172,5 +176,73 @@ describe('POST /api/attendance — запрет записи в закрытый
 
     const where = findUniqueClosedMonth.mock.calls.at(-1)![0].where;
     expect(where).toEqual({ year_month: { year: 2026, month: 3 } });
+  });
+});
+
+// QA раунд 3 №7 / раунд 4 №13: 28 отметок при норме 22 → +27% к окладу. Раньше — только жёлтый
+// текст в табеле. Теперь новая отметка сверх нормы не принимается для типов с окладом «по норме».
+describe('POST /api/attendance — норма производственного календаря', () => {
+  const calendar = prisma.workingCalendar.findFirst as unknown as ReturnType<typeof vi.fn>;
+  const countShifts = prisma.attendanceShift.count as unknown as ReturnType<typeof vi.fn>;
+
+  it.each(['manager_fixed', 'pharmacy_manager', 'office'])('%s: 409, если норма уже выбрана', async (employeeType) => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType });
+    calendar.mockResolvedValue({ workingDays: 22 });
+    countShifts.mockResolvedValue(22);
+
+    const res = await POST(makeRequest({ employeeId: 28, date: '2026-06-26' })) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/Норма за месяц — 22/);
+    expect(res.body.error).toMatch(/уже отмечено 22/);
+    expect(createShift).not.toHaveBeenCalled();
+  });
+
+  it('продавец на пятидневке через табель тоже ограничен нормой', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'seller', fiveDayViaAttendance: true });
+    calendar.mockResolvedValue({ workingDays: 22 });
+    countShifts.mockResolvedValue(22);
+
+    const res = await POST(makeRequest({ employeeId: 28, date: '2026-06-26' })) as unknown as { status: number };
+    expect(res.status).toBe(409);
+  });
+
+  it('разрешает отметку, пока норма не выбрана (21 из 22)', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'manager_fixed' });
+    calendar.mockResolvedValue({ workingDays: 22 });
+    countShifts.mockResolvedValue(21);
+
+    const res = await POST(makeRequest({ employeeId: 28, date: '2026-06-26' })) as unknown as { status: number };
+    expect(res.status).toBe(201);
+  });
+
+  it.each(['cleaner', 'seller_five_day_fixed'])('%s платится по ставке за смену — нормы нет', async (employeeType) => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType });
+    calendar.mockResolvedValue({ workingDays: 22 });
+    countShifts.mockResolvedValue(30);
+
+    const res = await POST(makeRequest({ employeeId: 28, date: '2026-06-26' })) as unknown as { status: number };
+    expect(res.status).toBe(201);
+  });
+
+  it('без календаря за месяц ограничения нет (это ловит calendarMissing при закрытии)', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'office' });
+    calendar.mockResolvedValue(null);
+    countShifts.mockResolvedValue(30);
+
+    const res = await POST(makeRequest({ employeeId: 28, date: '2026-06-26' })) as unknown as { status: number };
+    expect(res.status).toBe(201);
+  });
+
+  it('считает отметки месяца самой даты, а не текущего', async () => {
+    findUniqueEmployee.mockResolvedValue({ id: 28, employeeType: 'office' });
+    calendar.mockResolvedValue({ workingDays: 20 });
+    countShifts.mockResolvedValue(0);
+
+    await POST(makeRequest({ employeeId: 28, date: '2026-03-10' }));
+
+    expect(calendar).toHaveBeenLastCalledWith({ where: { year: 2026, month: 3 }, select: { workingDays: true } });
+    const where = countShifts.mock.calls[countShifts.mock.calls.length - 1][0].where;
+    expect(where.date.gte).toEqual(new Date(2026, 2, 1));
   });
 });

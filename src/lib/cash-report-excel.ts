@@ -48,7 +48,7 @@ export async function buildCashReportWorkbook(
       : meta.to
       ? `по ${formatDate(meta.to)}`
       : 'весь период';
-  const statusLabel = meta.statusFilter ? STATUS_LABELS[meta.statusFilter] ?? meta.statusFilter : 'Все статусы';
+  const statusLabel = meta.statusFilter ? STATUS_LABELS[meta.statusFilter] ?? meta.statusFilter : 'Подтверждённые';
 
   for (const section of sections) {
     const sheetName = section.pharmacyName.slice(0, 31).replace(/[[\]*?/\\:]/g, ' ');

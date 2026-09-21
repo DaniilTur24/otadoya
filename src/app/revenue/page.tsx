@@ -580,22 +580,6 @@ export default function RevenueListPage() {
     load();
   }
 
-  async function rejectEntry(id: number) {
-    if (!moderateComment.trim()) {
-      alert('Укажите причину отклонения');
-      return;
-    }
-    if (!confirm('Отклонить запись?')) return;
-    await fetch(`/api/revenue/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookkeeperComment: moderateComment }),
-    });
-    setModerating(null);
-    setModerateComment('');
-    load();
-  }
-
   function startEdit(entry: RevenueEntry) {
     setEditingId(entry.id);
     setSaveError('');
@@ -1674,16 +1658,16 @@ export default function RevenueListPage() {
                               <input
                                 type="text"
                                 className="input flex-1"
-                                placeholder="Комментарий бухгалтера (обязателен при отклонении)"
+                                placeholder="Комментарий бухгалтера (необязательно)"
                                 value={moderateComment}
                                 onChange={(e) => setModerateComment(e.target.value)}
                               />
+                              {/* «Отклонить» убрано: отклонённая запись прощала выданный из неё аванс
+                                  и запирала день для заведующей. Неверную запись бухгалтер правит
+                                  («Изменить») или удаляет («Удалить»). */}
                               <div className="flex gap-2 shrink-0">
                                 <button className="btn-success text-sm" onClick={() => approveEntry(entry.id)}>
                                   Подтвердить
-                                </button>
-                                <button className="btn-danger text-sm" onClick={() => rejectEntry(entry.id)}>
-                                  Отклонить
                                 </button>
                               </div>
                             </div>
@@ -1741,7 +1725,7 @@ export default function RevenueListPage() {
             } = summarizeEntries(visibleEntries);
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
-                <span className="text-slate-500">Итого по выбранным записям:</span>
+                <span className="text-slate-500">Итого по подтверждённым записям:</span>
                 <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
                 <span className="text-slate-500">
                   нал. <strong className="text-slate-700">{fmt(totalCash)}</strong>

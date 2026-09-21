@@ -1,5 +1,35 @@
 import { prisma } from '@/lib/prisma';
 import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types';
+import { REVENUE_ITEM_CATEGORIES, monthlyFieldLabel } from '@/lib/monthly-report-fields';
+
+/**
+ * Типы смены, которые принимает запись выручки. 'five_day' в форме давно не предлагается
+ * (SHIFT_OPTIONS в shift-types.ts) и зарплату не даёт, но занимал бы день для другой смены —
+ * поэтому сервер его тоже не принимает (QA раунд 4, №17).
+ */
+export const REVENUE_SHIFT_TYPES: ReadonlySet<string> = new Set(['day', 'full_day']);
+
+export function validateShiftTypeValue(shiftType: unknown): string | null {
+  if (shiftType == null || shiftType === '') return null;
+  if (typeof shiftType !== 'string' || !REVENUE_SHIFT_TYPES.has(shiftType)) {
+    return 'Недопустимый тип смены';
+  }
+  return null;
+}
+
+/**
+ * Категория строки расхода — только из списка, который предлагает форма. Пустая (null) допустима:
+ * такие строки уходят в «Прочие расходы».
+ */
+export function validateExpenseItemCategories(items: { category?: string | null }[]): string | null {
+  for (const item of items) {
+    if (item.category == null || item.category === '') continue;
+    if (typeof item.category !== 'string' || !REVENUE_ITEM_CATEGORIES.has(item.category)) {
+      return `Недопустимая статья расхода: ${monthlyFieldLabel(String(item.category))}`;
+    }
+  }
+  return null;
+}
 
 /**
  * Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не должны
@@ -66,6 +96,9 @@ export async function validateUniqueShift(
     where: {
       employeeId,
       shiftType: { not: null },
+      // Отклонённая запись (устаревший статус, новых больше не создаётся) — не смена: иначе
+      // после отклонения заведующая не могла ни исправить её, ни внести новую за этот день.
+      status: { not: 'rejected' },
       date: { gte: dayStart, lte: dayEnd },
       ...(excludeId ? { id: { not: excludeId } } : {}),
     },

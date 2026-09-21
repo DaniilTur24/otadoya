@@ -42,7 +42,7 @@ MANAGER_ALLOWED    = /revenue, /revenue/new, /attendance,
 |---|---|
 | Создать запись выручки (`POST /api/revenue`) | любая роль; у `manager` статус сразу `pending`, у `admin`/`bookkeeper` — сразу `approved` |
 | Редактировать/удалить запись выручки | `admin`/`bookkeeper` — любую; `manager` — только свою (`submittedById === userId`) и только в статусе `pending` |
-| Подтвердить/отклонить запись (`/api/revenue/[id]/approve|reject`) | только `admin`/`bookkeeper` |
+| Подтвердить запись (`/api/revenue/[id]/approve`; в закрытом месяце — 423) | только `admin`/`bookkeeper` |
 | Отметить/снять табель (`/api/attendance`) | любая роль; `manager` — только по своим аптекам |
 | Создать/редактировать сотрудника (`/api/employees`) | только `admin` (создание и `PUT`); `GET` — любая роль с фильтром по аптекам для manager |
 | Создать/редактировать аккаунт заведующего (`/api/users`) | `admin`/`bookkeeper` |

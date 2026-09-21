@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories } from '@/lib/revenue-validation';
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
@@ -79,9 +80,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (shiftType && !['day', 'full_day', 'five_day'].includes(shiftType)) {
-    return NextResponse.json({ error: 'Недопустимый тип смены' }, { status: 400 });
-  }
+  const shiftTypeError = validateShiftTypeValue(shiftType);
+  if (shiftTypeError) return NextResponse.json({ error: shiftTypeError }, { status: 400 });
 
   const amountsError = validateNonNegativeAmounts({ cashRevenue, terminalRevenue, kaspiRevenue, bonusRevenue });
   if (amountsError) return NextResponse.json({ error: amountsError }, { status: 400 });
@@ -123,6 +123,9 @@ export async function POST(request: NextRequest) {
       ? expenseItems.filter((i) => parseFloat(i.amount) > 0)
       : [];
 
+  const categoryError = validateExpenseItemCategories(items);
+  if (categoryError) return NextResponse.json({ error: categoryError }, { status: 400 });
+
   // Авансы и доплаты привязываются к конкретному сотруднику (может отличаться от employeeId
   // записи). Проверяем, что выбранный сотрудник действительно работает в этой аптеке.
   const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
@@ -156,7 +159,9 @@ export async function POST(request: NextRequest) {
   // Менеджер создаёт записи со статусом pending; admin/bookkeeper — сразу approved
   const entryStatus = role === 'manager' ? 'pending' : 'approved';
 
-  const entry = await prisma.$transaction(async (tx) => {
+  let entry;
+  try {
+    entry = await prisma.$transaction(async (tx) => {
     const created = await tx.dailyRevenueEntry.create({
       data: {
         pharmacyId: Number(pharmacyId),
@@ -193,7 +198,16 @@ export async function POST(request: NextRequest) {
       where: { id: created.id },
       include: { pharmacy: true, expenseItems: { orderBy: { id: 'asc' } } },
     });
-  });
+    });
+  } catch (err) {
+    // validateUniqueShift выше — findFirst без блокировки, два одновременных запроса (двойной
+    // клик, ретрай) её проходят оба. Последнее слово — за частичным уникальным индексом в БД
+    // (миграция 20260917120000): второй insert получает P2002, а не вторую оплачиваемую смену.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return NextResponse.json({ error: 'У этого сотрудника уже есть смена на эту дату — нельзя назначить вторую' }, { status: 409 });
+    }
+    throw err;
+  }
 
   return NextResponse.json(serializeEntry(entry as unknown as Record<string, unknown>), { status: 201 });
 }

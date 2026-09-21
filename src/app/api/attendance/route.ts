@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole } from '@/lib/api-auth';
 import { canMarkAttendance } from '@/lib/employee-types';
 import { isMonthClosed } from '@/lib/closed-month';
-import { validateNoShiftOnDate, validateNotFutureDate, validateEmployeePharmacyLink } from '@/lib/attendance-validation';
+import { validateNoShiftOnDate, validateNotFutureDate, validateEmployeePharmacyLink, validateWithinWorkingCalendar } from '@/lib/attendance-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,6 +113,12 @@ export async function POST(request: NextRequest) {
   const shiftConflictError = await validateNoShiftOnDate(Number(employeeId), new Date(date));
   if (shiftConflictError) {
     return NextResponse.json({ error: shiftConflictError }, { status: 409 });
+  }
+
+  const markDate = new Date(date);
+  const overCalendarError = await validateWithinWorkingCalendar(employee, markDate.getFullYear(), markDate.getMonth() + 1, 1);
+  if (overCalendarError) {
+    return NextResponse.json({ error: overCalendarError }, { status: 409 });
   }
 
   try {

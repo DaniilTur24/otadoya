@@ -7,6 +7,8 @@ function entry(over: Partial<SummaryEntry> = {}): SummaryEntry {
   const kaspiRevenue = over.kaspiRevenue ?? 0;
   return {
     date: '2026-09-01',
+    status: 'approved',
+    excludedFromReport: false,
     cashRevenue,
     terminalRevenue,
     kaspiRevenue,
@@ -88,6 +90,33 @@ describe('summarizeEntries', () => {
     expect(withIncome.totalIncomes).toBe(2_000);
     expect(withIncome.totalExpenses).toBe(0);
     expect(withIncome.total).toBe(12_000);
+  });
+
+  it('считает записи на проверке в итог — деньги из кассы уже вышли независимо от подтверждения', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000, status: 'pending' }),
+      entry({ cashRevenue: 50_000, status: 'approved' }),
+    ]);
+
+    expect(s.totalCash).toBe(150_000);
+  });
+
+  it('не считает отклонённые записи — они недействительны', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000, status: 'approved' }),
+      entry({ cashRevenue: 999_000, status: 'rejected' }),
+    ]);
+
+    expect(s.totalCash).toBe(100_000);
+  });
+
+  it('не считает записи, вычеркнутые бухгалтером как ошибка/дубль', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000 }),
+      entry({ cashRevenue: 999_000, excludedFromReport: true }),
+    ]);
+
+    expect(s.totalCash).toBe(100_000);
   });
 
   it('на пустом списке даёт нули, а не NaN', () => {

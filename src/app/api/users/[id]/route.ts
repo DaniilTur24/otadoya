@@ -186,6 +186,24 @@ export async function PUT(
   });
 }
 
+/**
+ * Есть ли у карточки сотрудника история, которую жёсткое удаление уничтожило бы: табель
+ * (AttendanceShift.onDelete: Cascade — стирается целиком), смены выручки и авансы/доплаты
+ * (employeeId → SetNull: деньги остаются расходом, но перестают вычитаться из чьей-либо зарплаты
+ * и пропадают из всех отчётов). Та же проверка, что в DELETE /api/employees/[id].
+ */
+async function employeeHasHistory(employeeId: number): Promise<boolean> {
+  const [attendanceCount, revenueCount, expenseItemCount] = await Promise.all([
+    prisma.attendanceShift.count({ where: { employeeId } }),
+    prisma.dailyRevenueEntry.count({ where: { employeeId } }),
+    prisma.dailyExpenseItem.count({ where: { employeeId } }),
+  ]);
+  return attendanceCount > 0 || revenueCount > 0 || expenseItemCount > 0;
+}
+
+const DEACTIVATED_MESSAGE =
+  'У заведующей/менеджера есть табель, смены или авансы — аккаунт и карточка деактивированы, а не удалены, чтобы не стереть историю и выданные деньги';
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -202,16 +220,34 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: 'Менеджер не найден' }, { status: 404 });
     }
+    if (await employeeHasHistory(employeeId)) {
+      await prisma.employee.update({ where: { id: employeeId }, data: { isActive: false } });
+      return NextResponse.json({ ok: true, deactivated: true, message: DEACTIVATED_MESSAGE });
+    }
     await prisma.employee.delete({ where: { id: employeeId } });
     return NextResponse.json({ ok: true });
   }
 
-  // Удаление аккаунта заведующего/менеджера должно убирать и его привязанную
-  // карточку сотрудника (Employee) — иначе она остаётся в системе как "невидимый"
-  // дубликат, которого не видно на /users, но который всё ещё считается в зарплате.
+  // Удаление аккаунта заведующего должно убирать и его привязанную карточку сотрудника
+  // (Employee) — иначе она остаётся в системе как "невидимый" дубликат, которого не видно
+  // на /users, но который всё ещё считается в зарплате. Но если у карточки есть история,
+  // жёсткое удаление каскадом стёрло бы табель и оторвало бы выданные авансы от получателя
+  // (QA раунд 4, №1) — тогда вместо удаления деактивируем и аккаунт (логин перестаёт
+  // работать), и карточку (пропадает из активных списков и сводок будущих месяцев).
+  const user = await prisma.user.findUnique({ where: { id }, select: { employeeId: true } });
+  if (!user) return NextResponse.json({ error: 'Аккаунт не найден' }, { status: 404 });
+
+  if (user.employeeId != null && (await employeeHasHistory(user.employeeId))) {
+    const employeeId = user.employeeId;
+    await prisma.$transaction(async (tx) => {
+      await tx.employee.update({ where: { id: employeeId }, data: { isActive: false } });
+      await tx.user.update({ where: { id }, data: { isActive: false } });
+    });
+    return NextResponse.json({ ok: true, deactivated: true, message: DEACTIVATED_MESSAGE });
+  }
+
   await prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id }, select: { employeeId: true } });
-    if (user?.employeeId != null) {
+    if (user.employeeId != null) {
       await tx.employee.delete({ where: { id: user.employeeId } });
     }
     await tx.user.delete({ where: { id } });

@@ -39,9 +39,12 @@ export async function GET(request: NextRequest) {
   const where: Record<string, unknown> = {};
   if (pharmacyId) where.pharmacyId = Number(pharmacyId);
   // Как и в таблице /revenue: по умолчанию подтверждённые и на проверке — ровно то, что
-  // считает касса. Отклонённая запись недействительна, денег по ней не было.
+  // считает касса (деньги из кассы по ним уже вышли, подтверждение — не факт о движении денег).
+  // Отклонённая запись недействительна, денег по ней не было. excludedFromReport — бухгалтер
+  // вычеркнул запись как ошибочную/дубль (QA раунд 4, №3): такая запись тоже не в счёт.
   if (status) where.status = status;
   else where.status = { not: 'rejected' };
+  where.excludedFromReport = false;
   if (from || to) {
     const date: Record<string, Date> = {};
     if (from) date.gte = new Date(`${from}T00:00:00`);

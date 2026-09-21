@@ -60,7 +60,7 @@ Key Prisma models and what they store:
 | `PharmacyAlias` | Ключевые слова для автоопределения аптеки из текста транзакции |
 | `User` | Аккаунт заведующего/менеджера (`role: 'manager'`): username/passwordHash; связан с аптеками через `UserPharmacy`; `employeeId` — связанная карточка `Employee` (см. Auth & RBAC) |
 | `Employee` | Сотрудник с baseSalary, `employeeType` (формула зарплаты, см. ниже), `shiftRate` (только cleaner), `allowance`/`allowanceDescription` (фикс. доплата, любой тип), `ladderPremiumEnabled`/`managerBonusShareEnabled` (manager_trading/manager_fixed/pharmacy_manager); связан с аптеками через `EmployeePharmacy` (M:N) |
-| `DailyRevenueEntry` | Ежедневная выручка (cash + terminal + kaspi) по сменам `day`/`full_day`/`five_day`, статус pending/approved/rejected |
+| `DailyRevenueEntry` | Ежедневная выручка (cash + terminal + kaspi) по сменам `day`/`full_day`/`five_day`, статус pending/approved (`rejected` — устаревший, новых не создаётся: «Отклонить» убрано, неверную запись правят или удаляют; см. QA раунд 4) |
 | `DailyExpenseItem` | Детализация расходов по записи выручки; `category` — ключ из `MONTHLY_EXPENSE_KEYS`. Имеет собственный nullable `employeeId` — получатель, который может отличаться от сотрудника самой записи (используется для `employeeAdvance`, см. ниже) |
 | `AttendanceShift` | Отметка одной отработанной смены в табеле посещаемости (employeeId + date, опционально pharmacyId) — для типов из `ATTENDANCE_BASED_TYPES`, у которых смена не привязана к записи выручки |
 | `WorkingCalendar` | Кол-во рабочих дней по (год, месяц) — делитель оклада для пятидневной смены (`five_day` / табельных типов) |

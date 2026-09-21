@@ -7,11 +7,22 @@ export interface SummaryExpenseItem {
 
 export interface SummaryEntry {
   date: string;
+  status: string;
+  excludedFromReport: boolean;
   cashRevenue: number;
   terminalRevenue: number;
   kaspiRevenue: number;
   totalRevenue: number;
   expenseItems: SummaryExpenseItem[];
+}
+
+// Что реально считается деньгами: отклонённая запись недействительна (статус легаси —
+// кнопка «Отклонить» убрана, новых не будет), excludedFromReport — бухгалтер вычеркнул
+// запись как ошибочную/дубль. «На проверке» в счёт идёт: деньги из кассы уже вышли,
+// подтверждение — это workflow-шлюз, а не факт о том, было ли движение денег (QA раунд 4, №3
+// расширен: под раздачу правильно попадают rejected/excludedFromReport, но не pending).
+export function countsTowardsTotals(e: Pick<SummaryEntry, 'status' | 'excludedFromReport'>): boolean {
+  return e.status !== 'rejected' && !e.excludedFromReport;
 }
 
 // Бонусы, зарплаты и доплаты показываются отдельными колонками, поэтому из общих
@@ -41,7 +52,8 @@ export function expenseItemsSum(items: SummaryExpenseItem[]) {
     .reduce((s, i) => s + i.amount, 0);
 }
 
-export function summarizeEntries(list: SummaryEntry[]) {
+export function summarizeEntries(all: SummaryEntry[]) {
+  const list = all.filter(countsTowardsTotals);
   const totalRevenue    = list.reduce((s, e) => s + e.totalRevenue, 0);
   const totalCash       = list.reduce((s, e) => s + e.cashRevenue, 0);
   const totalTerminal   = list.reduce((s, e) => s + e.terminalRevenue, 0);

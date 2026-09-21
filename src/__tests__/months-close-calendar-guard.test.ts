@@ -13,6 +13,7 @@ vi.mock('next/server', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     closedMonth: { findUnique: vi.fn(), create: vi.fn() },
+    dailyRevenueEntry: { aggregate: vi.fn() },
   },
 }));
 
@@ -31,6 +32,8 @@ import { buildEmployeeSalarySnapshot } from '@/lib/salary-snapshot';
 import { POST } from '@/app/api/months/close/route';
 
 const findUniqueClosedMonth = prisma.closedMonth.findUnique as unknown as ReturnType<typeof vi.fn>;
+const aggregatePending = prisma.dailyRevenueEntry.aggregate as unknown as ReturnType<typeof vi.fn>;
+const NO_PENDING = { _count: { _all: 0 }, _sum: { cashRevenue: null, terminalRevenue: null, kaspiRevenue: null } };
 const createClosedMonth = prisma.closedMonth.create as unknown as ReturnType<typeof vi.fn>;
 const buildSnapshot = buildEmployeeSalarySnapshot as unknown as ReturnType<typeof vi.fn>;
 
@@ -43,6 +46,7 @@ function makeRequest(body: unknown): NextRequest {
 }
 
 beforeEach(() => {
+  aggregatePending.mockReset().mockResolvedValue(NO_PENDING);
   findUniqueClosedMonth.mockReset().mockResolvedValue(null);
   createClosedMonth.mockReset().mockResolvedValue({ closedAt: new Date('2026-10-01') });
   buildSnapshot.mockReset();
@@ -163,5 +167,79 @@ describe('POST /api/months/close — блокировка без ставки з
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(createClosedMonth).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Записи «на проверке» в снимок не входят, а подтвердить их после закрытия уже нельзя (approve
+// отвечает 423) — закрыть месяц с ними значило бы навсегда потерять их выручку, смены и авансы
+// при «зелёных» статусах (QA раунд 4, №6).
+describe('POST /api/months/close — блокировка при записях на проверке', () => {
+  it('отклоняет закрытие, если в месяце есть pending-записи, и называет их число и сумму', async () => {
+    aggregatePending.mockResolvedValue({
+      _count: { _all: 2 },
+      _sum: { cashRevenue: '500000', terminalRevenue: '70000', kaspiRevenue: '6000' },
+    });
+    buildSnapshot.mockResolvedValue([]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/2 запис/);
+    expect(res.body.error).toMatch(/на проверке/);
+    expect(res.body.error).toMatch(/576/); // 500 000 + 70 000 + 6 000 = 576 000 ₸
+    expect(createClosedMonth).not.toHaveBeenCalled();
+    // Снимок даже не строится — незачем.
+    expect(buildSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('считает только pending-записи именно этого месяца', async () => {
+    buildSnapshot.mockResolvedValue([]);
+
+    await POST(makeRequest({ year: 2026, month: 9 }));
+
+    const where = aggregatePending.mock.calls[aggregatePending.mock.calls.length - 1][0].where;
+    expect(where.status).toBe('pending');
+    expect(where.date.gte).toEqual(new Date(2026, 8, 1));
+    expect(where.date.lte).toEqual(new Date(2026, 9, 0, 23, 59, 59, 999));
+  });
+
+  it('закрывает месяц как обычно, когда pending-записей нет', async () => {
+    buildSnapshot.mockResolvedValue([]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number };
+
+    expect(res.status).toBe(200);
+    expect(createClosedMonth).toHaveBeenCalled();
+  });
+});
+
+// QA раунд 3 №5 / раунд 4 №14: лестница включена, порогов у аптеки нет → премия тихо 0.
+// Замораживать такой ноль нельзя — тот же класс, что календарь и ставка.
+describe('POST /api/months/close — блокировка без лестницы премии у аптеки', () => {
+  it('отклоняет закрытие и называет аптеки и сотрудников', async () => {
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 1, employeeName: 'Заведующая Айгуль', pharmacyId: null, ladderConfigMissing: true, ladderConfigMissingPharmacies: ['hi hi', 'hu hu'] },
+      { employeeId: 1, employeeName: 'Заведующая Айгуль', pharmacyId: 2, ladderConfigMissing: true, ladderConfigMissingPharmacies: ['hi hi'] },
+      { employeeId: 2, employeeName: 'Продавец Аян', pharmacyId: null, ladderConfigMissing: false, ladderConfigMissingPharmacies: [] },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/лестницу премии/);
+    expect(res.body.error).toMatch(/hi hi, hu hu/);
+    expect(res.body.error).toMatch(/Заведующая Айгуль/);
+    expect(res.body.error).not.toMatch(/Продавец Аян/);
+    expect(createClosedMonth).not.toHaveBeenCalled();
+  });
+
+  it('закрывает как обычно, когда лестница настроена или выключена', async () => {
+    buildSnapshot.mockResolvedValue([
+      { employeeId: 1, employeeName: 'Заведующая', pharmacyId: null, ladderConfigMissing: false, ladderConfigMissingPharmacies: [] },
+    ]);
+
+    const res = await POST(makeRequest({ year: 2026, month: 9 })) as unknown as { status: number };
+    expect(res.status).toBe(200);
+    expect(createClosedMonth).toHaveBeenCalled();
   });
 });

@@ -28,10 +28,11 @@ export async function loadCashBalance(pharmacyId: number, from?: string, to?: st
     ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
   };
 
-  // Отклонённые смены в кассу не идут: запись признана недействительной.
-  // Ожидающие проверки — идут, деньги из ящика уже вышли.
+  // Отклонённые смены в кассу не идут: запись признана недействительной. То же — записи,
+  // которые бухгалтер вычеркнул как ошибочные/дубли (excludedFromReport). Ожидающие
+  // проверки — идут, деньги из ящика уже вышли независимо от статуса подтверждения.
   const entries = await prisma.dailyRevenueEntry.findMany({
-    where: { pharmacyId, status: { not: 'rejected' }, date: dateRange },
+    where: { pharmacyId, status: { not: 'rejected' }, excludedFromReport: false, date: dateRange },
     include: { expenseItems: true },
     orderBy: [{ date: 'asc' }, { id: 'asc' }],
   });
@@ -40,6 +41,8 @@ export async function loadCashBalance(pharmacyId: number, from?: string, to?: st
     const summary = summarizeEntries([
       {
         date: toDateKey(entry.date),
+        status: entry.status,
+        excludedFromReport: entry.excludedFromReport,
         cashRevenue: Number(entry.cashRevenue),
         terminalRevenue: Number(entry.terminalRevenue),
         kaspiRevenue: Number(entry.kaspiRevenue ?? 0),
