@@ -55,7 +55,12 @@ export function DateRangeFilter({ from, to, onChange }: DateRangeFilterProps) {
   }
 
   function handleApply() {
-    onChange(draftRange?.from ? toKey(draftRange.from) : '', draftRange?.to ? toKey(draftRange.to) : '');
+    const fromKey = draftRange?.from ? toKey(draftRange.from) : '';
+    // Один клик по календарю выбирает только `from` — без второй границы это трактуется
+    // как открытый диапазон "от даты и дальше". Пользователь в этом случае имеет в виду
+    // один день, поэтому зеркалим `from` в `to`, если вторая граница не выбрана.
+    const toKeyValue = draftRange?.to ? toKey(draftRange.to) : fromKey;
+    onChange(fromKey, toKeyValue);
     setOpen(false);
   }
 
