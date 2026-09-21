@@ -1618,11 +1618,15 @@ export default function RevenueListPage() {
             <button
               className="text-slate-600 underline hover:text-slate-900 text-xs"
               onClick={() => {
-                const allDays = groupEntriesByDate(visibleEntries).map((g) => g.dateKey);
-                setExpandedDays((prev) => (prev.size === allDays.length ? new Set() : new Set(allDays)));
+                if (expandedDays.size > 0) {
+                  setExpandedDays(new Set());
+                } else {
+                  const allDays = groupEntriesByDate(visibleEntries).map((g) => g.dateKey);
+                  setExpandedDays(new Set(allDays));
+                }
               }}
             >
-              {expandedDays.size === groupEntriesByDate(visibleEntries).length ? 'Свернуть все' : 'Развернуть все'}
+              {expandedDays.size > 0 ? 'Свернуть все' : 'Развернуть все'}
             </button>
           </div>
           {selectedIds.size > 0 && (
