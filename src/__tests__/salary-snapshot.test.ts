@@ -6,6 +6,8 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/salary-calculator', () => ({
   calculateEmployeeMonthlySalary: vi.fn(),
+  hasMonthActivity: (r: { recordsCount?: number; totalAdvances?: number; totalSurcharges?: number; totalBonuses?: number }) =>
+    (r.recordsCount ?? 0) > 0 || (r.totalAdvances ?? 0) > 0 || (r.totalSurcharges ?? 0) > 0 || (r.totalBonuses ?? 0) > 0,
 }));
 
 import { prisma } from '@/lib/prisma';
@@ -31,7 +33,7 @@ beforeEach(() => {
 describe('buildEmployeeSalarySnapshot', () => {
   it('сохраняет общий расчёт и расчёт по каждой привязанной аптеке', async () => {
     mocked(prisma.employee.findMany).mockResolvedValue([
-      { id: 7, pharmacies: [{ pharmacyId: 1 }, { pharmacyId: 2 }] },
+      { id: 7, isActive: true, pharmacies: [{ pharmacyId: 1 }, { pharmacyId: 2 }] },
     ]);
     mocked(calculateEmployeeMonthlySalary)
       .mockResolvedValueOnce(salary(7, 300))  // без фильтра по аптеке
@@ -50,7 +52,7 @@ describe('buildEmployeeSalarySnapshot', () => {
   // calculateAllEmployeesSalaries отбрасывает сотрудников без записей, но снимок должен
   // отвечать на любой запрос — иначе такой сотрудник провалится в живой расчёт.
   it('включает сотрудника без записей за месяц', async () => {
-    mocked(prisma.employee.findMany).mockResolvedValue([{ id: 9, pharmacies: [] }]);
+    mocked(prisma.employee.findMany).mockResolvedValue([{ id: 9, isActive: true, pharmacies: [] }]);
     mocked(calculateEmployeeMonthlySalary).mockResolvedValue(salary(9, 0));
 
     const stored = await buildEmployeeSalarySnapshot(2026, 8);
@@ -58,10 +60,26 @@ describe('buildEmployeeSalarySnapshot', () => {
     expect(stored[0]).toMatchObject({ employeeId: 9, pharmacyId: null, totalSalary: 0 });
   });
 
-  it('берёт только активных сотрудников', async () => {
+  // QA раунд 4, №11: уволенный и деактивированный после 20-го продавец должен замереть в снимке
+  // за месяц, в котором ещё работал; деактивированный без операций — не нужен.
+  it('деактивированного сотрудника включает только при операциях в месяце', async () => {
+    mocked(prisma.employee.findMany).mockResolvedValue([
+      { id: 11, isActive: false, pharmacies: [{ pharmacyId: 1 }] }, // работал: 20 смен
+      { id: 12, isActive: false, pharmacies: [{ pharmacyId: 1 }] }, // давно уволен, пусто
+    ]);
+    mocked(calculateEmployeeMonthlySalary).mockImplementation(async (id: number) =>
+      ({ employeeId: id, totalSalary: id === 11 ? 250 : 0, recordsCount: id === 11 ? 20 : 0 }) as unknown as StoredSalary
+    );
+
+    const stored = await buildEmployeeSalarySnapshot(2026, 8);
+
+    expect(stored.map((s) => [s.employeeId, s.pharmacyId])).toEqual([[11, null], [11, 1]]);
+  });
+
+  it('запрашивает всех сотрудников, а не только активных', async () => {
     mocked(prisma.employee.findMany).mockResolvedValue([]);
     await buildEmployeeSalarySnapshot(2026, 8);
-    expect(mocked(prisma.employee.findMany).mock.calls.at(-1)![0].where).toEqual({ isActive: true });
+    expect(mocked(prisma.employee.findMany).mock.calls.at(-1)![0].where).toBeUndefined();
   });
 });
 

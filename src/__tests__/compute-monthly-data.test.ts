@@ -14,6 +14,8 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/salary-calculator', () => ({
   calculateEmployeeMonthlySalary: vi.fn(),
+  hasMonthActivity: (r: { recordsCount?: number; totalAdvances?: number; totalSurcharges?: number; totalBonuses?: number }) =>
+    (r.recordsCount ?? 0) > 0 || (r.totalAdvances ?? 0) > 0 || (r.totalSurcharges ?? 0) > 0 || (r.totalBonuses ?? 0) > 0,
 }));
 
 import { prisma } from '@/lib/prisma';
@@ -49,8 +51,10 @@ function mockPdfReports(reports: unknown[] = []) {
 }
 
 /** Активные сотрудники, попадающие в расчёт зарплаты в отчёте. */
-function mockEmployees(employees: { id: number; employeeType: string; pharmacies: { pharmacyId: number }[] }[] = []) {
-  vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(employees);
+function mockEmployees(employees: { id: number; employeeType: string; isActive?: boolean; pharmacies: { pharmacyId: number }[] }[] = []) {
+  vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+    employees.map((e) => ({ isActive: true, ...e }))
+  );
 }
 
 /** calculateEmployeeMonthlySalary — по умолчанию возвращает null (как если бы данных не было). */
@@ -397,5 +401,66 @@ describe('computeMonthlyData', () => {
     const { overrideMap } = await computeMonthlyData(2026, 6);
 
     expect(overrideMap['1:retailRevenue']).toBe(999);
+  });
+});
+
+// QA раунд 4, №11: раньше брались только isActive-сотрудники — уволенный 20-го и деактивированный
+// 21-го продавец пропадал из pharmaSalary за месяц вместе с 20 сменами, а его выручка оставалась.
+describe('computeMonthlyData — деактивированные сотрудники с операциями в месяце', () => {
+  beforeEach(() => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+  });
+
+  it('включает деактивированного продавца, у которого в месяце были смены', async () => {
+    mockEmployees([{ id: 1, employeeType: 'seller', isActive: false, pharmacies: [{ pharmacyId: 1 }] }]);
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalSalary: 250000, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, recordsCount: 20,
+    });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].pharmaSalary).toBe(250000);
+  });
+
+  it('не включает деактивированного сотрудника без операций в месяце', async () => {
+    mockEmployees([{ id: 1, employeeType: 'seller', isActive: false, pharmacies: [{ pharmacyId: 1 }] }]);
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalSalary: 0, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 30000, recordsCount: 0,
+    });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].pharmaSalary).toBe(0);
+  });
+
+  it('деактивированная уборщица с авансом в месяце попадает в cleaning', async () => {
+    mockEmployees([{ id: 2, employeeType: 'cleaner', isActive: false, pharmacies: [{ pharmacyId: 1 }] }]);
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalSalary: -10000, totalBonuses: 0, totalAdvances: 10000, baseSalary: 0, allowance: 0, recordsCount: 0,
+    });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    // gross = totalSalary + totalAdvances = 0: аванс без смен не расход аптеки, но строка учтена без ошибки
+    expect(systemData[1].cleaning).toBe(0);
+  });
+
+  it('деактивированный офисный сотрудник с табелем остаётся в officeSalary', async () => {
+    mockEmployees([{ id: 3, employeeType: 'office', isActive: false, pharmacies: [] }]);
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalSalary: 90000, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, recordsCount: 10,
+    });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].officeSalary).toBe(90000);
+  });
+
+  it('запрашивает всех сотрудников, не только активных', async () => {
+    mockEmployees([]);
+    await computeMonthlyData(2026, 6);
+    const call = vi.mocked(prisma.employee.findMany as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
+    expect(call.where).toBeUndefined();
   });
 });

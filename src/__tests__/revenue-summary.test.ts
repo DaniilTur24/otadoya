@@ -1,0 +1,183 @@
+import { describe, it, expect } from 'vitest';
+import { summarizeEntries, groupEntriesByDateAndPharmacy, type SummaryEntry } from '@/lib/revenue-summary';
+
+function entry(over: Partial<SummaryEntry> = {}): SummaryEntry {
+  const cashRevenue = over.cashRevenue ?? 0;
+  const terminalRevenue = over.terminalRevenue ?? 0;
+  const kaspiRevenue = over.kaspiRevenue ?? 0;
+  return {
+    date: '2026-09-01',
+    status: 'approved',
+    excludedFromReport: false,
+    cashRevenue,
+    terminalRevenue,
+    kaspiRevenue,
+    totalRevenue: cashRevenue + terminalRevenue + kaspiRevenue,
+    expenseItems: [],
+    ...over,
+  };
+}
+
+describe('summarizeEntries', () => {
+  it('складывает выручку по способам оплаты', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000, terminalRevenue: 500_000 }),
+      entry({ cashRevenue: 47_155, terminalRevenue: 5_214 }),
+    ]);
+
+    expect(s.totalCash).toBe(147_155);
+    expect(s.totalTerminal).toBe(505_214);
+    expect(s.totalRevenue).toBe(652_369);
+  });
+
+  it('разносит бонусы, зарплаты и доплаты по своим колонкам, не задваивая их в расходах', () => {
+    const s = summarizeEntries([
+      entry({
+        cashRevenue: 100_000,
+        expenseItems: [
+          { category: 'pharmaBonus', amount: 5_000 },
+          { category: 'employeeAdvance', amount: 15_000 },
+          { category: 'employeeSurcharge', amount: 5_000 },
+          { category: 'utilities', amount: 3_000 },
+        ],
+      }),
+    ]);
+
+    expect(s.totalBonuses).toBe(5_000);
+    expect(s.totalAdvances).toBe(15_000);
+    expect(s.totalSurcharges).toBe(5_000);
+    expect(s.totalExpenses).toBe(3_000);
+  });
+
+  it('не вычитает доплату из наличных — она не выдаётся из кассы', () => {
+    const s = summarizeEntries([
+      entry({
+        cashRevenue: 140_000,
+        expenseItems: [
+          { category: 'pharmaBonus', amount: 5_000 },
+          { category: 'employeeAdvance', amount: 15_000 },
+          { category: 'employeeSurcharge', amount: 5_000 },
+        ],
+      }),
+    ]);
+
+    expect(s.cashNet).toBe(120_000);
+    expect(s.total).toBe(115_000);
+  });
+
+  it('уводит день в минус, когда из кассы выдали больше, чем заработали', () => {
+    const s = summarizeEntries([
+      entry({
+        cashRevenue: 4_555,
+        terminalRevenue: 4_444,
+        expenseItems: [
+          { category: 'pharmaBonus', amount: 5_000 },
+          { category: 'employeeAdvance', amount: 8_000 },
+          { category: 'employeeSurcharge', amount: 4_000 },
+        ],
+      }),
+    ]);
+
+    expect(s.cashNet).toBe(-8_445);
+    expect(s.total).toBe(-8_001);
+  });
+
+  it('прибавляет доходные статьи к итогу, а не вычитает', () => {
+    const withIncome = summarizeEntries([
+      entry({ cashRevenue: 10_000, expenseItems: [{ category: 'retailRevenue', amount: 2_000 }] }),
+    ]);
+
+    expect(withIncome.totalIncomes).toBe(2_000);
+    expect(withIncome.totalExpenses).toBe(0);
+    expect(withIncome.total).toBe(12_000);
+  });
+
+  it('считает записи на проверке в итог — деньги из кассы уже вышли независимо от подтверждения', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000, status: 'pending' }),
+      entry({ cashRevenue: 50_000, status: 'approved' }),
+    ]);
+
+    expect(s.totalCash).toBe(150_000);
+  });
+
+  it('не считает отклонённые записи — они недействительны', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000, status: 'approved' }),
+      entry({ cashRevenue: 999_000, status: 'rejected' }),
+    ]);
+
+    expect(s.totalCash).toBe(100_000);
+  });
+
+  it('не считает записи, вычеркнутые бухгалтером как ошибка/дубль', () => {
+    const s = summarizeEntries([
+      entry({ cashRevenue: 100_000 }),
+      entry({ cashRevenue: 999_000, excludedFromReport: true }),
+    ]);
+
+    expect(s.totalCash).toBe(100_000);
+  });
+
+  it('на пустом списке даёт нули, а не NaN', () => {
+    const s = summarizeEntries([]);
+    expect(s.totalRevenue).toBe(0);
+    expect(s.cashNet).toBe(0);
+    expect(s.total).toBe(0);
+  });
+});
+
+describe('groupEntriesByDateAndPharmacy', () => {
+  function withPharmacy(id: number, name: string, over: Partial<SummaryEntry> = {}) {
+    return { ...entry(over), pharmacy: { id, name } };
+  }
+
+  it('собирает записи одного дня и одной аптеки в одну группу, сохраняя порядок', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 100_000 }),
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 47_155 }),
+      withPharmacy(1, 'Думан', { date: '2026-09-02', cashRevenue: 40_000 }),
+    ]);
+
+    expect(groups.map((g) => g.dateKey)).toEqual(['2026-09-03', '2026-09-02']);
+    expect(groups[0].entries).toHaveLength(2);
+    expect(groups[1].entries).toHaveLength(1);
+  });
+
+  it('разносит записи одного дня по разным аптекам в отдельные группы, а не смешивает их', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 100_000 }),
+      withPharmacy(2, 'Наурызбай', { date: '2026-09-03', cashRevenue: 50_000 }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.pharmacyName)).toEqual(['Думан', 'Наурызбай']);
+    expect(groups.every((g) => g.dateKey === '2026-09-03')).toBe(true);
+  });
+
+  it('собирает записи одной аптеки в одну группу, даже если они не идут подряд', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 10_000 }),
+      withPharmacy(2, 'Наурызбай', { date: '2026-09-03', cashRevenue: 20_000 }),
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 30_000 }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].entries).toHaveLength(2);
+    expect(groups[1].entries).toHaveLength(1);
+  });
+
+  it('игнорирует время в дате и группирует по календарному дню', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03T00:00:00.000Z' }),
+      withPharmacy(1, 'Думан', { date: '2026-09-03T21:51:00.000Z' }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].dateKey).toBe('2026-09-03');
+  });
+
+  it('на пустом списке не создаёт групп', () => {
+    expect(groupEntriesByDateAndPharmacy([])).toEqual([]);
+  });
+});

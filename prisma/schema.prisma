@@ -26,6 +26,10 @@ model Pharmacy {
   // не от личной выручки сотрудника, а от средней выручки этой аптеки за смену того же типа
   // (день/сутки) за месяц, поровну на всех, кто отработал такие смены.
   poolAverageRevenuePremium Boolean @default(false) @map("pool_average_revenue_premium")
+  // С какого месяца считать кассу (хранится первым числом). Касса стартует с нуля и
+  // дальше копится непрерывно, через границы месяцев: выручку за последний день месяца
+  // обычно везут в банк уже в следующем, и при сбросе такая инкассация уводила бы в минус.
+  cashOpeningDate   DateTime? @map("cash_opening_date") @db.Date
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -41,8 +45,28 @@ model Pharmacy {
   managers             UserPharmacy[]
   employeeLinks        EmployeePharmacy[]
   attendanceShifts     AttendanceShift[]
+  cashMovements        CashMovement[]
 
   @@map("pharmacies")
+}
+
+// Взнос наличными в банк (инкассация) за день — уменьшает остаток кассы.
+// В месячный отчёт не попадает: это перекладывание денег из кассы на счёт, а не расход,
+// и выручка за день уже посчитана в DailyRevenueEntry.
+model CashMovement {
+  id         Int      @id @default(autoincrement())
+  pharmacyId Int      @map("pharmacy_id")
+  date       DateTime @db.Date
+  amount     Decimal
+  comment    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@unique([pharmacyId, date])
+  @@index([pharmacyId, date])
+  @@map("cash_movements")
 }
 
 model PharmacyAlias {
@@ -181,6 +205,10 @@ model DailyRevenueEntry {
 
   @@index([employeeId])
   @@index([submittedById])
+  // Плюс частичный UNIQUE (employee_id, date) WHERE shift_type IS NOT NULL AND status <> 'rejected' —
+  // объявлен только в миграции 20260917120000_unique_revenue_shift_per_employee_day (Prisma не
+  // поддерживает partial unique в схеме). Не удалять при `migrate dev`/`db push` — это защита от
+  // двойной оплаты смены при одновременных запросах.
   @@map("daily_revenue_entries")
 }
 

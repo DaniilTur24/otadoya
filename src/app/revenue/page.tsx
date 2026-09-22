@@ -8,6 +8,11 @@ import { ATTENDANCE_BASED_TYPES, canGetRevenueShift } from '@/lib/employee-types
 import { AmountInput } from '@/components/AmountInput';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
+import {
+  EXCLUDED_FROM_GENERIC_SUMS, pharmaBonusSum, advanceSum, surchargeSum,
+  incomeItemsSum, expenseItemsSum, summarizeEntries, groupEntriesByDateAndPharmacy,
+} from '@/lib/revenue-summary';
+import { suggestDeposit, type CashDayBalance } from '@/lib/cash-balance';
 
 const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
@@ -107,27 +112,14 @@ function fmtDate(s: string) {
   return new Date(s).toLocaleDateString('ru-RU');
 }
 
-function pharmaBonusSum(items: ExpenseItem[]) {
-  return items.filter((i) => i.category === 'pharmaBonus').reduce((s, i) => s + i.amount, 0);
-}
-function advanceSum(items: ExpenseItem[]) {
-  return items.filter((i) => i.category === 'employeeAdvance').reduce((s, i) => s + i.amount, 0);
-}
-function surchargeSum(items: ExpenseItem[]) {
-  return items.filter((i) => i.category === 'employeeSurcharge').reduce((s, i) => s + i.amount, 0);
-}
-const EXCLUDED_FROM_GENERIC_SUMS = new Set(['pharmaBonus', 'employeeAdvance', 'employeeSurcharge']);
-// Статьи с rowType 'income' — доходные, прибавляются к выручке
-function incomeItemsSum(items: ExpenseItem[]) {
-  return items
-    .filter((i) => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? '') && monthlyFieldType(i.category) === 'income')
-    .reduce((s, i) => s + i.amount, 0);
-}
-// Остальные статьи (expense / neutral) — расходы
-function expenseItemsSum(items: ExpenseItem[]) {
-  return items
-    .filter((i) => !EXCLUDED_FROM_GENERIC_SUMS.has(i.category ?? '') && monthlyFieldType(i.category) !== 'income')
-    .reduce((s, i) => s + i.amount, 0);
+// Склонение «N сотрудник/сотрудника/сотрудников» для свёрнутой строки дня, когда в ней
+// не одна смена и показывать одно конкретное имя нельзя.
+function employeeCountLabel(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} сотрудник`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} сотрудника`;
+  return `${n} сотрудников`;
 }
 
 const ROW_LABEL: Record<string, string> = Object.fromEntries(
@@ -145,17 +137,375 @@ const STATUS_CLASSES: Record<string, string> = {
   rejected: 'bg-red-100 text-red-800',
 };
 
-function summarizeEntries(list: RevenueEntry[]) {
-  const totalRevenue    = list.reduce((s, e) => s + e.totalRevenue, 0);
-  const totalCash       = list.reduce((s, e) => s + e.cashRevenue, 0);
-  const totalIncomes    = list.reduce((s, e) => s + incomeItemsSum(e.expenseItems), 0);
-  const totalBonuses    = list.reduce((s, e) => s + pharmaBonusSum(e.expenseItems), 0);
-  const totalAdvances   = list.reduce((s, e) => s + advanceSum(e.expenseItems), 0);
-  const totalSurcharges = list.reduce((s, e) => s + surchargeSum(e.expenseItems), 0);
-  const totalExpenses   = list.reduce((s, e) => s + expenseItemsSum(e.expenseItems), 0);
-  const total = totalRevenue + totalIncomes - totalExpenses - totalBonuses - totalAdvances - totalSurcharges;
-  const cashNet = totalCash - totalBonuses - totalAdvances - totalExpenses;
-  return { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet };
+interface CashBalanceResponse {
+  configured: boolean;
+  openingDate?: string;
+  openingBalance: number;
+  days: CashDayBalance[];
+  comments?: Record<string, string>;
+}
+
+// Движение наличных за день, как в карточке счёта: остаток с прошлого дня, выручка,
+// выдачи, взнос в банк и остаток на завтра. Взнос вводит только бухгалтер.
+function CashDayRow({
+  balance,
+  hiddenFromTable,
+  onSaveDeposit,
+}: {
+  balance: CashDayBalance;
+  /** Деньги, прошедшие через кассу в записях, которых в таблице сейчас не видно. */
+  hiddenFromTable: number;
+  onSaveDeposit: (amount: number) => Promise<void>;
+}) {
+  return (
+    <tr className="bg-sky-50 border-b-2 border-slate-300">
+      <td colSpan={15} className="px-3 py-3">
+        <CashDayPanel balance={balance} hiddenFromTable={hiddenFromTable} onSaveDeposit={onSaveDeposit} />
+      </td>
+    </tr>
+  );
+}
+
+// Тело кассового блока без табличной обвязки — общее для десктоп-строки (CashDayRow)
+// и мобильной карточки дня, чтобы расчёт и вёрстка кассы не разъезжались.
+function CashDayPanel({
+  balance,
+  hiddenFromTable,
+  onSaveDeposit,
+}: {
+  balance: CashDayBalance;
+  hiddenFromTable: number;
+  onSaveDeposit: (amount: number) => Promise<void>;
+}) {
+  const [value, setValue] = useState(balance.deposit ? String(balance.deposit) : '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(balance.deposit ? String(balance.deposit) : '');
+  }, [balance.deposit]);
+
+  const suggested = suggestDeposit(balance.balanceBeforeDeposit);
+
+  const parsed = value ? parseFloat(value) : 0;
+  const changed = Number.isFinite(parsed) && parsed !== balance.deposit;
+
+  async function commit() {
+    if (saving || !changed) return;
+    setSaving(true);
+    await onSaveDeposit(parsed);
+    setSaving(false);
+  }
+
+  async function applySuggested() {
+    if (saving) return;
+    setSaving(true);
+    setValue(String(suggested));
+    await onSaveDeposit(suggested);
+    setSaving(false);
+  }
+
+  return (
+    <div className="max-w-xl text-sm">
+      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Касса</div>
+
+      <CashLine label="Остаток с прошлого дня" value={fmt(balance.openingBalance)} />
+      <CashLine label="+ Выручка наличными" value={fmt(balance.cashRevenue)} valueClass="text-green-700" />
+      <CashLine label="− Выдано из кассы" value={fmt(balance.cashExpenses)} valueClass="text-red-600" />
+      <CashLine label="= В кассе на конец дня" value={fmt(balance.balanceBeforeDeposit)} strong />
+
+          <div className="flex items-center gap-2 py-1 border-t border-sky-200 mt-1 pt-1.5">
+            <span className="text-slate-600 w-52 shrink-0">− Сдано в банк</span>
+            <AmountInput
+              className="input w-36 py-0.5 text-sm text-right"
+              placeholder="0"
+              value={value}
+              onChange={setValue}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              }}
+            />
+            {saving ? (
+              <span className="text-xs text-slate-400">сохранение…</span>
+            ) : changed ? (
+              <button type="button" className="btn-primary text-xs py-0.5 px-2" onClick={commit}>
+                Сохранить
+              </button>
+            ) : (
+              suggested > 0 && suggested !== balance.deposit && (
+                <button
+                  type="button"
+                  className={`text-xs underline whitespace-nowrap ${
+                    balance.unconfirmed !== 0
+                      ? 'text-amber-700 hover:text-amber-900'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title={
+                    balance.unconfirmed !== 0
+                      ? 'Внимание: сумма посчитана с учётом записей на проверке. Если их отклонить, в кассе окажется меньше.'
+                      : 'Подставить весь остаток кассы. Сумму можно поправить.'
+                  }
+                  // Не даём полю потерять фокус по нажатию: иначе onBlur успевал записать
+                  // старое значение параллельно с этим сохранением.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={applySuggested}
+                >
+                  сдать всё: {fmt(suggested)}
+                </button>
+              )
+            )}
+          </div>
+
+          <div className="border-t border-sky-200 mt-1 pt-1.5">
+            <CashLine
+              label="= Остаток на завтра"
+              value={fmt(balance.closingBalance)}
+              valueClass={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700'}
+              strong
+            />
+            {balance.unconfirmed !== 0 && (
+              <>
+                <CashLine
+                  label="в т. ч. не подтверждено"
+                  value={fmt(balance.unconfirmed)}
+                  valueClass="text-amber-700"
+                  note={
+                    <span
+                      className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold leading-none cursor-help shrink-0"
+                      title={`В остатке учтены записи на проверке — накопительно, вместе с прошлыми днями. Подтверждение ничего не изменит, а отклонение уменьшит остаток на ${fmt(balance.unconfirmed)} и сдвинет все последующие дни.`}
+                    >
+                      !
+                    </span>
+                  }
+                />
+                <CashLine
+                  label="остаток без них"
+                  value={fmt(balance.closingBalance - balance.unconfirmed)}
+                  valueClass="text-slate-500"
+                />
+              </>
+            )}
+          </div>
+
+          {hiddenFromTable !== 0 && (
+            <p className="text-xs text-slate-500 mt-1">
+              В таблице выше показаны не все записи этого дня: фильтр скрывает {fmt(hiddenFromTable)} движения по кассе.
+            </p>
+          )}
+        </div>
+  );
+}
+
+// Строка кассового столбика: подпись слева, сумма в колонке справа, примечание за ней.
+function CashLine({
+  label, value, valueClass, strong, note,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  strong?: boolean;
+  note?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline gap-2 py-0.5">
+      <span className="text-slate-600 w-52 shrink-0">{label}</span>
+      <span className={`w-36 text-right tabular-nums ${strong ? 'font-semibold' : ''} ${valueClass ?? 'text-slate-900'}`}>
+        {value}
+      </span>
+      {note}
+    </div>
+  );
+}
+
+// Заголовок дня (одна аптека — группировка теперь идёт по дате+аптеке, см.
+// groupEntriesByDateAndPharmacy, поэтому здесь никогда не смешиваются разные аптеки).
+// Сам день виден всегда, смены внутри раскрываются по клику — иначе за месяц набирается
+// столько строк, что итоги в них тонут. Ячейки идут в том же порядке, что и колонки
+// таблицы, чтобы итоговые суммы стояли ровно под своими заголовками, а не отдельной
+// плашкой, которую легко принять за несоответствие.
+function DaySummaryRow({
+  dateKey, pharmacyName, entries, balance, expanded, onToggle,
+}: {
+  dateKey: string;
+  pharmacyName: string;
+  entries: RevenueEntry[];
+  balance: CashDayBalance | undefined;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const s = summarizeEntries(entries);
+  const hasPending = entries.some((e) => e.status === 'pending');
+  const soleStatus = new Set(entries.map((e) => e.status)).size === 1 ? entries[0].status : null;
+
+  // !py-2.5 переопределяет плотный [&_.td]:py-1 у таблицы (см. её className) — свёрнутая
+  // строка дня служит заголовком дня/аптеки и должна быть заметно выше обычных строк смен.
+  const summaryCell = 'td !py-2.5';
+
+  return (
+    <tr
+      className={`group border-y-2 border-slate-400 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 hover:bg-slate-200/60'}`}
+      onClick={onToggle}
+    >
+      <td className={summaryCell} />
+      <td className={`${summaryCell} whitespace-nowrap`}>
+        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900">
+          <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
+          {fmtDate(dateKey)}
+        </span>
+      </td>
+      <td className={`${summaryCell} font-medium max-w-[110px] truncate`} title={pharmacyName}>{pharmacyName}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{fmt(s.totalCash)}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{fmt(s.totalTerminal)}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{s.totalKaspi > 0 ? fmt(s.totalKaspi) : '—'}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{s.totalIncomes > 0 ? fmt(s.totalIncomes) : '—'}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalBonuses > 0 ? fmt(s.totalBonuses) : '—'}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalAdvances > 0 ? fmt(s.totalAdvances) : '—'}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalSurcharges > 0 ? fmt(s.totalSurcharges) : '—'}</td>
+      <td className={`${summaryCell} text-right font-semibold text-green-700 whitespace-nowrap`}>{fmt(s.totalRevenue)}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalExpenses > 0 ? fmt(s.totalExpenses) : '—'}</td>
+      <td className={`${summaryCell} text-slate-500 max-w-[130px] truncate`}>
+        {entries.length === 1 ? entries[0].employeeName : employeeCountLabel(entries.length)}
+      </td>
+      <td className={summaryCell}>
+        {hasPending ? (
+          <span className="text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-amber-100 text-amber-800">
+            есть на проверке
+          </span>
+        ) : soleStatus ? (
+          <span className={`text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+            STATUS_CLASSES[soleStatus] ?? 'bg-slate-100 text-slate-600'
+          }`}>
+            {STATUS_LABELS[soleStatus] ?? soleStatus}
+          </span>
+        ) : null}
+      </td>
+      {/* Непрозрачный фон обязателен: это sticky-колонка, под ней при горизонтальном скролле
+          уезжают остальные колонки этой же строки (например, бейдж статуса) — с полупрозрачным
+          фоном (bg-slate-200/70) их текст было видно сквозь «в кассе/сдано». */}
+      <td className={`${summaryCell} border-l border-slate-300 sticky right-0 z-10 ${expanded ? 'bg-slate-200' : 'bg-slate-100 group-hover:bg-slate-200'}`}>
+        {balance && (
+          <div className="text-xs text-right whitespace-nowrap">
+            <div className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700 font-medium'}>
+              в кассе {fmt(balance.closingBalance)}
+            </div>
+            {balance.deposit > 0 && <div className="text-slate-500">сдано {fmt(balance.deposit)}</div>}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// Итог по колонкам — виден только когда день раскрыт, чтобы числа стояли ровно
+// под теми же колонками, что и у смен выше.
+function DayTotalRow({ entries }: { entries: RevenueEntry[] }) {
+  const s = summarizeEntries(entries);
+
+  return (
+    <tr className="bg-slate-50 border-t border-slate-300 font-semibold text-slate-900">
+      <td className="td text-right text-slate-500 font-normal text-xs" colSpan={3}>
+        Итого за день
+      </td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalCash)}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalTerminal)}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalKaspi > 0 ? fmt(s.totalKaspi) : '—'}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalIncomes > 0 ? fmt(s.totalIncomes) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalBonuses > 0 ? fmt(s.totalBonuses) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalAdvances > 0 ? fmt(s.totalAdvances) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalSurcharges > 0 ? fmt(s.totalSurcharges) : '—'}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalRevenue)}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalExpenses > 0 ? fmt(s.totalExpenses) : '—'}</td>
+      <td className="td" colSpan={2} />
+      <td className="td bg-slate-50 border-l border-slate-300 sticky right-0 z-10" />
+    </tr>
+  );
+}
+
+// Мобильный аналог DaySummaryRow — тот же расчёт, но карточкой вместо табличной строки.
+// Группа тоже всегда одной аптеки (см. groupEntriesByDateAndPharmacy).
+function DaySummaryCard({
+  dateKey, pharmacyName, entries, balance, expanded, onToggle,
+}: {
+  dateKey: string;
+  pharmacyName: string;
+  entries: RevenueEntry[];
+  balance: CashDayBalance | undefined;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const s = summarizeEntries(entries);
+  const hasPending = entries.some((e) => e.status === 'pending');
+
+  return (
+    <div
+      className={`px-3 py-2.5 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 active:bg-slate-200/60'}`}
+      onClick={onToggle}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-slate-900 flex items-center gap-1.5">
+          <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
+          {fmtDate(dateKey)}
+        </span>
+        <span className="text-xs text-slate-400 shrink-0 truncate max-w-[140px]">
+          {entries.length === 1 ? entries[0].employeeName : employeeCountLabel(entries.length)}
+        </span>
+      </div>
+      <div className="text-xs text-slate-500 truncate mt-0.5 pl-[18px]">{pharmacyName}</div>
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm mt-1.5 pl-[18px]">
+        <span className="text-slate-500">Выручка <strong className="text-green-700">{fmt(s.totalRevenue)}</strong></span>
+        <span className="text-slate-500">
+          Наличными <strong className={s.cashNet >= 0 ? 'text-slate-900' : 'text-red-700'}>{fmt(s.cashNet)}</strong>
+        </span>
+        {balance && (
+          <span className="text-slate-500">
+            В кассе <strong className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700'}>{fmt(balance.closingBalance)}</strong>
+          </span>
+        )}
+      </div>
+      {(hasPending || (balance && balance.deposit > 0)) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-[18px] text-xs">
+          {hasPending && <span className="text-amber-700">есть записи на проверке</span>}
+          {balance && balance.deposit > 0 && <span className="text-slate-500">сдано в банк {fmt(balance.deposit)}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Мобильный аналог DayTotalRow — те же суммы, вёрстка сеткой вместо колонок таблицы.
+function DayTotalCard({ entries }: { entries: RevenueEntry[] }) {
+  const s = summarizeEntries(entries);
+
+  return (
+    <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 text-sm">
+      <div className="text-xs text-slate-500 mb-1">Итого за день</div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Нал.</span><span className="text-green-700 font-medium">{fmt(s.totalCash)}</span></div>
+        <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Терм.</span><span className="text-green-700 font-medium">{fmt(s.totalTerminal)}</span></div>
+        {s.totalKaspi > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Каспи</span><span className="text-green-700 font-medium">{fmt(s.totalKaspi)}</span></div>
+        )}
+        {s.totalIncomes > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доп. доходы</span><span className="text-green-700 font-medium">{fmt(s.totalIncomes)}</span></div>
+        )}
+        <div className="flex justify-between col-span-2 pt-1 mt-1 border-t border-slate-200 font-semibold">
+          <span className="text-slate-700">Выручка</span>
+          <span className="text-green-700">{fmt(s.totalRevenue)}</span>
+        </div>
+        {s.totalBonuses > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Бонусы</span><span className="text-red-600">{fmt(s.totalBonuses)}</span></div>
+        )}
+        {s.totalAdvances > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Зарплаты</span><span className="text-red-600">{fmt(s.totalAdvances)}</span></div>
+        )}
+        {s.totalSurcharges > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доплаты</span><span className="text-red-600">{fmt(s.totalSurcharges)}</span></div>
+        )}
+        {s.totalExpenses > 0 && (
+          <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Расходы</span><span className="text-red-600">{fmt(s.totalExpenses)}</span></div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function RevenueListPage() {
@@ -166,6 +516,10 @@ export default function RevenueListPage() {
   const [role, setRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Отдельно от `loading`: true только пока не было ни одной успешной загрузки.
+  // Повторные фоновые перезапросы (после подтверждения, сохранения, удаления и т.п.)
+  // не должны схлопывать таблицу в спиннер — это дёргает скролл наверх.
+  const [initialLoading, setInitialLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [moderating, setModerating] = useState<number | null>(null);
@@ -183,34 +537,18 @@ export default function RevenueListPage() {
   const [editState, setEditState] = useState<EditState | null>(null);
   const editSnapshotRef = useRef<string | null>(null);
 
+  // Остаток в кассе считается только по одной аптеке: у каждой свой ящик, и общий
+  // «остаток по всем аптекам» смысла не имеет. Грузится отдельно от записей, потому что
+  // остаток на начало периода зависит от всей истории до него, а не от видимых строк.
+  const [cashBalance, setCashBalance] = useState<CashBalanceResponse | null>(null);
+  // Группы (дата+аптека) свёрнуты по умолчанию: за месяц набирается слишком много строк,
+  // чтобы читать их подряд. Ключ — group.key из groupEntriesByDateAndPharmacy.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
   const [tooltipEntry, setTooltipEntry] = useState<RevenueEntry | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-
-  // Плавающий горизонтальный скроллбар для таблицы записей — прилипает к низу окна,
-  // пока таблица частично на экране, чтобы не листать вниз через все записи до обычного скроллбара.
-  const tableScrollRef = useRef<HTMLDivElement>(null);
-  const floatingScrollRef = useRef<HTMLDivElement>(null);
-  const syncingScrollRef = useRef(false);
-  const [showFloatingScrollbar, setShowFloatingScrollbar] = useState(false);
-  const [floatingBarRect, setFloatingBarRect] = useState({ left: 0, width: 0 });
-  const [tableScrollWidth, setTableScrollWidth] = useState(0);
-
-  const handleTableScroll = () => {
-    if (syncingScrollRef.current) { syncingScrollRef.current = false; return; }
-    if (floatingScrollRef.current && tableScrollRef.current) {
-      syncingScrollRef.current = true;
-      floatingScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-    }
-  };
-  const handleFloatingScroll = () => {
-    if (syncingScrollRef.current) { syncingScrollRef.current = false; return; }
-    if (floatingScrollRef.current && tableScrollRef.current) {
-      syncingScrollRef.current = true;
-      tableScrollRef.current.scrollLeft = floatingScrollRef.current.scrollLeft;
-    }
-  };
 
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
@@ -267,8 +605,10 @@ export default function RevenueListPage() {
     // сверить остаток по конкретной аптеке/периоду), показываем ровно этот статус.
     if (filterStatus) {
       data = data.filter((e) => e.status === filterStatus);
-    } else if (isModeratorRole) {
-      data = data.filter((e) => e.status !== 'pending');
+    } else {
+      // По умолчанию — подтверждённые и на проверке: ровно то, что считает касса.
+      // Отклонённая запись недействительна, денег по ней не было, поэтому её тут нет.
+      data = data.filter((e) => e.status !== 'rejected');
     }
 
     if (filterFrom) data = data.filter((e) => e.date >= filterFrom);
@@ -283,9 +623,46 @@ export default function RevenueListPage() {
       setPendingEntries([]);
     }
     setLoading(false);
+    setInitialLoading(false);
   }, [filterPharmacy, filterFrom, filterTo, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadCashBalance = useCallback(async () => {
+    const isModeratorRole = role === 'admin' || role === 'bookkeeper';
+    if (!filterPharmacy || !isModeratorRole) {
+      setCashBalance(null);
+      return;
+    }
+    const params = new URLSearchParams({ pharmacyId: filterPharmacy });
+    if (filterFrom) params.set('from', filterFrom);
+    if (filterTo) params.set('to', filterTo);
+
+    const res = await fetch(`/api/cash-balance?${params}`);
+    if (!res.ok) { setCashBalance(null); return; }
+    setCashBalance(await res.json());
+  }, [filterPharmacy, filterFrom, filterTo, role]);
+
+  useEffect(() => { loadCashBalance(); }, [loadCashBalance]);
+
+  function toggleGroup(key: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function saveCashMovement(date: string, amount: number) {
+    await fetch('/api/cash-balance', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pharmacyId: Number(filterPharmacy), date, amount }),
+    });
+    // Взнос меняет остаток не только своего дня, но и всех следующих — перечитываем целиком.
+    await loadCashBalance();
+  }
 
   async function approveEntry(id: number) {
     if (!confirm('Подтвердить запись?')) return;
@@ -297,22 +674,7 @@ export default function RevenueListPage() {
     setModerating(null);
     setModerateComment('');
     load();
-  }
-
-  async function rejectEntry(id: number) {
-    if (!moderateComment.trim()) {
-      alert('Укажите причину отклонения');
-      return;
-    }
-    if (!confirm('Отклонить запись?')) return;
-    await fetch(`/api/revenue/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookkeeperComment: moderateComment }),
-    });
-    setModerating(null);
-    setModerateComment('');
-    load();
+    loadCashBalance();
   }
 
   function startEdit(entry: RevenueEntry) {
@@ -504,6 +866,7 @@ export default function RevenueListPage() {
     if (!(await deleteRevenueEntry(id))) return;
     if (editingId === id) cancelEdit();
     load();
+    loadCashBalance();
   }
 
   function toggleSelect(id: number) {
@@ -531,6 +894,7 @@ export default function RevenueListPage() {
     }
     if (editingId !== null && selectedIds.has(editingId)) cancelEdit();
     load();
+    loadCashBalance();
   }
 
   async function saveEdit() {
@@ -631,7 +995,7 @@ export default function RevenueListPage() {
       }),
     });
 
-    if (res.ok) { cancelEdit(); load(); }
+    if (res.ok) { cancelEdit(); load(); loadCashBalance(); }
     else { const d = await res.json(); setSaveError(d.error || 'Ошибка сохранения'); }
     setSaving(false);
   }
@@ -691,33 +1055,6 @@ export default function RevenueListPage() {
   }
 
   const manageableEntries = visibleEntries.filter(canManageEntry);
-
-  useEffect(() => {
-    const container = tableScrollRef.current;
-    if (!container) return;
-
-    const updateMetrics = () => {
-      const rect = container.getBoundingClientRect();
-      setTableScrollWidth(container.scrollWidth);
-      setFloatingBarRect({ left: rect.left, width: rect.width });
-      const hasOverflow = container.scrollWidth > container.clientWidth + 1;
-      const scrollbarBelowViewport = rect.bottom > window.innerHeight;
-      const tableVisible = rect.top < window.innerHeight && rect.bottom > 0;
-      setShowFloatingScrollbar(hasOverflow && scrollbarBelowViewport && tableVisible);
-    };
-
-    updateMetrics();
-    const resizeObserver = new ResizeObserver(updateMetrics);
-    resizeObserver.observe(container);
-    window.addEventListener('scroll', updateMetrics, { passive: true });
-    window.addEventListener('resize', updateMetrics);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('scroll', updateMetrics);
-      window.removeEventListener('resize', updateMetrics);
-    };
-  }, [visibleEntries]);
 
   function renderEditForm() {
     if (!editState) return null;
@@ -1042,6 +1379,83 @@ export default function RevenueListPage() {
     );
   }
 
+  // Снимает пометку "не учитывается" с записи (общая функция для таблицы и карточек).
+  async function includeInReport(entry: RevenueEntry) {
+    const d = new Date(entry.date);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const { isClosed } = await fetch(`/api/months/close?year=${year}&month=${month}`).then((r) => r.json());
+    if (isClosed) {
+      alert('Месяц закрыт. Чтобы включить эту запись в отчёт, сначала откройте месяц в разделе «Закрытие месяца».');
+      return;
+    }
+    await fetch(`/api/revenue/${entry.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excludedFromReport: false }),
+    });
+    load();
+    loadCashBalance();
+  }
+
+  // Общие для десктоп-таблицы и мобильных карточек производные значения строки —
+  // считаем один раз на запись, чтобы не дублировать формулы в обоих рендерах.
+  function getEntryDerived(entry: RevenueEntry) {
+    return {
+      bonuses: pharmaBonusSum(entry.expenseItems),
+      advances: advanceSum(entry.expenseItems),
+      surcharges: surchargeSum(entry.expenseItems),
+      incomes: incomeItemsSum(entry.expenseItems),
+      expenses: expenseItemsSum(entry.expenseItems),
+      isEditingThis: editingId === entry.id,
+      isModeratingThis: moderating === entry.id,
+      canModerate: (role === 'admin' || role === 'bookkeeper') && entry.status === 'pending',
+    };
+  }
+
+  // Панель подтверждения/отклонения pending-записи — используется и в десктоп-таблице
+  // (внутри colSpan-строки), и в мобильной карточке (напрямую).
+  function renderModeratePanel(entry: RevenueEntry) {
+    return (
+      <>
+        {entry.expenseItems.length > 0 && (
+          <div className="mb-3 text-sm">
+            <p className="font-medium text-slate-700 mb-1">Расходы:</p>
+            <ul className="space-y-0.5">
+              {entry.expenseItems.map((item) => (
+                <li key={item.id} className="text-slate-600 flex gap-2">
+                  <span className="text-red-600">{fmt(item.amount)}</span>
+                  <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
+                  {item.comment && <span className="text-slate-400">— {item.comment}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {entry.generalComment && (
+          <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
+        )}
+        <div className="flex flex-col sm:flex-row gap-2 items-start">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="Комментарий бухгалтера (необязательно)"
+            value={moderateComment}
+            onChange={(e) => setModerateComment(e.target.value)}
+          />
+          {/* «Отклонить» убрано: отклонённая запись прощала выданный из неё аванс
+              и запирала день для заведующей. Неверную запись бухгалтер правит
+              («Изменить») или удаляет («Удалить»). */}
+          <div className="flex gap-2 shrink-0 w-full sm:w-auto">
+            <button className="btn-success text-sm flex-1 sm:flex-none" onClick={() => approveEntry(entry.id)}>
+              Подтвердить
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -1133,8 +1547,25 @@ export default function RevenueListPage() {
         )}
       </div>
 
+      {/* Почему не видно остатка в кассе */}
+      {(role === 'admin' || role === 'bookkeeper') && !initialLoading && (
+        filterPharmacy && cashBalance && !cashBalance.configured ? (
+          <div className="mb-3 px-3 py-2 rounded border border-amber-200 bg-amber-50 text-sm text-amber-900">
+            Остаток в кассе не считается: не задана точка отсчёта. Укажите в{' '}
+            <Link href={`/settings/pharmacies/${filterPharmacy}`} className="underline">
+              настройках аптеки
+            </Link>{' '}
+            дату и сумму, которая реально была в кассе на утро этого дня.
+          </div>
+        ) : !filterPharmacy ? (
+          <div className="mb-3 px-3 py-2 rounded border border-slate-200 bg-slate-50 text-sm text-slate-500">
+            Выберите аптеку в фильтре, чтобы видеть остаток в кассе по дням — у каждой аптеки своя касса.
+          </div>
+        ) : null
+      )}
+
       {/* Таблица записей */}
-      {loading ? (
+      {initialLoading ? (
         <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
           <span className="spinner" /> Загрузка...
         </div>
@@ -1144,6 +1575,24 @@ export default function RevenueListPage() {
         </div>
       ) : (
         <div className="card overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between text-sm">
+            <span className="text-slate-500">
+              Дни свёрнуты — нажмите на день, чтобы посмотреть смены и кассу
+            </span>
+            <button
+              className="text-slate-600 underline hover:text-slate-900 text-xs"
+              onClick={() => {
+                if (expandedGroups.size > 0) {
+                  setExpandedGroups(new Set());
+                } else {
+                  const allKeys = groupEntriesByDateAndPharmacy(visibleEntries).map((g) => g.key);
+                  setExpandedGroups(new Set(allKeys));
+                }
+              }}
+            >
+              {expandedGroups.size > 0 ? 'Свернуть все' : 'Развернуть все'}
+            </button>
+          </div>
           {selectedIds.size > 0 && (
             <div className="px-4 py-2 bg-slate-100 border-b border-slate-300 flex items-center justify-between">
               <span className="text-sm text-slate-900">Выбрано: {selectedIds.size}</span>
@@ -1152,8 +1601,8 @@ export default function RevenueListPage() {
               </button>
             </div>
           )}
-          <div className="overflow-x-auto" ref={tableScrollRef} onScroll={handleTableScroll}>
-            <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1">
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1 [&_.td]:border-b-2 [&_.td]:border-b-slate-300">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th w-8">
@@ -1181,19 +1630,28 @@ export default function RevenueListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleEntries.map((entry) => {
-                  const bonuses    = pharmaBonusSum(entry.expenseItems);
-                  const advances   = advanceSum(entry.expenseItems);
-                  const surcharges = surchargeSum(entry.expenseItems);
-                  const incomes  = incomeItemsSum(entry.expenseItems);
-                  const expenses = expenseItemsSum(entry.expenseItems);
-                  const isEditingThis = editingId === entry.id;
-                  const isModeratingThis = moderating === entry.id;
-                  const canModerate = (role === 'admin' || role === 'bookkeeper') && entry.status === 'pending';
+                {groupEntriesByDateAndPharmacy(visibleEntries).map((group) => {
+                  const dayBalance = cashBalance?.configured
+                    ? cashBalance.days.find((d) => d.date === group.dateKey)
+                    : undefined;
+                  const isExpanded = expandedGroups.has(group.key);
+                  return (
+                  <React.Fragment key={group.key}>
+                    <DaySummaryRow
+                      dateKey={group.dateKey}
+                      pharmacyName={group.pharmacyName}
+                      entries={group.entries}
+                      balance={dayBalance}
+                      expanded={isExpanded}
+                      onToggle={() => toggleGroup(group.key)}
+                    />
+                {isExpanded && group.entries.map((entry) => {
+                  const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
+                    getEntryDerived(entry);
                   const rowBg = isEditingThis
                     ? 'bg-slate-100'
                     : entry.status === 'pending'
-                    ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                    ? 'bg-yellow-100 hover:bg-yellow-200'
                     : 'hover:bg-slate-50';
                   return (
                     <React.Fragment key={entry.id}>
@@ -1248,22 +1706,7 @@ export default function RevenueListPage() {
                               <button
                                 className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
                                 title="Нажмите чтобы включить в отчёт за этот месяц"
-                                onClick={async () => {
-                                  const d = new Date(entry.date);
-                                  const year = d.getFullYear();
-                                  const month = d.getMonth() + 1;
-                                  const { isClosed } = await fetch(`/api/months/close?year=${year}&month=${month}`).then((r) => r.json());
-                                  if (isClosed) {
-                                    alert('Месяц закрыт. Чтобы включить эту запись в отчёт, сначала откройте месяц в разделе «Закрытие месяца».');
-                                    return;
-                                  }
-                                  await fetch(`/api/revenue/${entry.id}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ excludedFromReport: false }),
-                                  });
-                                  load();
-                                }}
+                                onClick={() => includeInReport(entry)}
                               >
                                 не учитывается
                               </button>
@@ -1288,7 +1731,7 @@ export default function RevenueListPage() {
                         </td>
                         <td
                           className={`td border-l border-slate-300 sticky right-0 z-10 ${
-                            isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-amber-50 group-hover:bg-amber-100' : 'bg-white group-hover:bg-slate-50'
+                            isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-yellow-100 group-hover:bg-yellow-200' : 'bg-white group-hover:bg-slate-50'
                           }`}
                         >
                           {isEditingThis ? (
@@ -1323,42 +1766,9 @@ export default function RevenueListPage() {
                         </td>
                       </tr>
                       {isModeratingThis && !isEditingThis && (
-                        <tr key={`${entry.id}-moderate`} className="bg-amber-50/60">
+                        <tr key={`${entry.id}-moderate`} className="bg-yellow-100">
                           <td colSpan={15} className="px-4 py-3">
-                            {entry.expenseItems.length > 0 && (
-                              <div className="mb-3 text-sm">
-                                <p className="font-medium text-slate-700 mb-1">Расходы:</p>
-                                <ul className="space-y-0.5">
-                                  {entry.expenseItems.map((item) => (
-                                    <li key={item.id} className="text-slate-600 flex gap-2">
-                                      <span className="text-red-600">{fmt(item.amount)}</span>
-                                      <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
-                                      {item.comment && <span className="text-slate-400">— {item.comment}</span>}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-                            {entry.generalComment && (
-                              <p className="text-sm text-slate-500 italic mb-3">{entry.generalComment}</p>
-                            )}
-                            <div className="flex flex-col sm:flex-row gap-2 items-start">
-                              <input
-                                type="text"
-                                className="input flex-1"
-                                placeholder="Комментарий бухгалтера (обязателен при отклонении)"
-                                value={moderateComment}
-                                onChange={(e) => setModerateComment(e.target.value)}
-                              />
-                              <div className="flex gap-2 shrink-0">
-                                <button className="btn-success text-sm" onClick={() => approveEntry(entry.id)}>
-                                  Подтвердить
-                                </button>
-                                <button className="btn-danger text-sm" onClick={() => rejectEntry(entry.id)}>
-                                  Отклонить
-                                </button>
-                              </div>
-                            </div>
+                            {renderModeratePanel(entry)}
                           </td>
                         </tr>
                       )}
@@ -1372,31 +1782,197 @@ export default function RevenueListPage() {
                     </React.Fragment>
                   );
                 })}
+                    {isExpanded && <DayTotalRow entries={group.entries} />}
+                    {isExpanded && dayBalance && (() => {
+                      const visible = summarizeEntries(group.entries);
+                      const visibleCashFlow =
+                        visible.totalCash - visible.totalBonuses - visible.totalAdvances - visible.totalExpenses;
+                      const balanceCashFlow = dayBalance.cashRevenue - dayBalance.cashExpenses;
+                      return (
+                        <CashDayRow
+                          balance={dayBalance}
+                          hiddenFromTable={balanceCashFlow - visibleCashFlow}
+                          onSaveDeposit={(amount) => saveCashMovement(group.dateKey, amount)}
+                        />
+                      );
+                    })()}
+                  </React.Fragment>
+                );})}
               </tbody>
             </table>
           </div>
 
-          {/* Плавающий горизонтальный скроллбар — прилипает к низу окна, пока таблица на экране,
-              чтобы не нужно было листать вниз через все записи ради обычного нижнего скроллбара. */}
-          {showFloatingScrollbar && (
-            <div
-              ref={floatingScrollRef}
-              onScroll={handleFloatingScroll}
-              style={{ position: 'fixed', bottom: 0, left: floatingBarRect.left, width: floatingBarRect.width, zIndex: 30 }}
-              className="overflow-x-auto overflow-y-hidden h-3 bg-slate-100 border-t border-slate-300"
-            >
-              <div style={{ width: tableScrollWidth, height: 1 }} />
-            </div>
-          )}
+          {/* Мобильная версия — карточки вместо таблицы, та же информация и те же действия,
+              просто без горизонтальной прокрутки по 13 колонкам. */}
+          <div className="md:hidden divide-y divide-slate-200">
+            {groupEntriesByDateAndPharmacy(visibleEntries).map((group) => {
+              const dayBalance = cashBalance?.configured
+                ? cashBalance.days.find((d) => d.date === group.dateKey)
+                : undefined;
+              const isExpanded = expandedGroups.has(group.key);
+              return (
+                <div key={group.key}>
+                  <DaySummaryCard
+                    dateKey={group.dateKey}
+                    pharmacyName={group.pharmacyName}
+                    entries={group.entries}
+                    balance={dayBalance}
+                    expanded={isExpanded}
+                    onToggle={() => toggleGroup(group.key)}
+                  />
+                  {isExpanded && (
+                    <div className="divide-y divide-slate-100">
+                      {group.entries.map((entry) => {
+              const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
+                getEntryDerived(entry);
+              const cardBg = isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-yellow-100' : '';
+
+              if (isEditingThis) {
+                return (
+                  <div key={entry.id} className={`p-3 ${cardBg}`}>
+                    {renderEditForm()}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={entry.id} className={`p-3 ${cardBg}`}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      {canManageEntry(entry) && (
+                        <input
+                          type="checkbox"
+                          className="rounded mt-1 shrink-0"
+                          checked={selectedIds.has(entry.id)}
+                          onChange={() => toggleSelect(entry.id)}
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{fmtDate(entry.date)}</div>
+                        <div className="text-sm text-slate-500 truncate">{entry.pharmacy.name}</div>
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+                      STATUS_CLASSES[entry.status] ?? 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {STATUS_LABELS[entry.status] ?? entry.status}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm mb-2">
+                    <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Нал.</span><span className="text-green-700 font-medium">{fmt(entry.cashRevenue)}</span></div>
+                    <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Терм.</span><span className="text-green-700 font-medium">{fmt(entry.terminalRevenue)}</span></div>
+                    {entry.kaspiRevenue > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Каспи</span><span className="text-green-700 font-medium">{fmt(entry.kaspiRevenue)}</span></div>
+                    )}
+                    {incomes > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доп. доходы</span><span className="text-green-700 font-medium">{fmt(incomes)}</span></div>
+                    )}
+                    <div className="flex justify-between col-span-2 pt-1 mt-1 border-t border-slate-100">
+                      <span className="text-slate-600 font-medium">Выручка</span>
+                      <span className="text-green-700 font-semibold">{fmt(entry.totalRevenue)}</span>
+                    </div>
+                    {bonuses > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Бонусы</span><span className="text-red-600">{fmt(bonuses)}</span></div>
+                    )}
+                    {advances > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Зарплаты</span><span className="text-red-600">{fmt(advances)}</span></div>
+                    )}
+                    {surcharges > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Доплаты</span><span className="text-red-600">{fmt(surcharges)}</span></div>
+                    )}
+                    {expenses > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Расходы</span><span className="text-red-600">{fmt(expenses)}</span></div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap text-sm mb-2">
+                    <span className="text-slate-500 truncate">{entry.employeeName}</span>
+                    {entry.shiftType && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                        entry.shiftType === 'full_day' ? 'bg-slate-200 text-slate-800' : 'bg-slate-100 text-slate-800'
+                      }`}>
+                        {SHIFT_TYPE_LABELS[entry.shiftType] ?? entry.shiftType}
+                      </span>
+                    )}
+                    {entry.excludedFromReport && (
+                      <button
+                        className="text-xs px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+                        title="Нажмите чтобы включить в отчёт за этот месяц"
+                        onClick={() => includeInReport(entry)}
+                      >
+                        не учитывается
+                      </button>
+                    )}
+                  </div>
+
+                  {entry.generalComment && !isModeratingThis && (
+                    <p className="text-sm text-slate-500 italic mb-2">{entry.generalComment}</p>
+                  )}
+
+                  {isModeratingThis ? (
+                    <div className="mt-2 pt-2 border-t border-amber-200">
+                      {renderModeratePanel(entry)}
+                      <button
+                        className="btn-secondary text-xs mt-2 w-full"
+                        onClick={() => { setModerating(null); setModerateComment(''); }}
+                      >
+                        Закрыть
+                      </button>
+                    </div>
+                  ) : canManageEntry(entry) ? (
+                    <div className="flex gap-2 pt-2 border-t border-slate-100">
+                      {canModerate && (
+                        <button className="btn-warning text-sm flex-1" onClick={() => { setModerating(entry.id); setModerateComment(''); }}>
+                          Проверить
+                        </button>
+                      )}
+                      <button className="btn-secondary text-sm flex-1" onClick={() => startEdit(entry)}>Изменить</button>
+                      <button className="btn-danger text-sm flex-1" onClick={() => deleteEntry(entry.id)}>Удалить</button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+                      })}
+                    </div>
+                  )}
+                  {isExpanded && <DayTotalCard entries={group.entries} />}
+                  {isExpanded && dayBalance && (() => {
+                    const visible = summarizeEntries(group.entries);
+                    const visibleCashFlow =
+                      visible.totalCash - visible.totalBonuses - visible.totalAdvances - visible.totalExpenses;
+                    const balanceCashFlow = dayBalance.cashRevenue - dayBalance.cashExpenses;
+                    return (
+                      <div className="bg-sky-50 border-t-2 border-slate-300 px-3 py-3">
+                        <CashDayPanel
+                          balance={dayBalance}
+                          hiddenFromTable={balanceCashFlow - visibleCashFlow}
+                          onSaveDeposit={(amount) => saveCashMovement(group.dateKey, amount)}
+                        />
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+
 
           {/* Итого */}
           {(() => {
-            const { totalRevenue, totalIncomes, totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet } =
-              summarizeEntries(visibleEntries);
+            const {
+              totalRevenue, totalCash, totalTerminal, totalKaspi, totalIncomes,
+              totalBonuses, totalAdvances, totalSurcharges, totalExpenses, total, cashNet,
+            } = summarizeEntries(visibleEntries);
             return (
               <div className="px-3 py-2 bg-slate-50 border-t border-slate-300 flex flex-wrap gap-4 text-sm">
-                <span className="text-slate-500">Итого по выбранным записям:</span>
+                <span className="text-slate-500">Итого по подтверждённым записям:</span>
                 <span>Выручка: <strong className="text-green-700">{fmt(totalRevenue)}</strong></span>
+                <span className="text-slate-500">
+                  нал. <strong className="text-slate-700">{fmt(totalCash)}</strong>
+                  {' · '}терм. <strong className="text-slate-700">{fmt(totalTerminal)}</strong>
+                  {totalKaspi > 0 && <>{' · '}каспи <strong className="text-slate-700">{fmt(totalKaspi)}</strong></>}
+                </span>
                 {totalIncomes > 0 && (
                   <span>Доп. доходы: <strong className="text-green-700">{fmt(totalIncomes)}</strong></span>
                 )}

@@ -32,6 +32,14 @@ export interface MonthlySalaryResult {
    * не зависит от оклада/календаря вообще.
    */
   shiftRateMissing: boolean;
+  /**
+   * true — у сотрудника включена лестничная премия (ladderPremiumEnabled), но хотя бы у одной из
+   * его аптек не заполнены порог/база (Pharmacy.managerPremiumThreshold/Base), поэтому премия по
+   * этой аптеке тихо считается как 0. Тот же класс, что calendarMissing/shiftRateMissing.
+   * Список названий таких аптек — ladderConfigMissingPharmacies.
+   */
+  ladderConfigMissing: boolean;
+  ladderConfigMissingPharmacies: string[];
   revenuePremiumDayShifts: number;
   revenuePremiumFullDayShifts: number;
   totalRevenuePremium: number;
@@ -133,8 +141,8 @@ async function computeManagerLadderPremium(
   pharmacyIds: number[],
   month: number,
   year: number,
-): Promise<{ premium: number; revenueTotal: number }> {
-  if (pharmacyIds.length === 0) return { premium: 0, revenueTotal: 0 };
+): Promise<{ premium: number; revenueTotal: number; configMissingPharmacies: string[] }> {
+  if (pharmacyIds.length === 0) return { premium: 0, revenueTotal: 0, configMissingPharmacies: [] };
 
   const dateFrom = startOfMonth(year, month);
   const dateTo = endOfMonth(year, month);
@@ -144,6 +152,7 @@ async function computeManagerLadderPremium(
       where: { id: { in: pharmacyIds } },
       select: {
         id: true,
+        name: true,
         managerPremiumThreshold: true,
         managerPremiumBase: true,
         managerPremiumStepAmount: true,
@@ -169,9 +178,15 @@ async function computeManagerLadderPremium(
 
   let premium = 0;
   let revenueTotal = 0;
+  const configMissingPharmacies: string[] = [];
   for (const ph of pharmacies) {
     const revenue = revenueByPharmacy.get(ph.id) ?? 0;
     revenueTotal += revenue;
+    // Без порога/базы computeLadderPremium вернёт 0 — не «премия не заслужена», а «не настроено».
+    // Раньше это было неотличимо от честного нуля (QA раунд 3 №5 / раунд 4 №14).
+    if (ph.managerPremiumThreshold === null || ph.managerPremiumBase === null) {
+      configMissingPharmacies.push(ph.name);
+    }
     premium += computeLadderPremium(
       revenue,
       ph.managerPremiumThreshold !== null ? Number(ph.managerPremiumThreshold) : null,
@@ -180,7 +195,7 @@ async function computeManagerLadderPremium(
       ph.managerPremiumStepBonus !== null ? Number(ph.managerPremiumStepBonus) : null,
     );
   }
-  return { premium: roundMoney(premium), revenueTotal };
+  return { premium: roundMoney(premium), revenueTotal, configMissingPharmacies };
 }
 
 /**
@@ -376,6 +391,8 @@ const EMPTY_RESULT_BASE = {
   workingCalendarDays: null as number | null,
   calendarMissing: false,
   shiftRateMissing: false,
+  ladderConfigMissing: false,
+  ladderConfigMissingPharmacies: [] as string[],
   revenuePremiumDayShifts: 0,
   revenuePremiumFullDayShifts: 0,
   totalRevenuePremium: 0,
@@ -489,7 +506,7 @@ async function calculateTradingEmployeeSalary(
         : Promise.resolve({ share: 0, total: 0 }),
       useLadder
         ? computeManagerLadderPremium(managedPharmacyIds, month, year)
-        : Promise.resolve({ premium: 0, revenueTotal: 0 }),
+        : Promise.resolve({ premium: 0, revenueTotal: 0, configMissingPharmacies: [] as string[] }),
       fiveDayViaAttendance
         ? getAttendanceShiftsCount(employee.id, month, year, pharmacyId)
         : Promise.resolve(0),
@@ -630,6 +647,8 @@ async function calculateTradingEmployeeSalary(
     allowanceDescription: employee.allowanceDescription ?? '',
     managerLadderPremium,
     managedRevenueTotal,
+    ladderConfigMissing: ladderStats.configMissingPharmacies.length > 0,
+    ladderConfigMissingPharmacies: ladderStats.configMissingPharmacies,
     ladderPremiumEnabled: useLadder,
     managerBonusShareEnabled: useBonusShare,
     totalSalary,
@@ -666,7 +685,7 @@ async function calculateFixedManagerSalary(
       computeSurcharges(employee.id, month, year, pharmacyId),
       useLadder
         ? computeManagerLadderPremium(managedPharmacyIds, month, year)
-        : Promise.resolve({ premium: 0, revenueTotal: 0 }),
+        : Promise.resolve({ premium: 0, revenueTotal: 0, configMissingPharmacies: [] as string[] }),
       useBonusShare
         ? computeManagerBonusShare(managedPharmacyIds, month, year)
         : Promise.resolve({ share: 0, total: 0 }),
@@ -710,6 +729,8 @@ async function calculateFixedManagerSalary(
     allowanceDescription: employee.allowanceDescription ?? '',
     managerLadderPremium: managerStats.premium,
     managedRevenueTotal: managerStats.revenueTotal,
+    ladderConfigMissing: managerStats.configMissingPharmacies.length > 0,
+    ladderConfigMissingPharmacies: managerStats.configMissingPharmacies,
     ladderPremiumEnabled: useLadder,
     managerBonusShareEnabled: useBonusShare,
     totalSalary,
@@ -842,7 +863,7 @@ async function calculatePharmacyManagerSalary(
     computeSurcharges(employee.id, month, year, pharmacyId),
     useLadder
       ? computeManagerLadderPremium(managedPharmacyIds, month, year)
-      : Promise.resolve({ premium: 0, revenueTotal: 0 }),
+      : Promise.resolve({ premium: 0, revenueTotal: 0, configMissingPharmacies: [] as string[] }),
     useBonusShare
       ? computeManagerBonusShare(managedPharmacyIds, month, year)
       : Promise.resolve({ share: 0, total: 0 }),
@@ -883,6 +904,8 @@ async function calculatePharmacyManagerSalary(
     managerBonusShareEnabled: useBonusShare,
     managerLadderPremium: managerStats.premium,
     managedRevenueTotal: managerStats.revenueTotal,
+    ladderConfigMissing: managerStats.configMissingPharmacies.length > 0,
+    ladderConfigMissingPharmacies: managerStats.configMissingPharmacies,
     totalSalary,
     recordsCount: attendanceShiftsCount,
   };
@@ -1179,7 +1202,24 @@ export async function getEmployeeMonthlySurcharges(
 }
 
 /**
- * Рассчитывает зарплаты всех активных сотрудников за месяц.
+ * Были ли у сотрудника в этом месяце реальные операции: смены/табель, выданные авансы или
+ * доплаты, бонусы. Для деактивированного сотрудника это единственный критерий включения в
+ * отчёт/сводку/снимок: «неактивен» — про будущие списки, а не про переписывание месяца, в
+ * котором он ещё работал. Раньше все три места брали только isActive, и уволенный 20-го
+ * продавец пропадал из расходов за месяц вместе с 20 сменами (QA раунд 4, №11).
+ */
+export function hasMonthActivity(result: MonthlySalaryResult): boolean {
+  return (
+    result.recordsCount > 0 ||
+    result.totalAdvances > 0 ||
+    result.totalSurcharges > 0 ||
+    result.totalBonuses > 0
+  );
+}
+
+/**
+ * Рассчитывает зарплаты всех сотрудников за месяц: активных — как обычно, деактивированных —
+ * только если у них в этом месяце были операции (см. hasMonthActivity).
  * Удобно для интеграции в закрытие месяца.
  */
 export async function calculateAllEmployeesSalaries(
@@ -1188,7 +1228,6 @@ export async function calculateAllEmployeesSalaries(
   pharmacyId?: number,
 ): Promise<MonthlySalaryResult[]> {
   const employees = await prisma.employee.findMany({
-    where: { isActive: true },
     orderBy: { name: 'asc' },
   });
 
@@ -1196,6 +1235,10 @@ export async function calculateAllEmployeesSalaries(
   for (const emp of employees) {
     const result = await calculateEmployeeMonthlySalary(emp.id, month, year, pharmacyId);
     if (!result) continue;
+    if (!emp.isActive) {
+      if (hasMonthActivity(result)) results.push(result);
+      continue;
+    }
     // Заведующие и менеджеры (USER_LINKED_TYPES) получают доплату/премию независимо
     // от того, торговали или отрабатывали смену лично в этом периоде — поэтому их
     // не фильтруем по recordsCount, как продавцов/уборщиц.

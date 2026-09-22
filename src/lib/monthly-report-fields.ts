@@ -91,6 +91,26 @@ export const BANK_IMPORT_TARGET_FIELDS = MONTHLY_REPORT_ROWS.filter((row) =>
   expenseKeySet.has(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
+/**
+ * Категории, которые может нести строка расхода записи выручки (DailyExpenseItem.category):
+ * все статьи расходов отчёта, доходные статьи, вводимые вручную (аренда терминала и т.п.), и две
+ * служебные (аванс/доплата сотруднику). Ровно то, что предлагает форма /revenue/new. Сервер
+ * проверяет по этому списку: computeMonthlyData прибавляет сумму в systemData[category], и без
+ * проверки строка с category='retailRevenue' дописала бы аптеке выручку (QA раунд 4, №12).
+ */
+export const REVENUE_ITEM_CATEGORIES: ReadonlySet<string> = new Set([
+  ...MONTHLY_EXPENSE_KEYS,
+  ...MONTHLY_REPORT_ROWS.filter(
+    (row) =>
+      !row.section &&
+      row.rowType === 'income' &&
+      row.source !== 'calc' &&
+      !['retailRevenue', 'kaspiRevenue', 'wholesaleRevenue'].includes(row.key)
+  ).map((row) => row.key),
+  'employeeAdvance',
+  'employeeSurcharge',
+]);
+
 export function monthlyFieldLabel(key: string | null | undefined): string {
   if (!key) return '—';
   return MONTHLY_REPORT_ROWS.find((row) => row.key === key)?.label ?? key;

@@ -54,6 +54,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Месяц уже закрыт' }, { status: 409 });
     }
 
+    // Записи «на проверке» в снимок не входят (он берёт только approved), а подтвердить их после
+    // закрытия уже нельзя (approve отвечает 423). Закрыть месяц с ними — значит навсегда потерять
+    // их выручку, смены и выданные из них авансы, причём все статусы будут выглядеть «зелёными»
+    // (QA раунд 4, №6). Поэтому сначала пусть бухгалтер их подтвердит или удалит.
+    const pending = await prisma.dailyRevenueEntry.aggregate({
+      where: {
+        status: 'pending',
+        date: { gte: new Date(year, month - 1, 1), lte: new Date(year, month, 0, 23, 59, 59, 999) },
+      },
+      _count: { _all: true },
+      _sum: { cashRevenue: true, terminalRevenue: true, kaspiRevenue: true },
+    });
+    if (pending._count._all > 0) {
+      const pendingRevenue =
+        Number(pending._sum.cashRevenue ?? 0) +
+        Number(pending._sum.terminalRevenue ?? 0) +
+        Number(pending._sum.kaspiRevenue ?? 0);
+      return NextResponse.json(
+        {
+          error:
+            `В ${month}.${year} ${pending._count._all} запис(ей) выручки на проверке ` +
+            `на ${pendingRevenue.toLocaleString('ru-RU')} ₸ — сначала подтвердите или удалите их на странице «Записи выручки»`,
+        },
+        { status: 400 },
+      );
+    }
+
     const { pharmacies, systemData, overrideMap } = await computeMonthlyData(year, month);
     const snapshot = buildMonthlySnapshot(pharmacies, systemData, overrideMap);
     // Разбивка по сотрудникам замораживается вместе с отчётом — иначе повышение оклада или
@@ -97,6 +124,22 @@ export async function POST(request: NextRequest) {
           error:
             `Заполните ставку за смену на странице /users для: ${shiftRateMissingNames.join(', ')} — иначе зарплата ` +
             `за ${month}.${year} будет зафиксирована нулём`,
+        },
+        { status: 400 },
+      );
+    }
+
+    // Лестничная премия включена, а у аптеки не заполнены порог/база — премия тихо 0. Тот же
+    // класс, что календарь/ставка выше: замораживать такой ноль снимком нельзя (QA раунд 4, №14).
+    const ladderMissing = employeeSalaries.filter((e) => e.pharmacyId === null && e.ladderConfigMissing);
+    if (ladderMissing.length > 0) {
+      const names = [...new Set(ladderMissing.map((e) => e.employeeName))];
+      const pharmacyNames = [...new Set(ladderMissing.flatMap((e) => e.ladderConfigMissingPharmacies ?? []))];
+      return NextResponse.json(
+        {
+          error:
+            `Заполните лестницу премии (порог и базу) в настройках аптек: ${pharmacyNames.join(', ')} — ` +
+            `иначе премия за ${month}.${year} будет зафиксирована нулём для: ${names.join(', ')}`,
         },
         { status: 400 },
       );

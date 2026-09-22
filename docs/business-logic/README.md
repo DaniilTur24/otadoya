@@ -16,7 +16,7 @@
 
 ## Как сделать (бухгалтер/админ)
 
-- [howto-enter-daily-revenue.md](howto-enter-daily-revenue.md) — внести дневную выручку, аванс, подтвердить/отклонить запись
+- [howto-enter-daily-revenue.md](howto-enter-daily-revenue.md) — внести дневную выручку, аванс, подтвердить запись
 - [howto-manage-employees.md](howto-manage-employees.md) — завести и настроить сотрудника любого из 6 типов
 - [howto-track-attendance.md](howto-track-attendance.md) — вести табель посещаемости
 - [howto-close-month.md](howto-close-month.md) — закрыть и открыть месяц

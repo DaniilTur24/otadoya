@@ -24,6 +24,13 @@ export interface CashReportExpenseLine {
   affectsCash: boolean;
 }
 
+/** Остаток кассы за день — тот же, что на странице выручки. Отсутствует, если у аптеки не задан месяц старта. */
+export interface CashReportDayBalance {
+  openingBalance: number;
+  deposit: number;
+  closingBalance: number;
+}
+
 export interface CashReportDay {
   date: string; // YYYY-MM-DD
   employeeNames: string[]; // все сотрудники, у кого были смены в этот день (одна смена = одно имя)
@@ -32,6 +39,7 @@ export interface CashReportDay {
   expenseLines: CashReportExpenseLine[]; // расходы всех смен дня, построчно, в порядке записей
   cashExpensesTotal: number;
   cashNet: number;
+  balance?: CashReportDayBalance;
 }
 
 export interface CashReportPharmacySection {
@@ -97,7 +105,11 @@ export function buildCashReportDay(entries: CashReportSourceEntry[]): CashReport
   };
 }
 
-export function buildCashReport(entries: CashReportSourceEntry[]): CashReportPharmacySection[] {
+export function buildCashReport(
+  entries: CashReportSourceEntry[],
+  /** Остатки по аптекам: pharmacyId → (дата → остаток). Аптеки без месяца старта сюда не попадают. */
+  balances?: Map<number, Map<string, CashReportDayBalance>>
+): CashReportPharmacySection[] {
   const byPharmacy = new Map<number, { pharmacyName: string; byDate: Map<string, CashReportSourceEntry[]> }>();
 
   for (const entry of entries) {
@@ -113,9 +125,14 @@ export function buildCashReport(entries: CashReportSourceEntry[]): CashReportPha
   }
 
   const sections: CashReportPharmacySection[] = [...byPharmacy.entries()].map(([pharmacyId, group]) => {
+    const pharmacyBalances = balances?.get(pharmacyId);
     const days = [...group.byDate.entries()]
       .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
-      .map(([, dayEntries]) => buildCashReportDay(dayEntries));
+      .map(([dateKey, dayEntries]) => {
+        const day = buildCashReportDay(dayEntries);
+        const balance = pharmacyBalances?.get(dateKey);
+        return balance ? { ...day, balance } : day;
+      });
 
     return {
       pharmacyId,

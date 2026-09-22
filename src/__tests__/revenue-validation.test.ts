@@ -9,6 +9,9 @@ vi.mock('@/lib/prisma', () => ({
     attendanceShift: {
       findFirst: vi.fn(),
     },
+    dailyRevenueEntry: {
+      findFirst: vi.fn(),
+    },
     employeePharmacy: {
       findMany: vi.fn(),
     },
@@ -16,7 +19,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 import { prisma } from '@/lib/prisma';
-import { validateShiftEmployeeType, validateNoAttendanceOnDate, validateRecipientPharmacy } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateNoAttendanceOnDate, validateRecipientPharmacy, validateUniqueShift } from '@/lib/revenue-validation';
 
 describe('validateShiftEmployeeType', () => {
   it('allows a plain seller to get a five_day shift (fiveDayViaAttendance off by default)', async () => {
@@ -138,5 +141,38 @@ describe('validateRecipientPharmacy', () => {
     const callsBefore = findMany.mock.calls.length;
     expect(await validateRecipientPharmacy([], 5)).toBeNull();
     expect(findMany.mock.calls.length).toBe(callsBefore);
+  });
+});
+
+// QA раунд 4, №9: отклонённая запись (устаревший статус) не должна «занимать» день — иначе
+// после отклонения заведующая не могла ни исправить её, ни внести новую смену за этот день.
+describe('validateUniqueShift', () => {
+  const findFirst = prisma.dailyRevenueEntry.findFirst as ReturnType<typeof vi.fn>;
+
+  it('исключает rejected-записи из поиска занятой смены', async () => {
+    findFirst.mockResolvedValue(null);
+    await validateUniqueShift(7, new Date('2026-09-01'), 'day');
+    const where = findFirst.mock.calls[findFirst.mock.calls.length - 1][0].where;
+    expect(where.status).toEqual({ not: 'rejected' });
+    expect(where.shiftType).toEqual({ not: null });
+    expect(where.employeeId).toBe(7);
+  });
+
+  it('возвращает ошибку, если найдена другая (не отклонённая) смена', async () => {
+    findFirst.mockResolvedValue({ id: 3 });
+    expect(await validateUniqueShift(7, new Date('2026-09-01'), 'day')).toMatch(/уже есть смена/);
+  });
+
+  it('исключает саму редактируемую запись по excludeId', async () => {
+    findFirst.mockResolvedValue(null);
+    await validateUniqueShift(7, new Date('2026-09-01'), 'day', 42);
+    const where = findFirst.mock.calls[findFirst.mock.calls.length - 1][0].where;
+    expect(where.id).toEqual({ not: 42 });
+  });
+
+  it('без смены (shiftType null) проверка не нужна', async () => {
+    findFirst.mockClear();
+    expect(await validateUniqueShift(7, new Date('2026-09-01'), null)).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });

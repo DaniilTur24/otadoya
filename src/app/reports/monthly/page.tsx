@@ -180,6 +180,7 @@ export default function MonthlyReportPage() {
   // часть оклада сейчас считается как 0 вместо реальной суммы. Показываем заранее, до клика
   // «Закрыть месяц», где сервер это же самое отклонит с 400.
   const [calendarMissingNames, setCalendarMissingNames] = useState<string[]>([]);
+  const [ladderMissing, setLadderMissing] = useState<{ names: string[]; pharmacies: string[] }>({ names: [], pharmacies: [] });
   // Симметричный случай для заведующей на фиксированной ставке (manager_trading с
   // fiveDayViaAttendance) — та же тихая нулевая зарплата, но лечится не календарём, а ставкой
   // на /users, поэтому отдельный список и отдельная подсказка.
@@ -211,12 +212,18 @@ export default function MonthlyReportPage() {
     if (!json.isClosed) {
       const salaryRes = await fetch(`/api/employees/salary-summary?year=${year}&month=${month}`);
       const salaryJson = await salaryRes.json();
-      const employees: { employeeName: string; calendarMissing?: boolean; shiftRateMissing?: boolean }[] = salaryJson.employees ?? [];
+      const employees: { employeeName: string; calendarMissing?: boolean; shiftRateMissing?: boolean; ladderConfigMissing?: boolean; ladderConfigMissingPharmacies?: string[] }[] = salaryJson.employees ?? [];
       setCalendarMissingNames([...new Set(employees.filter((e) => e.calendarMissing).map((e) => e.employeeName))]);
       setShiftRateMissingNames([...new Set(employees.filter((e) => e.shiftRateMissing).map((e) => e.employeeName))]);
+      const withLadderMissing = employees.filter((e) => e.ladderConfigMissing);
+      setLadderMissing({
+        names: [...new Set(withLadderMissing.map((e) => e.employeeName))],
+        pharmacies: [...new Set(withLadderMissing.flatMap((e) => e.ladderConfigMissingPharmacies ?? []))],
+      });
     } else {
       setCalendarMissingNames([]);
       setShiftRateMissingNames([]);
+      setLadderMissing({ names: [], pharmacies: [] });
     }
   }, [year, month]);
 
@@ -487,6 +494,19 @@ export default function MonthlyReportPage() {
             Пятидневная/табельная часть оклада сейчас считается как 0 для: {calendarMissingNames.join(', ')}.
             Закрыть месяц не получится, пока календарь не заполнен —{' '}
             <Link href="/settings/working-calendar" className="underline">заполнить сейчас</Link>.
+          </span>
+        </div>
+      )}
+
+      {!isClosed && ladderMissing.names.length > 0 && (
+        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded">
+          <span className="text-amber-700 text-sm font-medium">
+            Не заполнена лестница премии у аптек: {ladderMissing.pharmacies.join(', ')}
+          </span>
+          <span className="text-amber-600 text-xs block mt-0.5">
+            Премия по выручке аптеки сейчас считается как 0 для: {ladderMissing.names.join(', ')}.
+            Закрыть месяц не получится, пока порог и база не заполнены —{' '}
+            <Link href="/settings" className="underline">заполнить сейчас</Link>.
           </span>
         </div>
       )}

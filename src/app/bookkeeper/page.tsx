@@ -71,17 +71,6 @@ export default function BookkeeperPage() {
     load();
   }
 
-  async function reject(id: number) {
-    if (!confirm('Отклонить запись?')) return;
-    await fetch(`/api/revenue/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookkeeperComment: commentMap[id] || '' }),
-    });
-    setCommentMap((m) => { const n = { ...m }; delete n[id]; return n; });
-    load();
-  }
-
   function startEdit(entry: RevenueEntry) {
     setEditingId(entry.id);
     setEditState({
@@ -108,24 +97,17 @@ export default function BookkeeperPage() {
     load();
   }
 
-  const counts = {
-    pending: entries.filter((e) => e.status === 'pending').length,
-    approved: entries.filter((e) => e.status === 'approved').length,
-    rejected: entries.filter((e) => e.status === 'rejected').length,
-  };
-
   const statusButtons: { key: string; label: string }[] = [
     { key: 'all', label: 'Все' },
     { key: 'pending', label: `Ожидает проверки` },
     { key: 'approved', label: 'Подтверждено' },
-    { key: 'rejected', label: 'Отклонено' },
   ];
 
   return (
     <div>
       <h1 className="text-lg font-semibold text-slate-900 mb-1">Проверка записей выручки</h1>
       <p className="text-slate-500 text-sm mb-4">
-        Подтвердите, отклоните или отредактируйте записи от сотрудников аптек.
+        Подтвердите или отредактируйте записи от сотрудников аптек.
       </p>
 
       {/* Фильтр по статусу */}
@@ -240,20 +222,12 @@ export default function BookkeeperPage() {
                         ) : (
                           <div className="flex gap-1 flex-wrap">
                             {entry.status === 'pending' && (
-                              <>
-                                <button
-                                  className="btn-success text-xs"
-                                  onClick={() => approve(entry.id)}
-                                >
-                                  Принять
-                                </button>
-                                <button
-                                  className="btn-danger text-xs"
-                                  onClick={() => reject(entry.id)}
-                                >
-                                  Отклонить
-                                </button>
-                              </>
+                              <button
+                                className="btn-success text-xs"
+                                onClick={() => approve(entry.id)}
+                              >
+                                Принять
+                              </button>
                             )}
                             <button
                               className="btn-secondary text-xs"

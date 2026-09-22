@@ -22,10 +22,6 @@ function formatDate(dateKey: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function statusesLabel(statuses: string[]): string {
-  return statuses.map((s) => STATUS_LABELS[s] ?? s).join(' / ');
-}
-
 export interface CashReportMeta {
   from: string | null;
   to: string | null;
@@ -48,7 +44,7 @@ export async function buildCashReportWorkbook(
       : meta.to
       ? `по ${formatDate(meta.to)}`
       : 'весь период';
-  const statusLabel = meta.statusFilter ? STATUS_LABELS[meta.statusFilter] ?? meta.statusFilter : 'Все статусы';
+  const statusLabel = meta.statusFilter ? STATUS_LABELS[meta.statusFilter] ?? meta.statusFilter : 'Подтверждённые';
 
   for (const section of sections) {
     const sheetName = section.pharmacyName.slice(0, 31).replace(/[[\]*?/\\:]/g, ' ');
@@ -82,8 +78,8 @@ export async function buildCashReportWorkbook(
       'Статья расхода / комментарий',
       'Приход',
       'Расход',
+      'Общий оборот',
       'Сальдо',
-      'Статус',
     ]);
     headerRow.eachCell((cell) => {
       cell.fill = HEADER_FILL;
@@ -92,31 +88,59 @@ export async function buildCashReportWorkbook(
     });
 
     for (const day of section.days) {
-      let balance = day.cashRevenue;
+      // "Общий оборот" — приход минус расход день, каждый день заново от нуля.
+      // "Сальдо" переносится со вчера и живёт сквозь весь период — как на странице выручки.
+      // Без месяца старта у аптеки сальдо нет, и эта колонка остаётся пустой.
+      const hasBalance = day.balance != null;
+      let turnover = 0;
+      let balance = day.balance ? day.balance.openingBalance : 0;
+
+      if (day.balance) {
+        const openingRow = sheet.addRow([
+          formatDate(day.date),
+          '',
+          'Остаток с прошлого дня',
+          '',
+          '',
+          '',
+          balance,
+        ]);
+        openingRow.getCell(3).font = { italic: true, color: { argb: 'FF64748B' } };
+        openingRow.getCell(7).numFmt = '#,##0';
+        openingRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
+      }
+
+      turnover += day.cashRevenue;
+      balance += day.cashRevenue;
 
       const revenueRow = sheet.addRow([
-        formatDate(day.date),
+        day.balance ? '' : formatDate(day.date),
         day.employeeNames.join(', '),
         'Выручка нал.',
         day.cashRevenue,
         '',
-        balance,
-        statusesLabel(day.statuses),
+        turnover,
+        hasBalance ? balance : '',
       ]);
       revenueRow.getCell(3).font = { color: { argb: 'FF64748B' } };
       revenueRow.getCell(4).numFmt = '#,##0';
       revenueRow.getCell(6).numFmt = '#,##0';
+      revenueRow.getCell(7).numFmt = '#,##0';
       revenueRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
 
       for (const line of day.expenseLines) {
-        if (line.affectsCash) balance -= line.amount;
+        if (line.affectsCash) {
+          turnover -= line.amount;
+          balance -= line.amount;
+        }
 
         const label = [line.categoryLabel, line.recipientName ? `— ${line.recipientName}` : null, line.comment]
           .filter(Boolean)
           .join(' ');
-        const lineRow = sheet.addRow(['', '', label, '', line.amount, balance, '']);
+        const lineRow = sheet.addRow(['', '', label, '', line.amount, turnover, hasBalance ? balance : '']);
         lineRow.getCell(5).numFmt = '#,##0';
         lineRow.getCell(6).numFmt = '#,##0';
+        lineRow.getCell(7).numFmt = '#,##0';
 
         if (!line.affectsCash) {
           const italicGray = { italic: true, color: { argb: 'FF94A3B8' } };
@@ -127,14 +151,26 @@ export async function buildCashReportWorkbook(
         lineRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
       }
 
+      if (day.balance && day.balance.deposit !== 0) {
+        turnover -= day.balance.deposit;
+        balance -= day.balance.deposit;
+        const depositRow = sheet.addRow(['', '', 'Сдано в банк', '', day.balance.deposit, turnover, balance]);
+        depositRow.getCell(3).font = { bold: true };
+        depositRow.getCell(5).numFmt = '#,##0';
+        depositRow.getCell(6).numFmt = '#,##0';
+        depositRow.getCell(7).numFmt = '#,##0';
+        depositRow.eachCell({ includeEmpty: true }, (cell) => (cell.border = THIN_BORDER));
+      }
+
       const dayTotalRow = sheet.addRow([
         `Итого за ${formatDate(day.date)}`,
         '',
         '',
         day.cashRevenue,
-        day.cashExpensesTotal,
-        day.cashNet,
-        '',
+        day.cashExpensesTotal + (day.balance?.deposit ?? 0),
+        turnover,
+        // Дни до месяца старта остатка не имеют — там колонка пустая, как и на экране.
+        day.balance ? day.balance.closingBalance : '',
       ]);
       dayTotalRow.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = DAY_TOTAL_FILL;
@@ -144,16 +180,20 @@ export async function buildCashReportWorkbook(
       dayTotalRow.getCell(4).numFmt = '#,##0';
       dayTotalRow.getCell(5).numFmt = '#,##0';
       dayTotalRow.getCell(6).numFmt = '#,##0';
+      dayTotalRow.getCell(7).numFmt = '#,##0';
     }
+
+    const lastWithBalance = [...section.days].reverse().find((d) => d.balance);
+    const totalDeposits = section.days.reduce((sum, d) => sum + (d.balance?.deposit ?? 0), 0);
 
     const periodTotalRow = sheet.addRow([
       'ИТОГО ЗА ПЕРИОД',
       '',
       '',
       section.totalCashRevenue,
-      section.totalCashExpenses,
-      section.totalCashNet,
-      '',
+      section.totalCashExpenses + totalDeposits,
+      section.totalCashNet - totalDeposits,
+      lastWithBalance ? lastWithBalance.balance!.closingBalance : section.totalCashNet,
     ]);
     periodTotalRow.eachCell({ includeEmpty: true }, (cell) => {
       cell.fill = PERIOD_TOTAL_FILL;
@@ -163,6 +203,7 @@ export async function buildCashReportWorkbook(
     periodTotalRow.getCell(4).numFmt = '#,##0';
     periodTotalRow.getCell(5).numFmt = '#,##0';
     periodTotalRow.getCell(6).numFmt = '#,##0';
+    periodTotalRow.getCell(7).numFmt = '#,##0';
   }
 
   if (sections.length === 0) {

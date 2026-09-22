@@ -25,6 +25,7 @@ interface Pharmacy {
   managerPremiumStepAmount: number | null;
   managerPremiumStepBonus: number | null;
   poolAverageRevenuePremium: boolean;
+  cashOpeningDate: string | null;
 }
 
 export default function PharmacyEditPage() {
@@ -50,6 +51,7 @@ export default function PharmacyEditPage() {
     managerPremiumStepAmount: '',
     managerPremiumStepBonus: '',
     poolAverageRevenuePremium: false,
+    cashOpeningDate: '',
   });
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export default function PharmacyEditPage() {
           managerPremiumStepAmount: p.managerPremiumStepAmount != null ? String(p.managerPremiumStepAmount) : '',
           managerPremiumStepBonus:  p.managerPremiumStepBonus != null ? String(p.managerPremiumStepBonus) : '',
           poolAverageRevenuePremium: p.poolAverageRevenuePremium ?? false,
+          cashOpeningDate:   p.cashOpeningDate ? p.cashOpeningDate.slice(0, 10) : '',
         });
         setLoading(false);
       });
@@ -113,6 +116,18 @@ export default function PharmacyEditPage() {
   function save(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) { setError('Название обязательно'); return; }
+
+    // Смена месяца старта пересчитывает кассу за все дни после него, поэтому спрашиваем —
+    // но только если месяц уже был задан: первичная настройка ничего не меняет задним числом.
+    const hadStart = original?.cashOpeningDate != null;
+    const startChanged = form.cashOpeningDate !== (original?.cashOpeningDate?.slice(0, 10) ?? '');
+    if (hadStart && startChanged) {
+      const ok = window.confirm(
+        'Вы меняете месяц, с которого считается касса. Остаток будет пересчитан за все дни после него. Продолжить?'
+      );
+      if (!ok) return;
+    }
+
     const changed = changedSalaryFields();
     if (changed.length > 0) {
       setPendingFields(changed);
@@ -140,6 +155,7 @@ export default function PharmacyEditPage() {
         managerPremiumStepAmount: form.managerPremiumStepAmount ? parseFloat(form.managerPremiumStepAmount) : null,
         managerPremiumStepBonus:  form.managerPremiumStepBonus ? parseFloat(form.managerPremiumStepBonus) : null,
         poolAverageRevenuePremium: form.poolAverageRevenuePremium,
+        cashOpeningDate:   form.cashOpeningDate || null,
       }),
     });
 
@@ -274,6 +290,29 @@ export default function PharmacyEditPage() {
                 onChange={(value) => set('managerPremiumStepBonus', value)}
               />
             </div>
+          </div>
+        </div>
+
+        {/* Касса: с какого месяца считать остаток */}
+        <div className="border-t border-slate-100 pt-4">
+          <h2 className="text-sm font-semibold text-slate-700 mb-1">Касса этой аптеки</h2>
+          <p className="text-xs text-slate-400 mb-3">
+            Нужно для остатка в кассе на странице «Записи выручки». Касса начинается с нуля
+            и дальше копится по дням: выручка наличными плюсуется, выдачи из кассы и взносы
+            в банк вычитаются. Через границы месяцев остаток переносится, а не обнуляется.
+          </p>
+          <div className="max-w-xs">
+            <label className="label">Считать кассу с месяца</label>
+            <input
+              type="month"
+              className="input"
+              value={form.cashOpeningDate ? form.cashOpeningDate.slice(0, 7) : ''}
+              onChange={(e) => set('cashOpeningDate', e.target.value ? `${e.target.value}-01` : '')}
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Более ранние месяцы в остаток не входят. Если не заполнить, касса не считается —
+              иначе в остаток попала бы выручка за всю историю, по которой взносы в банк не вносились.
+            </p>
           </div>
         </div>
 

@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
-import { buildCashReport, CashReportSourceEntry } from '@/lib/cash-report-builder';
+import { buildCashReport, CashReportSourceEntry, CashReportDayBalance } from '@/lib/cash-report-builder';
 import { buildCashReportWorkbook } from '@/lib/cash-report-excel';
+import { loadCashBalance } from '@/lib/cash-balance-query';
+
+/** Остаток берётся тем же расчётом, что и на странице выручки, — иначе Excel и экран разойдутся. */
+async function buildBalancesByPharmacy(pharmacyIds: number[], from: string | null, to: string | null) {
+  const result = new Map<number, Map<string, CashReportDayBalance>>();
+
+  for (const pharmacyId of pharmacyIds) {
+    const balance = await loadCashBalance(pharmacyId, from ?? undefined, to ?? undefined);
+    if (!balance) continue;
+
+    result.set(
+      pharmacyId,
+      new Map(balance.days.map((d) => [d.date, {
+        openingBalance: d.openingBalance,
+        deposit: d.deposit,
+        closingBalance: d.closingBalance,
+      }]))
+    );
+  }
+
+  return result;
+}
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdminOrBookkeeper(request);
@@ -16,10 +38,13 @@ export async function GET(request: NextRequest) {
 
   const where: Record<string, unknown> = {};
   if (pharmacyId) where.pharmacyId = Number(pharmacyId);
-  // Без явного статуса в фильтре — как и в основной таблице /revenue для admin/bookkeeper —
-  // pending не подмешивается в общий срез, чтобы экспорт совпадал с тем, что видно на экране.
+  // Как и в таблице /revenue: по умолчанию подтверждённые и на проверке — ровно то, что
+  // считает касса (деньги из кассы по ним уже вышли, подтверждение — не факт о движении денег).
+  // Отклонённая запись недействительна, денег по ней не было. excludedFromReport — бухгалтер
+  // вычеркнул запись как ошибочную/дубль (QA раунд 4, №3): такая запись тоже не в счёт.
   if (status) where.status = status;
-  else where.status = { not: 'pending' };
+  else where.status = { not: 'rejected' };
+  where.excludedFromReport = false;
   if (from || to) {
     const date: Record<string, Date> = {};
     if (from) date.gte = new Date(`${from}T00:00:00`);
@@ -53,7 +78,12 @@ export async function GET(request: NextRequest) {
     })),
   }));
 
-  const sections = buildCashReport(sourceEntries);
+  const balances = await buildBalancesByPharmacy(
+    [...new Set(entries.map((e) => e.pharmacyId))],
+    from,
+    to
+  );
+  const sections = buildCashReport(sourceEntries, balances);
   const workbook = await buildCashReportWorkbook(sections, { from, to, statusFilter: status });
   const buffer = await workbook.xlsx.writeBuffer();
 
