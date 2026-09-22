@@ -132,7 +132,7 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: 'Отклонена',
 };
 const STATUS_CLASSES: Record<string, string> = {
-  pending: 'bg-yellow-300 text-yellow-900',
+  pending: 'bg-amber-100 text-amber-800',
   approved: 'bg-green-100 text-green-800',
   rejected: 'bg-red-100 text-red-800',
 };
@@ -336,34 +336,38 @@ function DaySummaryRow({
   const hasPending = entries.some((e) => e.status === 'pending');
   const soleStatus = new Set(entries.map((e) => e.status)).size === 1 ? entries[0].status : null;
 
+  // !py-2.5 переопределяет плотный [&_.td]:py-1 у таблицы (см. её className) — свёрнутая
+  // строка дня служит заголовком дня/аптеки и должна быть заметно выше обычных строк смен.
+  const summaryCell = 'td !py-2.5';
+
   return (
     <tr
-      className={`group border-y border-slate-300 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 hover:bg-slate-200/60'}`}
+      className={`group border-y-2 border-slate-400 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 hover:bg-slate-200/60'}`}
       onClick={onToggle}
     >
-      <td className="td" />
-      <td className="td whitespace-nowrap">
+      <td className={summaryCell} />
+      <td className={`${summaryCell} whitespace-nowrap`}>
         <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900">
           <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
           {fmtDate(dateKey)}
         </span>
       </td>
-      <td className="td font-medium max-w-[110px] truncate" title={pharmacyName}>{pharmacyName}</td>
-      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalCash)}</td>
-      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalTerminal)}</td>
-      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalKaspi > 0 ? fmt(s.totalKaspi) : '—'}</td>
-      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalIncomes > 0 ? fmt(s.totalIncomes) : '—'}</td>
-      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalBonuses > 0 ? fmt(s.totalBonuses) : '—'}</td>
-      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalAdvances > 0 ? fmt(s.totalAdvances) : '—'}</td>
-      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalSurcharges > 0 ? fmt(s.totalSurcharges) : '—'}</td>
-      <td className="td text-right font-semibold text-green-700 whitespace-nowrap">{fmt(s.totalRevenue)}</td>
-      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalExpenses > 0 ? fmt(s.totalExpenses) : '—'}</td>
-      <td className="td text-slate-500 max-w-[130px] truncate">
+      <td className={`${summaryCell} font-medium max-w-[110px] truncate`} title={pharmacyName}>{pharmacyName}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{fmt(s.totalCash)}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{fmt(s.totalTerminal)}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{s.totalKaspi > 0 ? fmt(s.totalKaspi) : '—'}</td>
+      <td className={`${summaryCell} text-right text-green-700 whitespace-nowrap`}>{s.totalIncomes > 0 ? fmt(s.totalIncomes) : '—'}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalBonuses > 0 ? fmt(s.totalBonuses) : '—'}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalAdvances > 0 ? fmt(s.totalAdvances) : '—'}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalSurcharges > 0 ? fmt(s.totalSurcharges) : '—'}</td>
+      <td className={`${summaryCell} text-right font-semibold text-green-700 whitespace-nowrap`}>{fmt(s.totalRevenue)}</td>
+      <td className={`${summaryCell} text-right text-red-600 whitespace-nowrap`}>{s.totalExpenses > 0 ? fmt(s.totalExpenses) : '—'}</td>
+      <td className={`${summaryCell} text-slate-500 max-w-[130px] truncate`}>
         {entries.length === 1 ? entries[0].employeeName : employeeCountLabel(entries.length)}
       </td>
-      <td className="td">
+      <td className={summaryCell}>
         {hasPending ? (
-          <span className="text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-yellow-300 text-yellow-900">
+          <span className="text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-amber-100 text-amber-800">
             есть на проверке
           </span>
         ) : soleStatus ? (
@@ -377,7 +381,7 @@ function DaySummaryRow({
       {/* Непрозрачный фон обязателен: это sticky-колонка, под ней при горизонтальном скролле
           уезжают остальные колонки этой же строки (например, бейдж статуса) — с полупрозрачным
           фоном (bg-slate-200/70) их текст было видно сквозь «в кассе/сдано». */}
-      <td className={`td border-l border-slate-300 sticky right-0 z-10 ${expanded ? 'bg-slate-200' : 'bg-slate-100 group-hover:bg-slate-200'}`}>
+      <td className={`${summaryCell} border-l border-slate-300 sticky right-0 z-10 ${expanded ? 'bg-slate-200' : 'bg-slate-100 group-hover:bg-slate-200'}`}>
         {balance && (
           <div className="text-xs text-right whitespace-nowrap">
             <div className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700 font-medium'}>
@@ -459,11 +463,7 @@ function DaySummaryCard({
       </div>
       {(hasPending || (balance && balance.deposit > 0)) && (
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-[18px] text-xs">
-          {hasPending && (
-            <span className="px-1.5 py-0.5 rounded font-medium bg-yellow-300 text-yellow-900">
-              есть записи на проверке
-            </span>
-          )}
+          {hasPending && <span className="text-amber-700">есть записи на проверке</span>}
           {balance && balance.deposit > 0 && <span className="text-slate-500">сдано в банк {fmt(balance.deposit)}</span>}
         </div>
       )}
@@ -1602,7 +1602,7 @@ export default function RevenueListPage() {
             </div>
           )}
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1">
+            <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1 [&_.td]:border-b-2 [&_.td]:border-b-slate-300">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="th w-8">
@@ -1651,7 +1651,7 @@ export default function RevenueListPage() {
                   const rowBg = isEditingThis
                     ? 'bg-slate-100'
                     : entry.status === 'pending'
-                    ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                    ? 'bg-yellow-100 hover:bg-yellow-200'
                     : 'hover:bg-slate-50';
                   return (
                     <React.Fragment key={entry.id}>
@@ -1731,7 +1731,7 @@ export default function RevenueListPage() {
                         </td>
                         <td
                           className={`td border-l border-slate-300 sticky right-0 z-10 ${
-                            isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-amber-50 group-hover:bg-amber-100' : 'bg-white group-hover:bg-slate-50'
+                            isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-yellow-100 group-hover:bg-yellow-200' : 'bg-white group-hover:bg-slate-50'
                           }`}
                         >
                           {isEditingThis ? (
@@ -1766,7 +1766,7 @@ export default function RevenueListPage() {
                         </td>
                       </tr>
                       {isModeratingThis && !isEditingThis && (
-                        <tr key={`${entry.id}-moderate`} className="bg-amber-50/60">
+                        <tr key={`${entry.id}-moderate`} className="bg-yellow-100">
                           <td colSpan={15} className="px-4 py-3">
                             {renderModeratePanel(entry)}
                           </td>
@@ -1825,7 +1825,7 @@ export default function RevenueListPage() {
                       {group.entries.map((entry) => {
               const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
                 getEntryDerived(entry);
-              const cardBg = isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-amber-50/40' : '';
+              const cardBg = isEditingThis ? 'bg-slate-100' : entry.status === 'pending' ? 'bg-yellow-100' : '';
 
               if (isEditingThis) {
                 return (
