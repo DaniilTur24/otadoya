@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrBookkeeper } from '@/lib/api-auth';
 import { loadCashBalance } from '@/lib/cash-balance-query';
+import { isMonthClosed } from '@/lib/closed-month';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,16 @@ export async function PUT(request: NextRequest) {
   }
 
   const day = new Date(`${String(date).slice(0, 10)}T00:00:00.000Z`);
+
+  // Взнос в банк меняет остаток кассы, который переносится изо дня в день и из месяца в месяц —
+  // правка внутри уже закрытого месяца задним числом сдвинула бы «Сальдо» во всех последующих
+  // месяцах, хотя закрытие обещает, что цифры за период зафиксированы (QA раунд 5, №7).
+  if (await isMonthClosed(day)) {
+    return NextResponse.json(
+      { error: 'Месяц закрыт — изменить взнос в банк нельзя. Сначала откройте месяц в разделе «Закрытие месяца»' },
+      { status: 423 },
+    );
+  }
 
   // Ноль — это «взноса не было», а не взнос на ноль: запись убирается целиком,
   // чтобы в истории не оставалось пустых строк.
