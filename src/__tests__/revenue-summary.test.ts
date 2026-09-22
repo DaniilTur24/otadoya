@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeEntries, groupEntriesByDate, type SummaryEntry } from '@/lib/revenue-summary';
+import { summarizeEntries, groupEntriesByDateAndPharmacy, type SummaryEntry } from '@/lib/revenue-summary';
 
 function entry(over: Partial<SummaryEntry> = {}): SummaryEntry {
   const cashRevenue = over.cashRevenue ?? 0;
@@ -127,12 +127,16 @@ describe('summarizeEntries', () => {
   });
 });
 
-describe('groupEntriesByDate', () => {
-  it('собирает подряд идущие записи одного дня в одну группу, сохраняя порядок', () => {
-    const groups = groupEntriesByDate([
-      entry({ date: '2026-09-03', cashRevenue: 100_000 }),
-      entry({ date: '2026-09-03', cashRevenue: 47_155 }),
-      entry({ date: '2026-09-02', cashRevenue: 40_000 }),
+describe('groupEntriesByDateAndPharmacy', () => {
+  function withPharmacy(id: number, name: string, over: Partial<SummaryEntry> = {}) {
+    return { ...entry(over), pharmacy: { id, name } };
+  }
+
+  it('собирает записи одного дня и одной аптеки в одну группу, сохраняя порядок', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 100_000 }),
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 47_155 }),
+      withPharmacy(1, 'Думан', { date: '2026-09-02', cashRevenue: 40_000 }),
     ]);
 
     expect(groups.map((g) => g.dateKey)).toEqual(['2026-09-03', '2026-09-02']);
@@ -140,10 +144,33 @@ describe('groupEntriesByDate', () => {
     expect(groups[1].entries).toHaveLength(1);
   });
 
+  it('разносит записи одного дня по разным аптекам в отдельные группы, а не смешивает их', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 100_000 }),
+      withPharmacy(2, 'Наурызбай', { date: '2026-09-03', cashRevenue: 50_000 }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.pharmacyName)).toEqual(['Думан', 'Наурызбай']);
+    expect(groups.every((g) => g.dateKey === '2026-09-03')).toBe(true);
+  });
+
+  it('собирает записи одной аптеки в одну группу, даже если они не идут подряд', () => {
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 10_000 }),
+      withPharmacy(2, 'Наурызбай', { date: '2026-09-03', cashRevenue: 20_000 }),
+      withPharmacy(1, 'Думан', { date: '2026-09-03', cashRevenue: 30_000 }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].entries).toHaveLength(2);
+    expect(groups[1].entries).toHaveLength(1);
+  });
+
   it('игнорирует время в дате и группирует по календарному дню', () => {
-    const groups = groupEntriesByDate([
-      entry({ date: '2026-09-03T00:00:00.000Z' }),
-      entry({ date: '2026-09-03T21:51:00.000Z' }),
+    const groups = groupEntriesByDateAndPharmacy([
+      withPharmacy(1, 'Думан', { date: '2026-09-03T00:00:00.000Z' }),
+      withPharmacy(1, 'Думан', { date: '2026-09-03T21:51:00.000Z' }),
     ]);
 
     expect(groups).toHaveLength(1);
@@ -151,6 +178,6 @@ describe('groupEntriesByDate', () => {
   });
 
   it('на пустом списке не создаёт групп', () => {
-    expect(groupEntriesByDate([])).toEqual([]);
+    expect(groupEntriesByDateAndPharmacy([])).toEqual([]);
   });
 });

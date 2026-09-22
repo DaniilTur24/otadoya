@@ -75,15 +75,27 @@ export function summarizeEntries(all: SummaryEntry[]) {
   };
 }
 
-// Записи приходят с сервера отсортированными по дате (desc), поэтому один день — это
-// подряд идущие строки; группировка сохраняет исходный порядок таблицы.
-export function groupEntriesByDate<T extends { date: string }>(list: T[]) {
-  const groups: { dateKey: string; entries: T[] }[] = [];
+// Группирует по дню И по аптеке — так, в отличие от группировки только по дате, за
+// одной свёрнутой строкой всегда стоит одна аптека. Если в день были записи по
+// нескольким аптекам, получаем несколько строк с одинаковой датой вместо одной строки
+// со смешанными «2 аптеки», под которой цифры было не понять, пока не развернёшь.
+// Использует Map (а не «подряд идущие записи»), поэтому не зависит от того, идут ли
+// записи одной аптеки подряд в исходном списке.
+export function groupEntriesByDateAndPharmacy<T extends { date: string; pharmacy: { id: number; name: string } }>(
+  list: T[]
+) {
+  const groups: { key: string; dateKey: string; pharmacyId: number; pharmacyName: string; entries: T[] }[] = [];
+  const indexByKey = new Map<string, number>();
   for (const entry of list) {
     const dateKey = entry.date.slice(0, 10);
-    const last = groups[groups.length - 1];
-    if (last && last.dateKey === dateKey) last.entries.push(entry);
-    else groups.push({ dateKey, entries: [entry] });
+    const key = `${dateKey}:${entry.pharmacy.id}`;
+    const idx = indexByKey.get(key);
+    if (idx !== undefined) {
+      groups[idx].entries.push(entry);
+    } else {
+      indexByKey.set(key, groups.length);
+      groups.push({ key, dateKey, pharmacyId: entry.pharmacy.id, pharmacyName: entry.pharmacy.name, entries: [entry] });
+    }
   }
   return groups;
 }

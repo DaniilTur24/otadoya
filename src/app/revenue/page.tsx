@@ -10,7 +10,7 @@ import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import {
   EXCLUDED_FROM_GENERIC_SUMS, pharmaBonusSum, advanceSum, surchargeSum,
-  incomeItemsSum, expenseItemsSum, summarizeEntries, groupEntriesByDate,
+  incomeItemsSum, expenseItemsSum, summarizeEntries, groupEntriesByDateAndPharmacy,
 } from '@/lib/revenue-summary';
 import { suggestDeposit, type CashDayBalance } from '@/lib/cash-balance';
 
@@ -112,6 +112,16 @@ function fmtDate(s: string) {
   return new Date(s).toLocaleDateString('ru-RU');
 }
 
+// Склонение «N сотрудник/сотрудника/сотрудников» для свёрнутой строки дня, когда в ней
+// не одна смена и показывать одно конкретное имя нельзя.
+function employeeCountLabel(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} сотрудник`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} сотрудника`;
+  return `${n} сотрудников`;
+}
+
 const ROW_LABEL: Record<string, string> = Object.fromEntries(
   MONTHLY_REPORT_ROWS.filter((r) => !r.section).map((r) => [r.key, r.label])
 );
@@ -122,7 +132,7 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: 'Отклонена',
 };
 const STATUS_CLASSES: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-800',
+  pending: 'bg-yellow-300 text-yellow-900',
   approved: 'bg-green-100 text-green-800',
   rejected: 'bg-red-100 text-red-800',
 };
@@ -306,77 +316,76 @@ function CashLine({
   );
 }
 
-// Одна метрика в строке дня: подпись слева, число справа в колонке фиксированной ширины,
-// чтобы числа выстраивались друг под другом и день с днём можно было сравнивать взглядом.
-function DayMetric({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <span className="w-44 shrink-0 flex justify-between gap-2">
-      <span className="text-slate-500">{label}</span>
-      <strong className={className ?? 'text-slate-900'}>{value}</strong>
-    </span>
-  );
-}
-
-// Заголовок дня. Сам день виден всегда, смены внутри раскрываются по клику — иначе
-// за месяц набирается столько строк, что итоги в них тонут.
+// Заголовок дня (одна аптека — группировка теперь идёт по дате+аптеке, см.
+// groupEntriesByDateAndPharmacy, поэтому здесь никогда не смешиваются разные аптеки).
+// Сам день виден всегда, смены внутри раскрываются по клику — иначе за месяц набирается
+// столько строк, что итоги в них тонут. Ячейки идут в том же порядке, что и колонки
+// таблицы, чтобы итоговые суммы стояли ровно под своими заголовками, а не отдельной
+// плашкой, которую легко принять за несоответствие.
 function DaySummaryRow({
-  dateKey, entries, balance, expanded, showPharmacy, showCash, onToggle,
+  dateKey, pharmacyName, entries, balance, expanded, onToggle,
 }: {
   dateKey: string;
+  pharmacyName: string;
   entries: RevenueEntry[];
   balance: CashDayBalance | undefined;
   expanded: boolean;
-  /** При фильтре по одной аптеке её название в каждой строке — лишний шум. */
-  showPharmacy: boolean;
-  /** Держим место под «В кассе», только если остаток вообще считается в этом срезе. */
-  showCash: boolean;
   onToggle: () => void;
 }) {
   const s = summarizeEntries(entries);
-  const pharmacyNames = [...new Set(entries.map((e) => e.pharmacy.name))];
   const hasPending = entries.some((e) => e.status === 'pending');
+  const soleStatus = new Set(entries.map((e) => e.status)).size === 1 ? entries[0].status : null;
 
   return (
     <tr
-      className={`border-y border-slate-300 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 hover:bg-slate-200/60'}`}
+      className={`group border-y border-slate-300 cursor-pointer ${expanded ? 'bg-slate-200/70' : 'bg-slate-100 hover:bg-slate-200/60'}`}
       onClick={onToggle}
     >
-      <td colSpan={15} className="px-3 py-2">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm">
-          <span className="w-32 shrink-0 font-semibold text-slate-900 flex items-center gap-1.5">
-            <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
-            {fmtDate(dateKey)}
+      <td className="td" />
+      <td className="td whitespace-nowrap">
+        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900">
+          <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
+          {fmtDate(dateKey)}
+        </span>
+      </td>
+      <td className="td font-medium max-w-[110px] truncate" title={pharmacyName}>{pharmacyName}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalCash)}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{fmt(s.totalTerminal)}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalKaspi > 0 ? fmt(s.totalKaspi) : '—'}</td>
+      <td className="td text-right text-green-700 whitespace-nowrap">{s.totalIncomes > 0 ? fmt(s.totalIncomes) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalBonuses > 0 ? fmt(s.totalBonuses) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalAdvances > 0 ? fmt(s.totalAdvances) : '—'}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalSurcharges > 0 ? fmt(s.totalSurcharges) : '—'}</td>
+      <td className="td text-right font-semibold text-green-700 whitespace-nowrap">{fmt(s.totalRevenue)}</td>
+      <td className="td text-right text-red-600 whitespace-nowrap">{s.totalExpenses > 0 ? fmt(s.totalExpenses) : '—'}</td>
+      <td className="td text-slate-500 max-w-[130px] truncate">
+        {entries.length === 1 ? entries[0].employeeName : employeeCountLabel(entries.length)}
+      </td>
+      <td className="td">
+        {hasPending ? (
+          <span className="text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-yellow-300 text-yellow-900">
+            есть на проверке
           </span>
-          {showPharmacy && (
-            <span className="w-40 shrink-0 text-slate-500 truncate" title={pharmacyNames.join(', ')}>
-              {pharmacyNames.length === 1 ? pharmacyNames[0] : `${pharmacyNames.length} аптеки`}
-            </span>
-          )}
-
-          <DayMetric label="Выручка" value={fmt(s.totalRevenue)} className="text-green-700" />
-          <DayMetric
-            label="Наличными"
-            value={fmt(s.cashNet)}
-            className={s.cashNet >= 0 ? 'text-slate-900' : 'text-red-700'}
-          />
-          {balance ? (
-            <DayMetric
-              label="В кассе"
-              value={fmt(balance.closingBalance)}
-              className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700'}
-            />
-          ) : showCash ? (
-            <span className="w-44 shrink-0" />
-          ) : null}
-
-          <span className="text-xs text-slate-400">
-            {entries.length === 1 ? '1 смена' : `${entries.length} смен`}
+        ) : soleStatus ? (
+          <span className={`text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+            STATUS_CLASSES[soleStatus] ?? 'bg-slate-100 text-slate-600'
+          }`}>
+            {STATUS_LABELS[soleStatus] ?? soleStatus}
           </span>
-          {hasPending && <span className="text-xs text-amber-700">есть записи на проверке</span>}
-          {balance && balance.deposit > 0 && (
-            <span className="text-xs text-slate-500">сдано в банк {fmt(balance.deposit)}</span>
-          )}
-        </div>
+        ) : null}
+      </td>
+      {/* Непрозрачный фон обязателен: это sticky-колонка, под ней при горизонтальном скролле
+          уезжают остальные колонки этой же строки (например, бейдж статуса) — с полупрозрачным
+          фоном (bg-slate-200/70) их текст было видно сквозь «в кассе/сдано». */}
+      <td className={`td border-l border-slate-300 sticky right-0 z-10 ${expanded ? 'bg-slate-200' : 'bg-slate-100 group-hover:bg-slate-200'}`}>
+        {balance && (
+          <div className="text-xs text-right whitespace-nowrap">
+            <div className={balance.closingBalance >= 0 ? 'text-slate-900' : 'text-red-700 font-medium'}>
+              в кассе {fmt(balance.closingBalance)}
+            </div>
+            {balance.deposit > 0 && <div className="text-slate-500">сдано {fmt(balance.deposit)}</div>}
+          </div>
+        )}
       </td>
     </tr>
   );
@@ -408,18 +417,18 @@ function DayTotalRow({ entries }: { entries: RevenueEntry[] }) {
 }
 
 // Мобильный аналог DaySummaryRow — тот же расчёт, но карточкой вместо табличной строки.
+// Группа тоже всегда одной аптеки (см. groupEntriesByDateAndPharmacy).
 function DaySummaryCard({
-  dateKey, entries, balance, expanded, showPharmacy, onToggle,
+  dateKey, pharmacyName, entries, balance, expanded, onToggle,
 }: {
   dateKey: string;
+  pharmacyName: string;
   entries: RevenueEntry[];
   balance: CashDayBalance | undefined;
   expanded: boolean;
-  showPharmacy: boolean;
   onToggle: () => void;
 }) {
   const s = summarizeEntries(entries);
-  const pharmacyNames = [...new Set(entries.map((e) => e.pharmacy.name))];
   const hasPending = entries.some((e) => e.status === 'pending');
 
   return (
@@ -432,15 +441,11 @@ function DaySummaryCard({
           <span className="text-slate-400 w-3">{expanded ? '▾' : '▸'}</span>
           {fmtDate(dateKey)}
         </span>
-        <span className="text-xs text-slate-400 shrink-0">
-          {entries.length === 1 ? '1 смена' : `${entries.length} смен`}
+        <span className="text-xs text-slate-400 shrink-0 truncate max-w-[140px]">
+          {entries.length === 1 ? entries[0].employeeName : employeeCountLabel(entries.length)}
         </span>
       </div>
-      {showPharmacy && (
-        <div className="text-xs text-slate-500 truncate mt-0.5 pl-[18px]" title={pharmacyNames.join(', ')}>
-          {pharmacyNames.length === 1 ? pharmacyNames[0] : `${pharmacyNames.length} аптеки`}
-        </div>
-      )}
+      <div className="text-xs text-slate-500 truncate mt-0.5 pl-[18px]">{pharmacyName}</div>
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm mt-1.5 pl-[18px]">
         <span className="text-slate-500">Выручка <strong className="text-green-700">{fmt(s.totalRevenue)}</strong></span>
         <span className="text-slate-500">
@@ -454,7 +459,11 @@ function DaySummaryCard({
       </div>
       {(hasPending || (balance && balance.deposit > 0)) && (
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-[18px] text-xs">
-          {hasPending && <span className="text-amber-700">есть записи на проверке</span>}
+          {hasPending && (
+            <span className="px-1.5 py-0.5 rounded font-medium bg-yellow-300 text-yellow-900">
+              есть записи на проверке
+            </span>
+          )}
           {balance && balance.deposit > 0 && <span className="text-slate-500">сдано в банк {fmt(balance.deposit)}</span>}
         </div>
       )}
@@ -507,6 +516,10 @@ export default function RevenueListPage() {
   const [role, setRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Отдельно от `loading`: true только пока не было ни одной успешной загрузки.
+  // Повторные фоновые перезапросы (после подтверждения, сохранения, удаления и т.п.)
+  // не должны схлопывать таблицу в спиннер — это дёргает скролл наверх.
+  const [initialLoading, setInitialLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [moderating, setModerating] = useState<number | null>(null);
@@ -528,37 +541,14 @@ export default function RevenueListPage() {
   // «остаток по всем аптекам» смысла не имеет. Грузится отдельно от записей, потому что
   // остаток на начало периода зависит от всей истории до него, а не от видимых строк.
   const [cashBalance, setCashBalance] = useState<CashBalanceResponse | null>(null);
-  // Дни свёрнуты по умолчанию: за месяц набирается слишком много строк, чтобы читать их подряд.
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+  // Группы (дата+аптека) свёрнуты по умолчанию: за месяц набирается слишком много строк,
+  // чтобы читать их подряд. Ключ — group.key из groupEntriesByDateAndPharmacy.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const [tooltipEntry, setTooltipEntry] = useState<RevenueEntry | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-
-  // Плавающий горизонтальный скроллбар для таблицы записей — прилипает к низу окна,
-  // пока таблица частично на экране, чтобы не листать вниз через все записи до обычного скроллбара.
-  const tableScrollRef = useRef<HTMLDivElement>(null);
-  const floatingScrollRef = useRef<HTMLDivElement>(null);
-  const syncingScrollRef = useRef(false);
-  const [showFloatingScrollbar, setShowFloatingScrollbar] = useState(false);
-  const [floatingBarRect, setFloatingBarRect] = useState({ left: 0, width: 0 });
-  const [tableScrollWidth, setTableScrollWidth] = useState(0);
-
-  const handleTableScroll = () => {
-    if (syncingScrollRef.current) { syncingScrollRef.current = false; return; }
-    if (floatingScrollRef.current && tableScrollRef.current) {
-      syncingScrollRef.current = true;
-      floatingScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-    }
-  };
-  const handleFloatingScroll = () => {
-    if (syncingScrollRef.current) { syncingScrollRef.current = false; return; }
-    if (floatingScrollRef.current && tableScrollRef.current) {
-      syncingScrollRef.current = true;
-      tableScrollRef.current.scrollLeft = floatingScrollRef.current.scrollLeft;
-    }
-  };
 
   // Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не привязаны
   // к смене в записи выручки — их зарплата считается только через табель посещаемости.
@@ -633,6 +623,7 @@ export default function RevenueListPage() {
       setPendingEntries([]);
     }
     setLoading(false);
+    setInitialLoading(false);
   }, [filterPharmacy, filterFrom, filterTo, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
@@ -654,11 +645,11 @@ export default function RevenueListPage() {
 
   useEffect(() => { loadCashBalance(); }, [loadCashBalance]);
 
-  function toggleDay(dateKey: string) {
-    setExpandedDays((prev) => {
+  function toggleGroup(key: string) {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(dateKey)) next.delete(dateKey);
-      else next.add(dateKey);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -1064,33 +1055,6 @@ export default function RevenueListPage() {
   }
 
   const manageableEntries = visibleEntries.filter(canManageEntry);
-
-  useEffect(() => {
-    const container = tableScrollRef.current;
-    if (!container) return;
-
-    const updateMetrics = () => {
-      const rect = container.getBoundingClientRect();
-      setTableScrollWidth(container.scrollWidth);
-      setFloatingBarRect({ left: rect.left, width: rect.width });
-      const hasOverflow = container.scrollWidth > container.clientWidth + 1;
-      const scrollbarBelowViewport = rect.bottom > window.innerHeight;
-      const tableVisible = rect.top < window.innerHeight && rect.bottom > 0;
-      setShowFloatingScrollbar(hasOverflow && scrollbarBelowViewport && tableVisible);
-    };
-
-    updateMetrics();
-    const resizeObserver = new ResizeObserver(updateMetrics);
-    resizeObserver.observe(container);
-    window.addEventListener('scroll', updateMetrics, { passive: true });
-    window.addEventListener('resize', updateMetrics);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('scroll', updateMetrics);
-      window.removeEventListener('resize', updateMetrics);
-    };
-  }, [visibleEntries]);
 
   function renderEditForm() {
     if (!editState) return null;
@@ -1584,7 +1548,7 @@ export default function RevenueListPage() {
       </div>
 
       {/* Почему не видно остатка в кассе */}
-      {(role === 'admin' || role === 'bookkeeper') && !loading && (
+      {(role === 'admin' || role === 'bookkeeper') && !initialLoading && (
         filterPharmacy && cashBalance && !cashBalance.configured ? (
           <div className="mb-3 px-3 py-2 rounded border border-amber-200 bg-amber-50 text-sm text-amber-900">
             Остаток в кассе не считается: не задана точка отсчёта. Укажите в{' '}
@@ -1601,7 +1565,7 @@ export default function RevenueListPage() {
       )}
 
       {/* Таблица записей */}
-      {loading ? (
+      {initialLoading ? (
         <div className="text-slate-500 text-sm py-5 text-center flex items-center justify-center gap-2">
           <span className="spinner" /> Загрузка...
         </div>
@@ -1618,15 +1582,15 @@ export default function RevenueListPage() {
             <button
               className="text-slate-600 underline hover:text-slate-900 text-xs"
               onClick={() => {
-                if (expandedDays.size > 0) {
-                  setExpandedDays(new Set());
+                if (expandedGroups.size > 0) {
+                  setExpandedGroups(new Set());
                 } else {
-                  const allDays = groupEntriesByDate(visibleEntries).map((g) => g.dateKey);
-                  setExpandedDays(new Set(allDays));
+                  const allKeys = groupEntriesByDateAndPharmacy(visibleEntries).map((g) => g.key);
+                  setExpandedGroups(new Set(allKeys));
                 }
               }}
             >
-              {expandedDays.size > 0 ? 'Свернуть все' : 'Развернуть все'}
+              {expandedGroups.size > 0 ? 'Свернуть все' : 'Развернуть все'}
             </button>
           </div>
           {selectedIds.size > 0 && (
@@ -1637,7 +1601,7 @@ export default function RevenueListPage() {
               </button>
             </div>
           )}
-          <div className="hidden md:block overflow-x-auto" ref={tableScrollRef} onScroll={handleTableScroll}>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full [&_.td]:px-1.5 [&_.td]:py-1 [&_.th]:px-1.5 [&_.th]:py-1">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
@@ -1666,21 +1630,20 @@ export default function RevenueListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {groupEntriesByDate(visibleEntries).map((group) => {
+                {groupEntriesByDateAndPharmacy(visibleEntries).map((group) => {
                   const dayBalance = cashBalance?.configured
                     ? cashBalance.days.find((d) => d.date === group.dateKey)
                     : undefined;
-                  const isExpanded = expandedDays.has(group.dateKey);
+                  const isExpanded = expandedGroups.has(group.key);
                   return (
-                  <React.Fragment key={group.dateKey}>
+                  <React.Fragment key={group.key}>
                     <DaySummaryRow
                       dateKey={group.dateKey}
+                      pharmacyName={group.pharmacyName}
                       entries={group.entries}
                       balance={dayBalance}
                       expanded={isExpanded}
-                      showPharmacy={!filterPharmacy}
-                      showCash={Boolean(cashBalance?.configured)}
-                      onToggle={() => toggleDay(group.dateKey)}
+                      onToggle={() => toggleGroup(group.key)}
                     />
                 {isExpanded && group.entries.map((entry) => {
                   const { bonuses, advances, surcharges, incomes, expenses, isEditingThis, isModeratingThis, canModerate } =
@@ -1842,20 +1805,20 @@ export default function RevenueListPage() {
           {/* Мобильная версия — карточки вместо таблицы, та же информация и те же действия,
               просто без горизонтальной прокрутки по 13 колонкам. */}
           <div className="md:hidden divide-y divide-slate-200">
-            {groupEntriesByDate(visibleEntries).map((group) => {
+            {groupEntriesByDateAndPharmacy(visibleEntries).map((group) => {
               const dayBalance = cashBalance?.configured
                 ? cashBalance.days.find((d) => d.date === group.dateKey)
                 : undefined;
-              const isExpanded = expandedDays.has(group.dateKey);
+              const isExpanded = expandedGroups.has(group.key);
               return (
-                <div key={group.dateKey}>
+                <div key={group.key}>
                   <DaySummaryCard
                     dateKey={group.dateKey}
+                    pharmacyName={group.pharmacyName}
                     entries={group.entries}
                     balance={dayBalance}
                     expanded={isExpanded}
-                    showPharmacy={!filterPharmacy}
-                    onToggle={() => toggleDay(group.dateKey)}
+                    onToggle={() => toggleGroup(group.key)}
                   />
                   {isExpanded && (
                     <div className="divide-y divide-slate-100">
@@ -1994,18 +1957,6 @@ export default function RevenueListPage() {
             })}
           </div>
 
-          {/* Плавающий горизонтальный скроллбар — прилипает к низу окна, пока таблица на экране,
-              чтобы не нужно было листать вниз через все записи ради обычного нижнего скроллбара. */}
-          {showFloatingScrollbar && (
-            <div
-              ref={floatingScrollRef}
-              onScroll={handleFloatingScroll}
-              style={{ position: 'fixed', bottom: 0, left: floatingBarRect.left, width: floatingBarRect.width, zIndex: 30 }}
-              className="overflow-x-auto overflow-y-hidden h-3 bg-slate-100 border-t border-slate-300"
-            >
-              <div style={{ width: tableScrollWidth, height: 1 }} />
-            </div>
-          )}
 
           {/* Итого */}
           {(() => {
