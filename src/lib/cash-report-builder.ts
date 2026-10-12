@@ -21,6 +21,8 @@ export interface CashReportExpenseLine {
   amount: number;
   comment: string | null;
   recipientName: string | null;
+  /** Аптека, за которую оплачен расход (в отчёте он числится за ней); null — за аптекой записи */
+  allocatedPharmacyName: string | null;
   affectsCash: boolean;
 }
 
@@ -65,6 +67,7 @@ export interface CashReportSourceEntry {
     amount: number;
     comment: string | null;
     employee: { name: string } | null;
+    allocatedPharmacy?: { name: string } | null;
   }[];
 }
 
@@ -79,6 +82,7 @@ function buildExpenseLines(entry: CashReportSourceEntry): CashReportExpenseLine[
     amount: item.amount,
     comment: item.comment,
     recipientName: item.employee?.name ?? null,
+    allocatedPharmacyName: item.allocatedPharmacy?.name ?? null,
     affectsCash: !EXCLUDED_FROM_CASH.has(item.category ?? ''),
   }));
 }

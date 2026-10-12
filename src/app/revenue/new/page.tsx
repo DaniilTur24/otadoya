@@ -23,8 +23,17 @@ interface Employee {
 interface ExpenseItem {
   id: number;
   amount: string;
+  // '' = аптека самой записи; иначе расход числится в отчёте за выбранной аптекой, а деньги
+  // по-прежнему уходят из кассы аптеки записи
+  pharmacyId: string;
   category: string;
   comment: string;
+}
+
+interface PharmacyOption {
+  id: number;
+  name: string;
+  isActive: boolean;
 }
 
 interface AvansItem {
@@ -44,6 +53,8 @@ const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
     !row.section &&
     row.key !== 'employeeAdvance' &&
+    // Бонусы вводятся отдельным блоком формы — они всегда относятся к аптеке записи и к зарплате
+    row.key !== 'pharmaBonus' &&
     (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
@@ -80,7 +91,7 @@ const MANAGER_EXPENSE_KEYS = new Set([
 let nextId = 1;
 
 function emptyItem(): ExpenseItem {
-  return { id: nextId++, amount: '', category: '', comment: '' };
+  return { id: nextId++, amount: '', pharmacyId: '', category: '', comment: '' };
 }
 
 function emptyAvansItem(): AvansItem {
@@ -118,6 +129,16 @@ export default function NewRevenuePage() {
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
   const [avansItems, setAvansItems] = useState<AvansItem[]>([]);
   const [doplataItems, setDoplataItems] = useState<DoplataItem[]>([]);
+  const [bonus, setBonus] = useState({ amount: '', comment: '' });
+  // Все аптеки (не только свои): заведующий может отнести расход на любую аптеку
+  const [allPharmacies, setAllPharmacies] = useState<PharmacyOption[]>([]);
+
+  useEffect(() => {
+    fetch('/api/pharmacies/names')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: PharmacyOption[]) => setAllPharmacies(list))
+      .catch(() => setAllPharmacies([]));
+  }, []);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -196,7 +217,7 @@ export default function NewRevenuePage() {
     setExpenseItems((items) => items.filter((i) => i.id !== id));
   }
 
-  function updateExpenseItem(id: number, field: 'amount' | 'category' | 'comment', value: string) {
+  function updateExpenseItem(id: number, field: 'amount' | 'pharmacyId' | 'category' | 'comment', value: string) {
     setExpenseItems((items) =>
       items.map((i) => (i.id === id ? { ...i, [field]: value } : i))
     );
@@ -248,6 +269,30 @@ export default function NewRevenuePage() {
     ? INCOME_OPTIONS.filter((opt) => MANAGER_EXPENSE_KEYS.has(opt.key))
     : INCOME_OPTIONS;
 
+  // Аптека, за которую числится расход: по умолчанию аптека записи (её касса платит), но можно
+  // выбрать любую активную — например, когда одна аптека оплатила нужду другой.
+  const pharmacyOptions: PharmacyOption[] =
+    allPharmacies.length > 0
+      ? allPharmacies.filter((p) => p.isActive)
+      : pharmacies.map((p) => ({ id: p.id, name: p.name, isActive: true }));
+  const entryPharmacyName = pharmacyOptions.find((p) => p.id === Number(form.pharmacyId))?.name ?? '';
+
+  function renderPharmacySelect(item: ExpenseItem) {
+    return (
+      <select
+        value={item.pharmacyId || form.pharmacyId}
+        onChange={(e) => updateExpenseItem(item.id, 'pharmacyId', e.target.value === form.pharmacyId ? '' : e.target.value)}
+        className="input"
+        aria-label="Аптека, за которую расход"
+      >
+        {!form.pharmacyId && <option value="">— аптека —</option>}
+        {pharmacyOptions.map((p) => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+    );
+  }
+
   const totalExpenses = expenseItems.reduce(
     (sum, i) => sum + (parseFloat(i.amount) || 0),
     0
@@ -261,9 +306,7 @@ export default function NewRevenuePage() {
   const cashRevenueNum = parseFloat(form.cashRevenue) || 0;
   const avansTotal = avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
   const doplataNum = doplataItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
-  const summaryBonuses = expenseItems
-    .filter((i) => i.category === 'pharmaBonus')
-    .reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+  const summaryBonuses = parseFloat(bonus.amount) || 0;
   const summaryAdvances =
     expenseItems
       .filter((i) => i.category === 'employeeAdvance')
@@ -293,6 +336,7 @@ export default function NewRevenuePage() {
     form.kaspiRevenue ||
     form.generalComment ||
     expenseItems.length > 0 ||
+    Boolean(bonus.amount || bonus.comment) ||
     avansItems.length > 0 ||
     doplataItems.length > 0
   );
@@ -342,12 +386,20 @@ export default function NewRevenuePage() {
       return;
     }
 
-    type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId?: number };
+    type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId?: number; allocatedPharmacyId?: number | null };
     const allExpenseItems: SubmitExpenseItem[] = validItems.map((i) => ({
       amount: i.amount,
       category: i.category,
       comment: i.comment || null,
+      allocatedPharmacyId: i.pharmacyId ? Number(i.pharmacyId) : null,
     }));
+    if (parseFloat(bonus.amount) > 0) {
+      allExpenseItems.push({
+        amount: bonus.amount,
+        category: 'pharmaBonus',
+        comment: bonus.comment.trim() || null,
+      });
+    }
     for (const item of validAvansItems) {
       const avansEmployee = employees.find((e) => e.id === Number(item.employeeId));
       allExpenseItems.push({
@@ -404,6 +456,7 @@ export default function NewRevenuePage() {
         shiftType: form.shiftType,
       });
       setExpenseItems([]);
+      setBonus({ amount: '', comment: '' });
       setAvansItems([]);
       setDoplataItems([]);
       setTimeout(() => setSuccess(false), 4000);
@@ -608,9 +661,10 @@ export default function NewRevenuePage() {
             </p>
           ) : (
             <div className="space-y-2">
-              <div className="hidden sm:grid gap-2 text-xs text-slate-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
+              <div className="hidden sm:grid gap-2 text-xs text-slate-400 font-medium px-6" style={{ gridTemplateColumns: '2rem 7rem 11rem 1fr 9rem 1.5rem' }}>
                 <span></span>
                 <span>Сумма</span>
+                <span>Аптека</span>
                 <span>Статья *</span>
                 <span>Примечание</span>
                 <span></span>
@@ -637,6 +691,7 @@ export default function NewRevenuePage() {
                         ×
                       </button>
                     </div>
+                    <div className="[&_select]:w-full">{renderPharmacySelect(item)}</div>
                     <select
                       value={item.category}
                       onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}
@@ -664,7 +719,7 @@ export default function NewRevenuePage() {
                     />
                   </div>
                   {/* Desktop layout */}
-                  <div className="hidden sm:grid gap-2 items-start" style={{ gridTemplateColumns: '2rem 7rem 1fr 9rem 1.5rem' }}>
+                  <div className="hidden sm:grid gap-2 items-start" style={{ gridTemplateColumns: '2rem 7rem 11rem 1fr 9rem 1.5rem' }}>
                     <span className="text-xs text-slate-400 mt-2.5 text-right pr-1">
                       {idx + 1}.
                     </span>
@@ -675,6 +730,7 @@ export default function NewRevenuePage() {
                       className="input"
                       autoFocus={idx === expenseItems.length - 1}
                     />
+                    {renderPharmacySelect(item)}
                     <select
                       value={item.category}
                       onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}
@@ -709,9 +765,9 @@ export default function NewRevenuePage() {
                       ×
                     </button>
                   </div>
-                  {item.category === 'pharmaBonus' && (
-                    <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mt-1 sm:ml-8">
-                      Эта сумма пойдёт в расходы и будет автоматически учтена в зарплате сотрудника за месяц.
+                  {item.pharmacyId && item.pharmacyId !== form.pharmacyId && (
+                    <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1 mt-1 sm:ml-8">
+                      Деньги уйдут из кассы «{entryPharmacyName}», а в отчёте и при закрытии месяца этот расход будет у аптеки «{pharmacyOptions.find((p) => String(p.id) === item.pharmacyId)?.name ?? '—'}».
                     </p>
                   )}
                 </div>
@@ -724,6 +780,32 @@ export default function NewRevenuePage() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* Бонусы фарм и зав — всегда за аптекой записи (идут в зарплату по этой аптеке), поэтому
+            вынесены из общего списка статей, где можно выбрать другую аптеку. Сумма — первым полем. */}
+        <div className="rounded border border-slate-300 p-3">
+          <label className="label">Бонусы фарм и зав <span className="text-slate-400 font-normal">— необязательно</span></label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+            <AmountInput
+              value={bonus.amount}
+              onChange={(value) => setBonus((b) => ({ ...b, amount: value }))}
+              placeholder="Сумма бонусов"
+              className="input"
+            />
+            <input
+              type="text"
+              value={bonus.comment}
+              onChange={(e) => setBonus((b) => ({ ...b, comment: e.target.value }))}
+              placeholder="Примечание (необязательно)"
+              className="input sm:col-span-2"
+            />
+          </div>
+          {summaryBonuses > 0 && (
+            <p className="mt-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+              Эта сумма пойдёт в расходы и будет автоматически учтена в зарплате сотрудника за месяц.
+            </p>
           )}
         </div>
 

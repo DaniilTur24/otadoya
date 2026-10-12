@@ -13,6 +13,7 @@ vi.mock('next/server', () => ({
 const COUNTERS = [
   'dailyRevenueEntry', 'attendanceShift', 'extractedExpenseEntry', 'importedReportValue',
   'pharmacyPdfReport', 'monthlyReportOverride', 'employeePharmacy', 'userPharmacy', 'uploadedFile',
+  'dailyExpenseItem',
 ] as const;
 
 vi.mock('@/lib/prisma', () => ({
@@ -27,6 +28,7 @@ vi.mock('@/lib/prisma', () => ({
     employeePharmacy: { count: vi.fn() },
     userPharmacy: { count: vi.fn() },
     uploadedFile: { count: vi.fn() },
+    dailyExpenseItem: { count: vi.fn() },
   },
 }));
 

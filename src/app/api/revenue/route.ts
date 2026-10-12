@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories, validateAllocatedPharmacies, resolveAllocatedPharmacyId } from '@/lib/revenue-validation';
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
@@ -118,13 +118,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const items: { amount: string; category?: string; comment?: string; employeeId?: number | null }[] =
+  const items: { amount: string; category?: string; comment?: string; employeeId?: number | null; allocatedPharmacyId?: number | string | null }[] =
     Array.isArray(expenseItems)
       ? expenseItems.filter((i) => parseFloat(i.amount) > 0)
       : [];
 
   const categoryError = validateExpenseItemCategories(items);
   if (categoryError) return NextResponse.json({ error: categoryError }, { status: 400 });
+
+  // Расход может быть оплачен из кассы этой аптеки, но числиться в отчёте за другой
+  const allocationError = await validateAllocatedPharmacies(items, Number(pharmacyId));
+  if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 });
 
   // Авансы и доплаты привязываются к конкретному сотруднику (может отличаться от employeeId
   // записи). Проверяем, что выбранный сотрудник действительно работает в этой аптеке.
@@ -190,6 +194,7 @@ export async function POST(request: NextRequest) {
           category: i.category || null,
           comment: i.comment || null,
           employeeId: i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId ? Number(i.employeeId) : null,
+          allocatedPharmacyId: resolveAllocatedPharmacyId(i, Number(pharmacyId)),
         })),
       });
     }

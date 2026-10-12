@@ -18,6 +18,8 @@ const EXPENSE_OPTIONS = MONTHLY_REPORT_ROWS.filter(
   (row) =>
     !row.section &&
     row.key !== 'employeeAdvance' &&
+    // Бонусы вводятся отдельным блоком формы — они всегда относятся к аптеке записи и к зарплате
+    row.key !== 'pharmaBonus' &&
     (MONTHLY_EXPENSE_KEYS as readonly string[]).includes(row.key)
 ).map((row) => ({ key: row.key, label: row.label }));
 
@@ -52,6 +54,7 @@ const MANAGER_EXPENSE_KEYS = new Set([
 ]);
 
 interface Pharmacy { id: number; name: string }
+interface PharmacyOption { id: number; name: string; isActive: boolean }
 interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean; pharmacies: Pharmacy[] }
 
 interface ExpenseItem {
@@ -60,6 +63,8 @@ interface ExpenseItem {
   category: string | null;
   comment: string | null;
   employeeId: number | null;
+  // Аптека, за которой расход числится в отчёте, если его оплатила другая; null — аптека записи
+  allocatedPharmacyId: number | null;
 }
 
 interface RevenueEntry {
@@ -81,7 +86,7 @@ interface RevenueEntry {
   excludedFromReport: boolean;
 }
 
-interface EditExpenseItem { id: number; amount: string; category: string; comment: string; employeeId: string }
+interface EditExpenseItem { id: number; amount: string; pharmacyId: string; category: string; comment: string; employeeId: string }
 interface EditAvansItem { id: number; employeeId: string; amount: string }
 interface EditDoplataItem { id: number; employeeId: string; amount: string; comment: string }
 
@@ -98,10 +103,11 @@ interface EditState {
   avansItems: EditAvansItem[];
   doplataItems: EditDoplataItem[];
   expenseItems: EditExpenseItem[];
+  bonus: { amount: string; comment: string };
 }
 
 let nextItemId = 1;
-function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', category: '', comment: '', employeeId: '' }; }
+function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', pharmacyId: '', category: '', comment: '', employeeId: '' }; }
 function newAvansItem(): EditAvansItem { return { id: nextItemId++, employeeId: '', amount: '' }; }
 function newDoplataItem(): EditDoplataItem { return { id: nextItemId++, employeeId: '', amount: '', comment: '' }; }
 
@@ -510,6 +516,8 @@ function DayTotalCard({ entries }: { entries: RevenueEntry[] }) {
 
 export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
+  // Все аптеки (не только свои): заведующий может отнести расход на любую аптеку
+  const [allPharmacies, setAllPharmacies] = useState<PharmacyOption[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
@@ -565,6 +573,10 @@ export default function RevenueListPage() {
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
+    fetch('/api/pharmacies/names')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: PharmacyOption[]) => setAllPharmacies(list))
+      .catch(() => setAllPharmacies([]));
     fetch('/api/employees?isActive=true').then((r) => r.json()).then(setEmployees);
   }, []);
 
@@ -690,6 +702,11 @@ export default function RevenueListPage() {
     // «Дополнительных статьях» — иначе можно случайно добавить их туда повторно.
     const advanceItems = entry.expenseItems.filter((i) => i.category === 'employeeAdvance');
     const surchargeItems = entry.expenseItems.filter((i) => i.category === 'employeeSurcharge');
+    // Бонусы — отдельное поле формы одной суммой; если в старой записи их несколько строк,
+    // суммируем, а примечания склеиваем.
+    const bonusItems = entry.expenseItems.filter((i) => i.category === 'pharmaBonus');
+    const bonusAmount = bonusItems.reduce((sum, i) => sum + Number(i.amount), 0);
+    const bonusComment = [...new Set(bonusItems.map((i) => (i.comment ?? '').trim()).filter(Boolean))].join('; ');
 
     const initialState: EditState = {
       pharmacyId: String(entry.pharmacy.id),
@@ -716,11 +733,13 @@ export default function RevenueListPage() {
           comment: separatorIndex !== -1 ? rawComment.slice(separatorIndex + 3) : '',
         };
       }),
+      bonus: { amount: bonusItems.length > 0 ? String(bonusAmount) : '', comment: bonusComment },
       expenseItems: entry.expenseItems
-        .filter((i) => !surchargeItems.includes(i) && !advanceItems.includes(i))
+        .filter((i) => !surchargeItems.includes(i) && !advanceItems.includes(i) && !bonusItems.includes(i))
         .map((i) => ({
           id: nextItemId++,
           amount: String(i.amount),
+          pharmacyId: i.allocatedPharmacyId ? String(i.allocatedPharmacyId) : '',
           category: i.category ?? '',
           comment: i.comment ?? '',
           employeeId: i.employeeId ? String(i.employeeId) : '',
@@ -748,7 +767,7 @@ export default function RevenueListPage() {
     cancelEdit();
   }
 
-  function updateField(field: keyof Omit<EditState, 'expenseItems' | 'avansItems' | 'doplataItems'>, value: string) {
+  function updateField(field: keyof Omit<EditState, 'expenseItems' | 'avansItems' | 'doplataItems' | 'bonus'>, value: string) {
     setEditState((s) => {
       if (!s) return s;
       const updated = { ...s, [field]: value };
@@ -771,10 +790,14 @@ export default function RevenueListPage() {
   function removeExpenseItem(id: number) {
     setEditState((s) => s ? { ...s, expenseItems: s.expenseItems.filter((i) => i.id !== id) } : s);
   }
-  function updateExpenseItem(id: number, field: 'amount' | 'category' | 'comment' | 'employeeId', value: string) {
+  function updateExpenseItem(id: number, field: 'amount' | 'pharmacyId' | 'category' | 'comment' | 'employeeId', value: string) {
     setEditState((s) =>
       s ? { ...s, expenseItems: s.expenseItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
     );
+  }
+
+  function updateBonus(field: 'amount' | 'comment', value: string) {
+    setEditState((s) => s ? { ...s, bonus: { ...s.bonus, [field]: value } } : s);
   }
 
   function addAvansItem() {
@@ -946,13 +969,22 @@ export default function RevenueListPage() {
       return;
     }
 
-    type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId: number | null };
+    type SubmitExpenseItem = { amount: string; category: string | null; comment: string | null; employeeId: number | null; allocatedPharmacyId?: number | null };
     const allExpenseItems: SubmitExpenseItem[] = validItems.map((i) => ({
       amount: i.amount,
       category: i.category || null,
       comment: i.comment || null,
       employeeId: (i.category === 'employeeAdvance' || i.category === 'employeeSurcharge') && i.employeeId ? Number(i.employeeId) : null,
+      allocatedPharmacyId: i.pharmacyId ? Number(i.pharmacyId) : null,
     }));
+    if (parseFloat(editState.bonus.amount) > 0) {
+      allExpenseItems.push({
+        amount: editState.bonus.amount,
+        category: 'pharmaBonus',
+        comment: editState.bonus.comment.trim() || null,
+        employeeId: null,
+      });
+    }
     for (const item of validAvansItems) {
       const avansEmployee = employees.find((e) => e.id === Number(item.employeeId));
       allExpenseItems.push({
@@ -1013,6 +1045,20 @@ export default function RevenueListPage() {
   const incomeOptions = isManager
     ? INCOME_OPTIONS.filter((opt) => MANAGER_EXPENSE_KEYS.has(opt.key))
     : INCOME_OPTIONS;
+
+  // Аптека, за которую числится расход: по умолчанию аптека записи (её касса платит), но можно
+  // выбрать любую активную. Уже выбранная ранее, но неактивная теперь аптека остаётся в списке.
+  function pharmacyOptionsFor(selectedId: string): PharmacyOption[] {
+    const base: PharmacyOption[] =
+      allPharmacies.length > 0
+        ? allPharmacies
+        : pharmacies.map((p) => ({ id: p.id, name: p.name, isActive: true }));
+    return base.filter((p) => p.isActive || String(p.id) === selectedId);
+  }
+  function pharmacyNameById(id: string): string {
+    const found = allPharmacies.find((p) => String(p.id) === id) ?? pharmacies.find((p) => String(p.id) === id);
+    return found?.name ?? '—';
+  }
 
   const avansTotal = editState
     ? editState.avansItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
@@ -1184,17 +1230,24 @@ export default function RevenueListPage() {
             ) : (
               <div className="space-y-1.5">
                 <div className="grid gap-2 text-xs text-slate-400 font-medium px-5"
-                  style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
-                  <span></span><span>Сумма</span><span>Статья *</span><span>Примечание</span><span></span>
+                  style={{ gridTemplateColumns: '1.5rem 6rem 9rem 1fr 8rem 1.5rem' }}>
+                  <span></span><span>Сумма</span><span>Аптека</span><span>Статья *</span><span>Примечание</span><span></span>
                 </div>
                 {editState.expenseItems.map((item, idx) => (
                   <div key={item.id}>
                     <div className="grid gap-2 items-start"
-                      style={{ gridTemplateColumns: '1.5rem 6rem 1fr 8rem 1.5rem' }}>
+                      style={{ gridTemplateColumns: '1.5rem 6rem 9rem 1fr 8rem 1.5rem' }}>
                       <span className="text-xs text-slate-400 mt-2.5 text-right pr-1">{idx + 1}.</span>
                       <AmountInput placeholder="0.00"
                         className="input" value={item.amount}
                         onChange={(value) => updateExpenseItem(item.id, 'amount', value)} />
+                      <select className="input" aria-label="Аптека, за которую расход"
+                        value={item.pharmacyId || editState.pharmacyId}
+                        onChange={(e) => updateExpenseItem(item.id, 'pharmacyId', e.target.value === editState.pharmacyId ? '' : e.target.value)}>
+                        {pharmacyOptionsFor(item.pharmacyId).map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
                       <select className="input" value={item.category} required
                         onChange={(e) => updateExpenseItem(item.id, 'category', e.target.value)}>
                         <option value="">— статья —</option>
@@ -1217,9 +1270,9 @@ export default function RevenueListPage() {
                         ×
                       </button>
                     </div>
-                    {item.category === 'pharmaBonus' && (
-                      <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mt-1 ml-5">
-                        Эта сумма пойдёт в расходы и будет учтена в зарплате сотрудника за месяц.
+                    {item.pharmacyId && item.pharmacyId !== editState.pharmacyId && (
+                      <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1 mt-1 ml-5">
+                        Деньги уйдут из кассы «{pharmacyNameById(editState.pharmacyId)}», а в отчёте и при закрытии месяца этот расход будет у аптеки «{pharmacyNameById(item.pharmacyId)}».
                       </p>
                     )}
                     {item.category === 'employeeSurcharge' && (
@@ -1244,6 +1297,32 @@ export default function RevenueListPage() {
                   </p>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* Бонусы фарм и зав — всегда за аптекой записи (идут в зарплату по этой аптеке), поэтому
+              вынесены из общего списка статей, где можно выбрать другую аптеку. Сумма — первым полем. */}
+          <div className="rounded border border-slate-300 p-3 mb-4">
+            <label className="label">Бонусы фарм и зав <span className="text-slate-400 font-normal">— необязательно</span></label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+              <AmountInput
+                value={editState.bonus.amount}
+                onChange={(value) => updateBonus('amount', value)}
+                placeholder="Сумма бонусов"
+                className="input"
+              />
+              <input
+                type="text"
+                value={editState.bonus.comment}
+                onChange={(e) => updateBonus('comment', e.target.value)}
+                placeholder="Примечание (необязательно)"
+                className="input sm:col-span-2"
+              />
+            </div>
+            {(parseFloat(editState.bonus.amount) || 0) > 0 && (
+              <p className="mt-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+                Эта сумма пойдёт в расходы и будет учтена в зарплате сотрудника за месяц.
+              </p>
             )}
           </div>
 
@@ -1426,6 +1505,9 @@ export default function RevenueListPage() {
                 <li key={item.id} className="text-slate-600 flex gap-2">
                   <span className="text-red-600">{fmt(item.amount)}</span>
                   <span>{ROW_LABEL[item.category ?? ''] ?? item.category ?? '—'}</span>
+                  {item.allocatedPharmacyId && (
+                    <span className="text-orange-700">→ за {pharmacyNameById(String(item.allocatedPharmacyId))}</span>
+                  )}
                   {item.comment && <span className="text-slate-400">— {item.comment}</span>}
                 </li>
               ))}
@@ -2022,6 +2104,9 @@ export default function RevenueListPage() {
                     <div key={item.id} className="flex gap-2 items-baseline">
                       <span className={`font-semibold shrink-0 ${colorClass}`}>{fmt(item.amount)}</span>
                       <span className="text-slate-700">{label}</span>
+                      {item.allocatedPharmacyId && (
+                        <span className="text-orange-700">→ за {pharmacyNameById(String(item.allocatedPharmacyId))}</span>
+                      )}
                       {item.comment && <span className="text-slate-400">— {item.comment}</span>}
                     </div>
                   );

@@ -72,10 +72,14 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
       // без этого пропуска попала бы в otherExpenses ВДОБАВОК к зарплате и задвоилась бы.
       if (cat === 'employeeSurcharge') continue;
       const amt = Number(item.amount);
-      if (cat && cat in systemData[e.pharmacyId]) {
-        systemData[e.pharmacyId][cat] += amt;
+      // Расход мог быть оплачен из кассы аптеки записи, но относиться к другой аптеке —
+      // в отчёт и закрытие месяца он идёт по allocatedPharmacyId (касса считается по аптеке записи).
+      const allocatedId = (item as unknown as { allocatedPharmacyId?: number | null }).allocatedPharmacyId;
+      const target = allocatedId && systemData[allocatedId] ? allocatedId : e.pharmacyId;
+      if (cat && cat in systemData[target]) {
+        systemData[target][cat] += amt;
       } else {
-        systemData[e.pharmacyId].otherExpenses += amt;
+        systemData[target].otherExpenses += amt;
       }
     }
   }

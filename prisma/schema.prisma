@@ -46,6 +46,7 @@ model Pharmacy {
   employeeLinks        EmployeePharmacy[]
   attendanceShifts     AttendanceShift[]
   cashMovements        CashMovement[]
+  allocatedExpenseItems DailyExpenseItem[] @relation("ExpenseItemAllocatedPharmacy")
 
   @@map("pharmacies")
 }
@@ -222,11 +223,17 @@ model DailyExpenseItem {
   // Сотрудник, которому начислена эта строка (например, кому выдан аванс categry='employeeAdvance');
   // может отличаться от employeeId самой записи выручки (entry.employeeId)
   employeeId Int? @map("employee_id")
+  // Аптека, чьим расходом считается эта строка в месячном отчёте и закрытии месяца, если её
+  // оплатила другая аптека. null = аптека самой записи. Касса по-прежнему уменьшается у аптеки
+  // записи (она заплатила), а в отчёте сумма уходит сюда.
+  allocatedPharmacyId Int? @map("allocated_pharmacy_id")
 
-  entry    DailyRevenueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  employee Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  entry             DailyRevenueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  employee          Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  allocatedPharmacy Pharmacy?         @relation("ExpenseItemAllocatedPharmacy", fields: [allocatedPharmacyId], references: [id], onDelete: Restrict)
 
   @@index([employeeId])
+  @@index([allocatedPharmacyId])
   @@map("daily_expense_items")
 }
 

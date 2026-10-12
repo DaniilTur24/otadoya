@@ -155,6 +155,105 @@ describe('computeMonthlyData', () => {
     expect(systemData[1].otherExpenses).toBe(0);
   });
 
+  describe('расход, отнесённый на другую аптеку (allocatedPharmacyId)', () => {
+    const pharmacy2: Pharmacy = { id: 2, name: 'Аптека №2', coefficient: 0, terminalRent: 0, procedureRent: 0, isActive: true };
+
+    it('записывает сумму в отчёт аптеки, за которую оплачено, а не в отчёт плательщика', async () => {
+      mockPharmacies([pharmacy1, pharmacy2]);
+      mockRevenueEntries([
+        {
+          pharmacyId: 1,
+          cashRevenue: 0,
+          terminalRevenue: 0,
+          kaspiRevenue: 0,
+          expenseItems: [{ category: 'repairs', amount: 9000, allocatedPharmacyId: 2 }],
+        },
+      ]);
+
+      const { systemData } = await computeMonthlyData(2026, 6);
+
+      expect(systemData[2].repairs).toBe(9000);
+      expect(systemData[1].repairs).toBe(0);
+      expect(systemData[2].totalExpenses).toBe(9000);
+      expect(systemData[1].totalExpenses).toBe(0);
+    });
+
+    it('общий итог расходов по всем аптекам не меняется от переноса', async () => {
+      mockPharmacies([pharmacy1, pharmacy2]);
+      mockRevenueEntries([
+        {
+          pharmacyId: 1,
+          cashRevenue: 0,
+          terminalRevenue: 0,
+          kaspiRevenue: 0,
+          expenseItems: [
+            { category: 'repairs', amount: 9000, allocatedPharmacyId: 2 },
+            { category: 'repairs', amount: 1000, allocatedPharmacyId: null },
+          ],
+        },
+      ]);
+
+      const { systemData } = await computeMonthlyData(2026, 6);
+
+      expect(systemData[1].repairs).toBe(1000);
+      expect(systemData[2].repairs).toBe(9000);
+      expect(systemData[1].totalExpenses + systemData[2].totalExpenses).toBe(10000);
+    });
+
+    it('нераспознанная статья с переносом уходит в «Прочие расходы» аптеки назначения', async () => {
+      mockPharmacies([pharmacy1, pharmacy2]);
+      mockRevenueEntries([
+        {
+          pharmacyId: 1,
+          cashRevenue: 0,
+          terminalRevenue: 0,
+          kaspiRevenue: 0,
+          expenseItems: [{ category: 'somethingUnknown', amount: 500, allocatedPharmacyId: 2 }],
+        },
+      ]);
+
+      const { systemData } = await computeMonthlyData(2026, 6);
+
+      expect(systemData[2].otherExpenses).toBe(500);
+      expect(systemData[1].otherExpenses).toBe(0);
+    });
+
+    it('доходная статья с переносом попадает в аптеку назначения', async () => {
+      mockPharmacies([pharmacy1, pharmacy2]);
+      mockRevenueEntries([
+        {
+          pharmacyId: 1,
+          cashRevenue: 0,
+          terminalRevenue: 0,
+          kaspiRevenue: 0,
+          expenseItems: [{ category: 'legalEntityProfit', amount: 700, allocatedPharmacyId: 2 }],
+        },
+      ]);
+
+      const { systemData } = await computeMonthlyData(2026, 6);
+
+      expect(systemData[2].legalEntityProfit).toBe(700);
+      expect(systemData[1].legalEntityProfit).toBe(0);
+    });
+
+    it('если аптеки назначения нет в отчёте, расход остаётся за аптекой записи', async () => {
+      mockPharmacies([pharmacy1]);
+      mockRevenueEntries([
+        {
+          pharmacyId: 1,
+          cashRevenue: 0,
+          terminalRevenue: 0,
+          kaspiRevenue: 0,
+          expenseItems: [{ category: 'repairs', amount: 300, allocatedPharmacyId: 99 }],
+        },
+      ]);
+
+      const { systemData } = await computeMonthlyData(2026, 6);
+
+      expect(systemData[1].repairs).toBe(300);
+    });
+  });
+
   it('falls back to otherExpenses for an unrecognized category', async () => {
     mockPharmacies([pharmacy1]);
     mockRevenueEntries([

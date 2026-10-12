@@ -115,8 +115,8 @@ describe('buildCashReportWorkbook', () => {
           date: '2026-09-01',
           cashRevenue: 300_000,
           expenseLines: [
-            { category: 'rentExpenses', categoryLabel: 'Аренда', amount: 50_000, comment: null, recipientName: null, affectsCash: true },
-            { category: 'employeeAdvance', categoryLabel: 'Зарплата', amount: 20_000, comment: null, recipientName: 'Иван', affectsCash: true },
+            { category: 'rentExpenses', categoryLabel: 'Аренда', amount: 50_000, comment: null, recipientName: null, allocatedPharmacyName: null, affectsCash: true },
+            { category: 'employeeAdvance', categoryLabel: 'Зарплата', amount: 20_000, comment: null, recipientName: 'Иван', allocatedPharmacyName: null, affectsCash: true },
           ],
         }),
         day({ date: '2026-09-02', cashRevenue: 100_000 }),
@@ -136,6 +136,24 @@ describe('buildCashReportWorkbook', () => {
     expect(period?.turnover).toBe(330_000); // сумма оборотов дней (без переноса/инкассации)
   });
 
+  it('помечает расход, отнесённый на другую аптеку, но всё равно списывает его из кассы', async () => {
+    const rows = await rowsOf([
+      section([
+        day({
+          date: '2026-09-01',
+          cashRevenue: 100_000,
+          expenseLines: [
+            { category: 'repairs', categoryLabel: 'Расходы на ремонт', amount: 9_000, comment: null, recipientName: null, allocatedPharmacyName: 'Алатау', affectsCash: true },
+          ],
+        }),
+      ]),
+    ]);
+
+    const line = rows.find((r) => r.item.startsWith('Расходы на ремонт'));
+    expect(line?.item).toContain('→ за Алатау');
+    expect(line?.turnover).toBe(91_000);
+  });
+
   it('не даёт "Доплате" (не из кассы) сдвинуть ни оборот, ни сальдо', async () => {
     const rows = await rowsOf([
       section([
@@ -143,7 +161,7 @@ describe('buildCashReportWorkbook', () => {
           date: '2026-09-01',
           cashRevenue: 100_000,
           expenseLines: [
-            { category: 'employeeSurcharge', categoryLabel: 'Доплата', amount: 5_000, comment: null, recipientName: 'Иван', affectsCash: false },
+            { category: 'employeeSurcharge', categoryLabel: 'Доплата', amount: 5_000, comment: null, recipientName: 'Иван', allocatedPharmacyName: null, affectsCash: false },
           ],
           balance: { openingBalance: 10_000, deposit: 0, closingBalance: 110_000 },
         }),

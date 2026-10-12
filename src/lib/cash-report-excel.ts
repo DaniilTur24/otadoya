@@ -134,7 +134,12 @@ export async function buildCashReportWorkbook(
           balance -= line.amount;
         }
 
-        const label = [line.categoryLabel, line.recipientName ? `— ${line.recipientName}` : null, line.comment]
+        const label = [
+          line.categoryLabel,
+          line.recipientName ? `— ${line.recipientName}` : null,
+          line.allocatedPharmacyName ? `→ за ${line.allocatedPharmacyName}` : null,
+          line.comment,
+        ]
           .filter(Boolean)
           .join(' ');
         const lineRow = sheet.addRow(['', '', label, '', line.amount, turnover, hasBalance ? balance : '']);

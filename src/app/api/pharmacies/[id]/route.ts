@@ -76,7 +76,7 @@ export async function DELETE(
   // (связь без onDelete → Restrict), а PDF-отчёты, ручные правки отчёта, привязки сотрудников
   // и заведующих, табель и строки импорта каскадом стирались молча (QA раунд 4, №18).
   // Если у аптеки есть любая история — деактивируем, как сотрудников и заведующих.
-  const [revenue, attendance, expenses, imported, pdf, overrides, employeeLinks, userLinks, files] = await Promise.all([
+  const [revenue, attendance, expenses, imported, pdf, overrides, employeeLinks, userLinks, files, allocatedItems] = await Promise.all([
     prisma.dailyRevenueEntry.count({ where: { pharmacyId: id } }),
     prisma.attendanceShift.count({ where: { pharmacyId: id } }),
     prisma.extractedExpenseEntry.count({ where: { pharmacyId: id } }),
@@ -86,8 +86,10 @@ export async function DELETE(
     prisma.employeePharmacy.count({ where: { pharmacyId: id } }),
     prisma.userPharmacy.count({ where: { pharmacyId: id } }),
     prisma.uploadedFile.count({ where: { pharmacyId: id } }),
+    // Расходы других аптек, отнесённые на эту (DailyExpenseItem.allocatedPharmacyId)
+    prisma.dailyExpenseItem.count({ where: { allocatedPharmacyId: id } }),
   ]);
-  const historyCount = revenue + attendance + expenses + imported + pdf + overrides + employeeLinks + userLinks + files;
+  const historyCount = revenue + attendance + expenses + imported + pdf + overrides + employeeLinks + userLinks + files + allocatedItems;
 
   if (historyCount > 0) {
     await prisma.pharmacy.update({ where: { id }, data: { isActive: false } });

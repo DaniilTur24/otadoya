@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories, validateAllocatedPharmacies, resolveAllocatedPharmacyId } from '@/lib/revenue-validation';
 import { isMonthClosed } from '@/lib/closed-month';
 import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 
@@ -207,6 +207,21 @@ export async function PUT(
 
     // Авансы и доплаты привязываются к конкретному сотруднику — проверяем, что он работает в этой аптеке
     const targetPharmacyId = pharmacyId != null ? Number(pharmacyId) : existing.pharmacyId;
+
+    // Неактивную аптеку, на которую расход уже был отнесён раньше, оставляем допустимой —
+    // иначе запись нельзя было бы пересохранить после деактивации аптеки.
+    if (filled.some((i: { allocatedPharmacyId?: unknown }) => i.allocatedPharmacyId)) {
+      const previouslyAllocated = await prisma.dailyExpenseItem.findMany({
+        where: { entryId: id, allocatedPharmacyId: { not: null } },
+        select: { allocatedPharmacyId: true },
+      });
+      const allocationError = await validateAllocatedPharmacies(
+        filled,
+        targetPharmacyId,
+        previouslyAllocated.map((i) => i.allocatedPharmacyId as number),
+      );
+      if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 });
+    }
     const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
     const recipientEmployeeIds = [
       ...new Set(
@@ -240,12 +255,13 @@ export async function PUT(
 
       if (filled.length > 0) {
         await tx.dailyExpenseItem.createMany({
-          data: filled.map((i: { amount: string; category?: string; comment?: string; employeeId?: number | null }) => ({
+          data: filled.map((i: { amount: string; category?: string; comment?: string; employeeId?: number | null; allocatedPharmacyId?: number | string | null }) => ({
             entryId: id,
             amount: i.amount,
             category: i.category || null,
             comment: i.comment || null,
             employeeId: i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId ? Number(i.employeeId) : null,
+            allocatedPharmacyId: resolveAllocatedPharmacyId(i, targetPharmacyId),
           })),
         });
       }

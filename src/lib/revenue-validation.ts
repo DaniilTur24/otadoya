@@ -32,6 +32,71 @@ export function validateExpenseItemCategories(items: { category?: string | null 
 }
 
 /**
+ * Статьи, которые нельзя отнести на другую аптеку: бонусы, зарплата и доплата считаются
+ * в расчёте зарплаты по аптеке самой записи, и перенос дал бы расхождение отчёта с зарплатой.
+ */
+export const NON_ALLOCATABLE_CATEGORIES: ReadonlySet<string> = new Set([
+  'pharmaBonus',
+  'employeeAdvance',
+  'employeeSurcharge',
+]);
+
+type AllocatableItem = { category?: string | null; allocatedPharmacyId?: number | string | null };
+
+/**
+ * Аптека, на которую отнесён расход, или null, если он остаётся за аптекой записи
+ * (не указана, совпадает с аптекой записи или статья не переносится).
+ */
+export function resolveAllocatedPharmacyId(item: AllocatableItem, entryPharmacyId: number): number | null {
+  const raw = item.allocatedPharmacyId;
+  if (raw == null || raw === '') return null;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0 || id === entryPharmacyId) return null;
+  if (item.category && NON_ALLOCATABLE_CATEGORIES.has(item.category)) return null;
+  return id;
+}
+
+/**
+ * Строка расхода может числиться в отчёте за другой аптекой, чем та, из кассы которой она
+ * оплачена. Проверяем, что аптека существует и активна (уже использованная записью ранее
+ * неактивная аптека допускается — иначе запись нельзя было бы пересохранить), а бонус,
+ * зарплата и доплата остаются за аптекой записи.
+ */
+export async function validateAllocatedPharmacies(
+  items: AllocatableItem[],
+  entryPharmacyId: number,
+  alreadyAllocatedIds: number[] = [],
+): Promise<string | null> {
+  const ids = new Set<number>();
+  for (const item of items) {
+    const raw = item.allocatedPharmacyId;
+    if (raw == null || raw === '') continue;
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0) return 'Недопустимая аптека для расхода';
+    if (id === entryPharmacyId) continue;
+    if (item.category && NON_ALLOCATABLE_CATEGORIES.has(item.category)) {
+      return 'Бонусы, зарплату и доплату нельзя отнести на другую аптеку';
+    }
+    ids.add(id);
+  }
+  if (ids.size === 0) return null;
+
+  const found = await prisma.pharmacy.findMany({
+    where: { id: { in: [...ids] } },
+    select: { id: true, isActive: true },
+  });
+  const byId = new Map(found.map((p) => [p.id, p]));
+  for (const id of ids) {
+    const pharmacy = byId.get(id);
+    if (!pharmacy) return 'Аптека для расхода не найдена';
+    if (!pharmacy.isActive && !alreadyAllocatedIds.includes(id)) {
+      return 'Нельзя отнести расход на неактивную аптеку';
+    }
+  }
+  return null;
+}
+
+/**
  * Сотрудники с табельной оплатой (manager_fixed/cleaner/office/pharmacy_manager) не должны
  * получать смену в записи выручки — их зарплата считается только по AttendanceShift, а смена
  * в выручке не ограничена количеством рабочих дней и может задвоить/накрутить оплату при смене типа.

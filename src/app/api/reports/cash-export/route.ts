@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     where,
     include: {
       pharmacy: true,
-      expenseItems: { include: { employee: { select: { name: true } } }, orderBy: { id: 'asc' } },
+      expenseItems: { include: { employee: { select: { name: true } }, allocatedPharmacy: { select: { name: true } } }, orderBy: { id: 'asc' } },
     },
     orderBy: [{ date: 'asc' }, { id: 'asc' }],
   });
@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
       amount: Number(i.amount),
       comment: i.comment,
       employee: i.employee ? { name: i.employee.name } : null,
+      allocatedPharmacy: i.allocatedPharmacy ? { name: i.allocatedPharmacy.name } : null,
     })),
   }));
 

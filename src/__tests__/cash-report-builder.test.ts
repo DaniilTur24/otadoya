@@ -38,6 +38,22 @@ describe('buildCashReportDay', () => {
     expect(day.expenseLines).toHaveLength(3);
   });
 
+  it('carries the pharmacy an expense is accounted to, and still takes the money out of this pharmacy\'s cash', () => {
+    const day = buildCashReportDay([
+      entry({
+        cashRevenue: 100000,
+        expenseItems: [
+          { category: 'repairs', amount: 9000, comment: null, employee: null, allocatedPharmacy: { name: 'Алатау' } },
+          { category: 'charity', amount: 1000, comment: null, employee: null },
+        ],
+      }),
+    ]);
+
+    expect(day.expenseLines.map((l) => l.allocatedPharmacyName)).toEqual(['Алатау', null]);
+    expect(day.cashExpensesTotal).toBe(10000);
+    expect(day.cashNet).toBe(90000);
+  });
+
   it('does not let employeeSurcharge (доплата) reduce cash on hand', () => {
     const day = buildCashReportDay([
       entry({
