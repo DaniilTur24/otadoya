@@ -31,7 +31,7 @@ import { POST } from '@/app/api/revenue/route';
 import { PUT } from '@/app/api/revenue/[id]/route';
 import { GET as GET_NAMES } from '@/app/api/pharmacies/names/route';
 import { loadCashBalance } from '@/lib/cash-balance-query';
-import { resolveAllocatedPharmacyId, validateAllocatedPharmacies } from '@/lib/revenue-validation';
+import { resolveAllocatedPharmacyId, validateAllocatedPharmacies, validateRecipientPharmacies } from '@/lib/revenue-validation';
 
 type Mock = ReturnType<typeof vi.fn>;
 const findManyPharmacy = prisma.pharmacy.findMany as unknown as Mock;
@@ -102,8 +102,13 @@ describe('resolveAllocatedPharmacyId', () => {
     expect(resolveAllocatedPharmacyId({ category: 'repairs', allocatedPharmacyId: '2' }, 1)).toBe(2);
   });
 
-  it.each(['pharmaBonus', 'employeeAdvance', 'employeeSurcharge'])('для %s перенос не применяется', (category) => {
+  it.each(['pharmaBonus', 'employeeSurcharge'])('для %s перенос не применяется', (category) => {
     expect(resolveAllocatedPharmacyId({ category, allocatedPharmacyId: 2 }, 1)).toBeNull();
+  });
+
+  it('аванс (employeeAdvance) можно отнести на аптеку сотрудника', () => {
+    expect(resolveAllocatedPharmacyId({ category: 'employeeAdvance', allocatedPharmacyId: 2 }, 1)).toBe(2);
+    expect(resolveAllocatedPharmacyId({ category: 'employeeAdvance', allocatedPharmacyId: 1 }, 1)).toBeNull();
   });
 });
 
@@ -129,8 +134,13 @@ describe('validateAllocatedPharmacies', () => {
     expect(await validateAllocatedPharmacies([{ category: 'repairs', allocatedPharmacyId: 2 }], 1, [2])).toBeNull();
   });
 
-  it.each(['pharmaBonus', 'employeeAdvance', 'employeeSurcharge'])('не даёт отнести %s на другую аптеку', async (category) => {
+  it.each(['pharmaBonus', 'employeeSurcharge'])('не даёт отнести %s на другую аптеку', async (category) => {
     expect(await validateAllocatedPharmacies([{ category, allocatedPharmacyId: 2 }], 1)).toMatch(/нельзя отнести/);
+  });
+
+  it('аванс на другую существующую аптеку проходит', async () => {
+    findManyPharmacy.mockResolvedValue([{ id: 2, isActive: true }]);
+    expect(await validateAllocatedPharmacies([{ category: 'employeeAdvance', allocatedPharmacyId: 2 }], 1)).toBeNull();
   });
 
   it('некорректное значение отклоняется', async () => {
@@ -337,5 +347,108 @@ describe('касса при расходе за другую аптеку', () =
     expect(findManyRevenueEntry.mock.calls[0][0].where.pharmacyId).toBe(1);
     const day = result!.days.find((d) => d.date === '2026-06-10')!;
     expect(day.closingBalance).toBe(11000);
+  });
+});
+
+// Аванс: деньги из кассы аптеки записи (А), сотрудник — аптеки Б. Получатель проверяется по Б.
+describe('validateRecipientPharmacies — аванс сотруднику другой аптеки', () => {
+  const findManyEmployee = prisma.employee.findMany as unknown as Mock;
+  const findManyEmployeePharmacy = prisma.employeePharmacy.findMany as unknown as Mock;
+
+  beforeEach(() => {
+    findManyEmployee.mockReset();
+    findManyEmployeePharmacy.mockReset();
+    findManyEmployee.mockResolvedValue([{ id: 7, employeeType: 'seller' }]);
+  });
+
+  it('сотрудник аптеки Б проверяется по аптеке Б, а не по аптеке записи А', async () => {
+    findManyEmployeePharmacy.mockResolvedValue([{ employeeId: 7 }]);
+
+    const result = await validateRecipientPharmacies(
+      [{ category: 'employeeAdvance', employeeId: 7, allocatedPharmacyId: 2 }],
+      1,
+    );
+
+    expect(result).toBeNull();
+    const where = findManyEmployeePharmacy.mock.calls[findManyEmployeePharmacy.mock.calls.length - 1][0].where;
+    expect(where.pharmacyId).toBe(2);
+  });
+
+  it('сотрудник не из выбранной аптеки отклоняется', async () => {
+    findManyEmployeePharmacy.mockResolvedValue([]);
+
+    const result = await validateRecipientPharmacies(
+      [{ category: 'employeeAdvance', employeeId: 7, allocatedPharmacyId: 2 }],
+      1,
+    );
+
+    expect(result).toMatch(/только сотруднику выбранной аптеки/);
+  });
+
+  it('без выбранной аптеки аванс проверяется по аптеке записи', async () => {
+    findManyEmployeePharmacy.mockResolvedValue([{ employeeId: 7 }]);
+
+    await validateRecipientPharmacies([{ category: 'employeeAdvance', employeeId: 7 }], 1);
+
+    const where = findManyEmployeePharmacy.mock.calls[findManyEmployeePharmacy.mock.calls.length - 1][0].where;
+    expect(where.pharmacyId).toBe(1);
+  });
+
+  it('доплата всегда проверяется по аптеке записи, даже если передан allocatedPharmacyId', async () => {
+    findManyEmployeePharmacy.mockResolvedValue([{ employeeId: 7 }]);
+
+    await validateRecipientPharmacies(
+      [{ category: 'employeeSurcharge', employeeId: 7, allocatedPharmacyId: 2 }],
+      1,
+    );
+
+    const where = findManyEmployeePharmacy.mock.calls[findManyEmployeePharmacy.mock.calls.length - 1][0].where;
+    expect(where.pharmacyId).toBe(1);
+  });
+
+  it('без авансов и доплат к базе не обращается', async () => {
+    expect(await validateRecipientPharmacies([{ category: 'repairs' }], 1)).toBeNull();
+    expect(findManyEmployee).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/revenue — аванс сотруднику другой аптеки', () => {
+  const findManyEmployee = prisma.employee.findMany as unknown as Mock;
+  const findManyEmployeePharmacy = prisma.employeePharmacy.findMany as unknown as Mock;
+
+  it('сохраняет аптеку сотрудника в allocatedPharmacyId; запись остаётся на аптеке-плательщике', async () => {
+    findManyPharmacy.mockResolvedValue([{ id: 2, isActive: true }]);
+    findManyEmployee.mockResolvedValue([{ id: 7, employeeType: 'seller' }]);
+    findManyEmployeePharmacy.mockResolvedValue([{ employeeId: 7 }]);
+
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', {
+        ...baseBody,
+        expenseItems: [{ amount: '20000', category: 'employeeAdvance', employeeId: 7, allocatedPharmacyId: 2 }],
+      })
+    ) as unknown as { status: number };
+
+    expect(res.status).toBe(201);
+    const row = createMany.mock.calls[0][0].data[0];
+    expect(row.allocatedPharmacyId).toBe(2);
+    expect(row.employeeId).toBe(7);
+    expect(findManyEmployeePharmacy.mock.calls[findManyEmployeePharmacy.mock.calls.length - 1][0].where.pharmacyId).toBe(2);
+  });
+
+  it('отклоняет аванс, если сотрудник не работает в выбранной аптеке', async () => {
+    findManyPharmacy.mockResolvedValue([{ id: 2, isActive: true }]);
+    findManyEmployee.mockResolvedValue([{ id: 7, employeeType: 'seller' }]);
+    findManyEmployeePharmacy.mockResolvedValue([]);
+
+    const res = await POST(
+      makeRequest('POST', 'http://localhost/api/revenue', {
+        ...baseBody,
+        expenseItems: [{ amount: '20000', category: 'employeeAdvance', employeeId: 7, allocatedPharmacyId: 2 }],
+      })
+    ) as unknown as { status: number; body: { error: string } };
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/только сотруднику выбранной аптеки/);
+    expect(transaction).not.toHaveBeenCalled();
   });
 });

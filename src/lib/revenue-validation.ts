@@ -32,12 +32,13 @@ export function validateExpenseItemCategories(items: { category?: string | null 
 }
 
 /**
- * Статьи, которые нельзя отнести на другую аптеку: бонусы, зарплата и доплата считаются
- * в расчёте зарплаты по аптеке самой записи, и перенос дал бы расхождение отчёта с зарплатой.
+ * Статьи, которые нельзя отнести на другую аптеку: бонусы и доплата считаются в расчёте
+ * зарплаты по аптеке самой записи, и перенос дал бы расхождение отчёта с зарплатой.
+ * Аванс — исключение: заведующая может выдать его из своей кассы сотруднику другой аптеки;
+ * тогда allocatedPharmacyId — аптека сотрудника, по ней аванс вычитается из зарплаты и идёт в отчёт.
  */
 export const NON_ALLOCATABLE_CATEGORIES: ReadonlySet<string> = new Set([
   'pharmaBonus',
-  'employeeAdvance',
   'employeeSurcharge',
 ]);
 
@@ -197,6 +198,34 @@ export async function validateRecipientPharmacy(
   const linkedIds = new Set(links.map((l) => l.employeeId));
   if (idsNeedingLink.some((id) => !linkedIds.has(id))) {
     return 'Аванс/доплату можно записать только сотруднику выбранной аптеки';
+  }
+  return null;
+}
+
+type RecipientItem = AllocatableItem & { employeeId?: number | string | null };
+
+/**
+ * Проверка получателей аванса/доплаты с учётом выбранной аптеки: аванс проверяется по аптеке
+ * сотрудника (allocatedPharmacyId, а если не указана — по аптеке записи), доплата всегда по
+ * аптеке записи.
+ */
+export async function validateRecipientPharmacies(
+  items: RecipientItem[],
+  entryPharmacyId: number,
+): Promise<string | null> {
+  const byPharmacy = new Map<number, Set<number>>();
+  for (const item of items) {
+    if (!item.employeeId || !item.category) continue;
+    if (item.category !== 'employeeAdvance' && item.category !== 'employeeSurcharge') continue;
+    const pharmacyId = item.category === 'employeeAdvance'
+      ? (resolveAllocatedPharmacyId(item, entryPharmacyId) ?? entryPharmacyId)
+      : entryPharmacyId;
+    if (!byPharmacy.has(pharmacyId)) byPharmacy.set(pharmacyId, new Set());
+    byPharmacy.get(pharmacyId)!.add(Number(item.employeeId));
+  }
+  for (const [pharmacyId, ids] of byPharmacy) {
+    const error = await validateRecipientPharmacy([...ids], pharmacyId);
+    if (error) return error;
   }
   return null;
 }

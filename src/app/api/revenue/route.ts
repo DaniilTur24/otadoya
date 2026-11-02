@@ -3,7 +3,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { monthlyFieldLabel } from '@/lib/monthly-report-fields';
 import { requireAnyRole, getManagerPharmacyIds, getRequestRole, getRequestUserId } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories, validateAllocatedPharmacies, resolveAllocatedPharmacyId } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateShiftTypeValue, validateExpenseItemCategories, validateAllocatedPharmacies, resolveAllocatedPharmacyId, validateRecipientPharmacies } from '@/lib/revenue-validation';
+
+const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
 
 function serializeEntry(entry: Record<string, unknown>) {
   const items = (entry.expenseItems as { amount: unknown; comment: unknown; employeeId: unknown }[] | undefined) ?? [];
@@ -131,16 +133,9 @@ export async function POST(request: NextRequest) {
   if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 });
 
   // Авансы и доплаты привязываются к конкретному сотруднику (может отличаться от employeeId
-  // записи). Проверяем, что выбранный сотрудник действительно работает в этой аптеке.
-  const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
-  const recipientEmployeeIds = [
-    ...new Set(
-      items
-        .filter((i) => i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId)
-        .map((i) => Number(i.employeeId))
-    ),
-  ];
-  const recipientError = await validateRecipientPharmacy(recipientEmployeeIds, Number(pharmacyId));
+  // записи). Проверяем, что выбранный сотрудник работает в нужной аптеке: для аванса — в той,
+  // что выбрана в строке (по умолчанию аптека записи), для доплаты — в аптеке записи.
+  const recipientError = await validateRecipientPharmacies(items, Number(pharmacyId));
   if (recipientError) return NextResponse.json({ error: recipientError }, { status: 400 });
 
   const totalExpenses = items

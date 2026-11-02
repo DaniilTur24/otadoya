@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAnyRole, getRequestRole, getRequestUserId, getManagerPharmacyIds } from '@/lib/api-auth';
-import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateRecipientPharmacy, validateShiftTypeValue, validateExpenseItemCategories, validateAllocatedPharmacies, resolveAllocatedPharmacyId } from '@/lib/revenue-validation';
+import { validateShiftEmployeeType, validateUniqueShift, validateNoAttendanceOnDate, validateNonNegativeAmounts, validateShiftTypeValue, validateExpenseItemCategories, validateAllocatedPharmacies, resolveAllocatedPharmacyId, validateRecipientPharmacies } from '@/lib/revenue-validation';
 import { isMonthClosed } from '@/lib/closed-month';
 import { computeRevenueDeleteImpact } from '@/lib/revenue-delete-impact';
 
@@ -35,6 +35,7 @@ function serialize(entry: Record<string, unknown>) {
 }
 
 const PROTECTED_CATEGORIES = ['employeeAdvance', 'employeeSurcharge'];
+const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
 
 // Перенос записи на дату/сотрудника, у которого там уже есть смена: validateUniqueShift — это
 // findFirst без блокировки, последнее слово за частичным уникальным индексом в БД
@@ -222,15 +223,7 @@ export async function PUT(
       );
       if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 });
     }
-    const RECIPIENT_CATEGORIES = new Set(['employeeAdvance', 'employeeSurcharge']);
-    const recipientEmployeeIds = [
-      ...new Set(
-        filled
-          .filter((i: { category?: string; employeeId?: number | null }) => i.category && RECIPIENT_CATEGORIES.has(i.category) && i.employeeId)
-          .map((i: { employeeId?: number | null }) => Number(i.employeeId))
-      ),
-    ];
-    const recipientError = await validateRecipientPharmacy(recipientEmployeeIds, targetPharmacyId);
+    const recipientError = await validateRecipientPharmacies(filled, targetPharmacyId);
     if (recipientError) return NextResponse.json({ error: recipientError }, { status: 400 });
 
     data.additionalExpenses = filled

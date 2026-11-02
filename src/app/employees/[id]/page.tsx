@@ -48,6 +48,7 @@ interface AdvanceEntry {
   id: number;
   date: string;
   pharmacyName: string;
+  allocatedPharmacyName?: string | null;
   amount: number;
   comment: string | null;
 }
@@ -908,7 +909,8 @@ export default function EmployeeDetailPage() {
                         {new Date(a.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
                       </span>
                       <span className="text-slate-800 truncate pr-2">
-                        {a.pharmacyName}
+                        {a.allocatedPharmacyName ?? a.pharmacyName}
+                        {a.allocatedPharmacyName && <span className="text-orange-700"> (из кассы {a.pharmacyName})</span>}
                         {a.comment && <span className="text-slate-400"> — {a.comment}</span>}
                       </span>
                       <span className="text-right font-medium text-red-600">−{fmt(a.amount)}</span>

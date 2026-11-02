@@ -327,6 +327,21 @@ async function getAttendanceShiftsCount(
 }
 
 /**
+ * Аванс принадлежит аптеке сотрудника-получателя: allocatedPharmacyId, если аванс выдан из кассы
+ * другой аптеки (аптеки записи), иначе аптека записи. Фильтр по аптеке учитывает оба случая, но
+ * не считает один аванс дважды.
+ */
+function advancePharmacyFilter(pharmacyId?: number) {
+  if (!pharmacyId) return {};
+  return {
+    OR: [
+      { allocatedPharmacyId: pharmacyId },
+      { allocatedPharmacyId: null, entry: { pharmacyId } },
+    ],
+  };
+}
+
+/**
  * Авансы выданные сотруднику как получателю — общий механизм для всех типов сотрудников.
  * Намеренно НЕ фильтруется по excludedFromReport (в отличие от смены/премии/бонуса в
  * entryFilter выше): аванс — это уже физически выданные из кассы деньги, факт остаётся фактом
@@ -346,8 +361,8 @@ async function computeAdvances(
       entry: {
         status: 'approved',
         date: { gte: startOfMonth(year, month), lte: endOfMonth(year, month) },
-        ...(pharmacyId ? { pharmacyId } : {}),
       },
+      ...advancePharmacyFilter(pharmacyId),
     },
   });
   return roundMoney(Number(agg._sum.amount ?? 0));
@@ -1119,7 +1134,10 @@ export async function getEmployeeMonthlyAttendance(
 export interface AdvanceEntry {
   id: number;
   date: Date;
+  /** Аптека записи — из её кассы выдан аванс */
   pharmacyName: string;
+  /** Аптека сотрудника, если аванс выдан из кассы другой аптеки; null — та же, что и у записи */
+  allocatedPharmacyName: string | null;
   amount: number;
   comment: string | null;
 }
@@ -1142,10 +1160,13 @@ export async function getEmployeeMonthlyAdvances(
       entry: {
         status: 'approved',
         date: { gte: startOfMonth(year, month), lte: endOfMonth(year, month) },
-        ...(pharmacyId ? { pharmacyId } : {}),
       },
+      ...advancePharmacyFilter(pharmacyId),
     },
-    include: { entry: { select: { date: true, pharmacy: { select: { name: true } } } } },
+    include: {
+      entry: { select: { date: true, pharmacy: { select: { name: true } } } },
+      allocatedPharmacy: { select: { name: true } },
+    },
     orderBy: { entry: { date: 'asc' } },
   });
 
@@ -1153,6 +1174,7 @@ export async function getEmployeeMonthlyAdvances(
     id: i.id,
     date: i.entry.date,
     pharmacyName: i.entry.pharmacy.name,
+    allocatedPharmacyName: i.allocatedPharmacy?.name ?? null,
     amount: Number(i.amount),
     comment: i.comment,
   }));
@@ -1185,10 +1207,13 @@ export async function getEmployeeMonthlySurcharges(
       entry: {
         status: 'approved',
         date: { gte: startOfMonth(year, month), lte: endOfMonth(year, month) },
-        ...(pharmacyId ? { pharmacyId } : {}),
       },
+      ...advancePharmacyFilter(pharmacyId),
     },
-    include: { entry: { select: { date: true, pharmacy: { select: { name: true } } } } },
+    include: {
+      entry: { select: { date: true, pharmacy: { select: { name: true } } } },
+      allocatedPharmacy: { select: { name: true } },
+    },
     orderBy: { entry: { date: 'asc' } },
   });
 
@@ -1196,6 +1221,7 @@ export async function getEmployeeMonthlySurcharges(
     id: i.id,
     date: i.entry.date,
     pharmacyName: i.entry.pharmacy.name,
+    allocatedPharmacyName: i.allocatedPharmacy?.name ?? null,
     amount: Number(i.amount),
     comment: i.comment,
   }));

@@ -55,6 +55,7 @@ const MANAGER_EXPENSE_KEYS = new Set([
 
 interface Pharmacy { id: number; name: string }
 interface PharmacyOption { id: number; name: string; isActive: boolean }
+interface RecipientOption { id: number; name: string; employeeType: string }
 interface Employee { id: number; name: string; employeeType: string; fiveDayViaAttendance?: boolean; pharmacies: Pharmacy[] }
 
 interface ExpenseItem {
@@ -87,7 +88,8 @@ interface RevenueEntry {
 }
 
 interface EditExpenseItem { id: number; amount: string; pharmacyId: string; category: string; comment: string; employeeId: string }
-interface EditAvansItem { id: number; employeeId: string; amount: string }
+// pharmacyId — аптека сотрудника-получателя; '' = аптека записи (аванс из кассы этой же аптеки)
+interface EditAvansItem { id: number; pharmacyId: string; employeeId: string; amount: string }
 interface EditDoplataItem { id: number; employeeId: string; amount: string; comment: string }
 
 interface EditState {
@@ -108,7 +110,7 @@ interface EditState {
 
 let nextItemId = 1;
 function newItem(): EditExpenseItem { return { id: nextItemId++, amount: '', pharmacyId: '', category: '', comment: '', employeeId: '' }; }
-function newAvansItem(): EditAvansItem { return { id: nextItemId++, employeeId: '', amount: '' }; }
+function newAvansItem(): EditAvansItem { return { id: nextItemId++, pharmacyId: '', employeeId: '', amount: '' }; }
 function newDoplataItem(): EditDoplataItem { return { id: nextItemId++, employeeId: '', amount: '', comment: '' }; }
 
 function fmt(n: number) {
@@ -518,6 +520,8 @@ export default function RevenueListPage() {
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   // Все аптеки (не только свои): заведующий может отнести расход на любую аптеку
   const [allPharmacies, setAllPharmacies] = useState<PharmacyOption[]>([]);
+  // Сотрудники других аптек для аванса (по id аптеки) — своих аптек заведующему /api/employees хватает
+  const [recipientsByPharmacy, setRecipientsByPharmacy] = useState<Record<string, RecipientOption[]>>({});
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [pendingEntries, setPendingEntries] = useState<RevenueEntry[]>([]);
@@ -570,6 +574,12 @@ export default function RevenueListPage() {
   const editPharmacyEmployees = editState
     ? employees.filter((e) => e.employeeType === 'office' || e.pharmacies.some((p) => p.id === Number(editState.pharmacyId)))
     : [];
+
+  // Получатели аванса: сотрудники аптеки записи или выбранной в строке аптеки
+  function avansRecipients(item: EditAvansItem): { id: number; name: string }[] {
+    if (!item.pharmacyId || !editState || item.pharmacyId === editState.pharmacyId) return editPharmacyEmployees;
+    return recipientsByPharmacy[item.pharmacyId] ?? [];
+  }
 
   useEffect(() => {
     fetch('/api/pharmacies').then((r) => r.json()).then(setPharmacies);
@@ -720,6 +730,7 @@ export default function RevenueListPage() {
       shiftType: entry.shiftType ?? '',
       avansItems: advanceItems.map((i) => ({
         id: nextItemId++,
+        pharmacyId: i.allocatedPharmacyId ? String(i.allocatedPharmacyId) : '',
         employeeId: i.employeeId ? String(i.employeeId) : '',
         amount: String(i.amount),
       })),
@@ -747,6 +758,8 @@ export default function RevenueListPage() {
     };
     setEditState(initialState);
     editSnapshotRef.current = JSON.stringify(initialState);
+    // Авансы, выданные сотрудникам других аптек: подгружаем их список для селектора
+    for (const a of initialState.avansItems) if (a.pharmacyId) loadRecipients(a.pharmacyId);
   }
 
   function cancelEdit() {
@@ -806,9 +819,22 @@ export default function RevenueListPage() {
   function removeAvansItem(id: number) {
     setEditState((s) => s ? { ...s, avansItems: s.avansItems.filter((i) => i.id !== id) } : s);
   }
-  function updateAvansItem(id: number, field: 'employeeId' | 'amount', value: string) {
+  function loadRecipients(pharmacyId: string) {
+    if (recipientsByPharmacy[pharmacyId]) return;
+    fetch(`/api/employees/recipients?pharmacyId=${pharmacyId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: RecipientOption[]) => setRecipientsByPharmacy((m) => ({ ...m, [pharmacyId]: list })))
+      .catch(() => setRecipientsByPharmacy((m) => ({ ...m, [pharmacyId]: [] })));
+  }
+
+  function updateAvansItem(id: number, field: 'pharmacyId' | 'employeeId' | 'amount', value: string) {
+    if (field === 'pharmacyId' && value) loadRecipients(value);
     setEditState((s) =>
-      s ? { ...s, avansItems: s.avansItems.map((i) => i.id === id ? { ...i, [field]: value } : i) } : s
+      s ? { ...s, avansItems: s.avansItems.map((i) => {
+        if (i.id !== id) return i;
+        // Смена аптеки — сотрудник другой аптеки уже не подходит
+        return field === 'pharmacyId' ? { ...i, pharmacyId: value, employeeId: '' } : { ...i, [field]: value };
+      }) } : s
     );
   }
 
@@ -986,12 +1012,13 @@ export default function RevenueListPage() {
       });
     }
     for (const item of validAvansItems) {
-      const avansEmployee = employees.find((e) => e.id === Number(item.employeeId));
+      const avansEmployee = avansRecipients(item).find((e) => e.id === Number(item.employeeId));
       allExpenseItems.push({
         amount: item.amount,
         category: 'employeeAdvance',
         comment: avansEmployee ? `Зарплата: ${avansEmployee.name}` : null,
         employeeId: Number(item.employeeId),
+        allocatedPharmacyId: item.pharmacyId && item.pharmacyId !== editState.pharmacyId ? Number(item.pharmacyId) : null,
       });
     }
     for (const item of validDoplataItems) {
@@ -1340,7 +1367,8 @@ export default function RevenueListPage() {
             ) : (
               <div className="space-y-2">
                 {editState.avansItems.map((item) => (
-                  <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                  <div key={item.id}>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-start">
                     <div>
                       <AmountInput
                         value={item.amount}
@@ -1349,15 +1377,22 @@ export default function RevenueListPage() {
                         className="input"
                       />
                     </div>
+                    <select className="input" aria-label="Аптека сотрудника"
+                      value={item.pharmacyId || editState.pharmacyId}
+                      onChange={(e) => updateAvansItem(item.id, 'pharmacyId', e.target.value === editState.pharmacyId ? '' : e.target.value)}>
+                      {pharmacyOptionsFor(item.pharmacyId).map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
                     <div className="col-span-2 flex gap-2 items-center">
                       <select
                         className="input"
                         value={item.employeeId}
                         onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
-                        disabled={editPharmacyEmployees.length === 0}
+                        disabled={avansRecipients(item).length === 0}
                       >
                         <option value="">— кому выдана зарплата —</option>
-                        {editPharmacyEmployees.map((emp) => (
+                        {avansRecipients(item).map((emp) => (
                           <option key={emp.id} value={emp.id}>{emp.name}</option>
                         ))}
                       </select>
@@ -1367,6 +1402,12 @@ export default function RevenueListPage() {
                         ×
                       </button>
                     </div>
+                  </div>
+                  {item.pharmacyId && item.pharmacyId !== editState.pharmacyId && (
+                    <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1 mt-1">
+                      Деньги уйдут из кассы «{pharmacyNameById(editState.pharmacyId)}», а зарплата сотрудника и отчёт — у аптеки «{pharmacyNameById(item.pharmacyId)}».
+                    </p>
+                  )}
                   </div>
                 ))}
               </div>
@@ -2133,6 +2174,9 @@ export default function RevenueListPage() {
                       <span className="font-semibold shrink-0 text-red-600">−{fmt(item.amount)}</span>
                       <span className="text-slate-700">Зарплата</span>
                       <span className="text-slate-400">→ {recipient?.name ?? 'сотрудник не указан'}</span>
+                      {item.allocatedPharmacyId && (
+                        <span className="text-orange-700">({pharmacyNameById(String(item.allocatedPharmacyId))})</span>
+                      )}
                     </div>
                   );
                 })}

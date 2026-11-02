@@ -38,6 +38,9 @@ interface PharmacyOption {
 
 interface AvansItem {
   id: number;
+  // Аптека сотрудника-получателя; '' = аптека записи (деньги из её кассы). Если выбрана другая —
+  // аванс выдан из кассы аптеки записи, а вычитается из зарплаты и идёт в отчёт по выбранной.
+  pharmacyId: string;
   employeeId: string;
   amount: string;
 }
@@ -95,7 +98,7 @@ function emptyItem(): ExpenseItem {
 }
 
 function emptyAvansItem(): AvansItem {
-  return { id: nextId++, employeeId: '', amount: '' };
+  return { id: nextId++, pharmacyId: '', employeeId: '', amount: '' };
 }
 
 function emptyDoplataItem(): DoplataItem {
@@ -132,6 +135,8 @@ export default function NewRevenuePage() {
   const [bonus, setBonus] = useState({ amount: '', comment: '' });
   // Все аптеки (не только свои): заведующий может отнести расход на любую аптеку
   const [allPharmacies, setAllPharmacies] = useState<PharmacyOption[]>([]);
+  // Сотрудники других аптек для аванса (по id аптеки); сотрудники аптеки записи — в `employees`
+  const [recipientsByPharmacy, setRecipientsByPharmacy] = useState<Record<string, Employee[]>>({});
 
   useEffect(() => {
     fetch('/api/pharmacies/names')
@@ -231,10 +236,29 @@ export default function NewRevenuePage() {
     setAvansItems((items) => items.filter((i) => i.id !== id));
   }
 
-  function updateAvansItem(id: number, field: 'employeeId' | 'amount', value: string) {
+  function updateAvansItem(id: number, field: 'pharmacyId' | 'employeeId' | 'amount', value: string) {
     setAvansItems((items) =>
-      items.map((i) => (i.id === id ? { ...i, [field]: value } : i))
+      items.map((i) => {
+        if (i.id !== id) return i;
+        // Смена аптеки — сотрудник другой аптеки уже не подходит
+        return field === 'pharmacyId' ? { ...i, pharmacyId: value, employeeId: '' } : { ...i, [field]: value };
+      })
     );
+    if (field === 'pharmacyId' && value) loadRecipients(value);
+  }
+
+  function loadRecipients(pharmacyId: string) {
+    if (recipientsByPharmacy[pharmacyId]) return;
+    fetch(`/api/employees/recipients?pharmacyId=${pharmacyId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: Employee[]) => setRecipientsByPharmacy((m) => ({ ...m, [pharmacyId]: list })))
+      .catch(() => setRecipientsByPharmacy((m) => ({ ...m, [pharmacyId]: [] })));
+  }
+
+  // Получатели аванса: сотрудники аптеки записи или выбранной в строке аптеки
+  function avansRecipients(item: AvansItem): Employee[] {
+    if (!item.pharmacyId || item.pharmacyId === form.pharmacyId) return employees;
+    return recipientsByPharmacy[item.pharmacyId] ?? [];
   }
 
   function addDoplataItem() {
@@ -401,12 +425,13 @@ export default function NewRevenuePage() {
       });
     }
     for (const item of validAvansItems) {
-      const avansEmployee = employees.find((e) => e.id === Number(item.employeeId));
+      const avansEmployee = avansRecipients(item).find((e) => e.id === Number(item.employeeId));
       allExpenseItems.push({
         amount: item.amount,
         category: 'employeeAdvance',
         comment: avansEmployee ? `Зарплата: ${avansEmployee.name}` : null,
         employeeId: Number(item.employeeId),
+        allocatedPharmacyId: item.pharmacyId ? Number(item.pharmacyId) : null,
       });
     }
     for (const item of validDoplataItems) {
@@ -828,7 +853,8 @@ export default function NewRevenuePage() {
           ) : (
             <div className="space-y-2">
               {avansItems.map((item) => (
-                <div key={item.id} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                <div key={item.id}>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-start">
                   <div>
                     <AmountInput
                       value={item.amount}
@@ -838,15 +864,26 @@ export default function NewRevenuePage() {
                       autoFocus
                     />
                   </div>
+                  <select
+                    value={item.pharmacyId || form.pharmacyId}
+                    onChange={(e) => updateAvansItem(item.id, 'pharmacyId', e.target.value === form.pharmacyId ? '' : e.target.value)}
+                    className="input"
+                    aria-label="Аптека сотрудника"
+                  >
+                    {!form.pharmacyId && <option value="">— аптека —</option>}
+                    {pharmacyOptions.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
                   <div className="col-span-2 flex gap-2 items-center">
                     <select
                       value={item.employeeId}
                       onChange={(e) => updateAvansItem(item.id, 'employeeId', e.target.value)}
                       className="input"
-                      disabled={employees.length === 0}
+                      disabled={avansRecipients(item).length === 0}
                     >
                       <option value="">— кому выдана зарплата —</option>
-                      {employees.map((emp) => (
+                      {avansRecipients(item).map((emp) => (
                         <option key={emp.id} value={emp.id}>{emp.name}</option>
                       ))}
                     </select>
@@ -859,6 +896,12 @@ export default function NewRevenuePage() {
                       ×
                     </button>
                   </div>
+                </div>
+                {item.pharmacyId && item.pharmacyId !== form.pharmacyId && (
+                  <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1 mt-1">
+                    Деньги уйдут из кассы «{entryPharmacyName}», а зарплата сотрудника и отчёт — у аптеки «{pharmacyOptions.find((p) => String(p.id) === item.pharmacyId)?.name ?? '—'}».
+                  </p>
+                )}
                 </div>
               ))}
             </div>

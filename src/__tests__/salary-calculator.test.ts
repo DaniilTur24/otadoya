@@ -539,6 +539,22 @@ describe('calculateEmployeeMonthlySalary — excludedFromReport stops paying the
     expect(advanceCall![0].where.entry).not.toHaveProperty('excludedFromReport');
   });
 
+  it('counts an advance toward the recipient pharmacy (allocatedPharmacyId, else the entry pharmacy)', async () => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    mockShifts([]);
+    const agg = vi.mocked(prisma.dailyExpenseItem.aggregate as ReturnType<typeof vi.fn>);
+    agg.mockResolvedValue({ _sum: { amount: 0 } });
+
+    await calculateEmployeeMonthlySalary(1, 9, 2026, 10);
+
+    const advanceCall = agg.mock.calls.filter((c) => c[0]?.where?.category === 'employeeAdvance').pop();
+    expect(advanceCall![0].where.OR).toEqual([
+      { allocatedPharmacyId: 10 },
+      { allocatedPharmacyId: null, entry: { pharmacyId: 10 } },
+    ]);
+    expect(advanceCall![0].where.entry).not.toHaveProperty('pharmacyId');
+  });
+
   it('does NOT filter surcharges by excludedFromReport — same deliberate exception as advances', async () => {
     vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
     mockShifts([]);
@@ -1478,13 +1494,31 @@ describe('getEmployeeMonthlyAdvances', () => {
         amount: 15000,
         comment: 'Аванс: Иван Петров',
         entry: { date: entryDate, pharmacy: { name: 'Аптека на Абая' } },
+        allocatedPharmacy: null,
       },
     ]);
 
     const result = await getEmployeeMonthlyAdvances(2, 5, 2025);
     expect(result).toEqual([
-      { id: 11, date: entryDate, pharmacyName: 'Аптека на Абая', amount: 15000, comment: 'Аванс: Иван Петров' },
+      { id: 11, date: entryDate, pharmacyName: 'Аптека на Абая', allocatedPharmacyName: null, amount: 15000, comment: 'Аванс: Иван Петров' },
     ]);
+  });
+
+  it('shows the recipient pharmacy for an advance paid from another pharmacy’s cash', async () => {
+    const entryDate = new Date('2025-05-10');
+    vi.mocked(prisma.dailyExpenseItem.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 12,
+        amount: 20000,
+        comment: null,
+        entry: { date: entryDate, pharmacy: { name: 'Аптека на Абая' } },
+        allocatedPharmacy: { name: 'Аптека на Достык' },
+      },
+    ]);
+
+    const result = await getEmployeeMonthlyAdvances(2, 5, 2025);
+    expect(result[0].pharmacyName).toBe('Аптека на Абая');
+    expect(result[0].allocatedPharmacyName).toBe('Аптека на Достык');
   });
 
   it('queries by recipient employeeId, not the entry employee', async () => {
@@ -1496,7 +1530,22 @@ describe('getEmployeeMonthlyAdvances', () => {
     const where = findMany.mock.calls[findMany.mock.calls.length - 1][0].where;
     expect(where.category).toBe('employeeAdvance');
     expect(where.employeeId).toBe(7);
-    expect(where.entry.pharmacyId).toBe(3);
     expect(where.entry.status).toBe('approved');
+    // аптека сотрудника: либо явно выбранная в авансе, либо (если не выбрана) аптека записи
+    expect(where.OR).toEqual([
+      { allocatedPharmacyId: 3 },
+      { allocatedPharmacyId: null, entry: { pharmacyId: 3 } },
+    ]);
+  });
+
+  it('without a pharmacyId does not filter by pharmacy at all', async () => {
+    const findMany = vi.mocked(prisma.dailyExpenseItem.findMany as ReturnType<typeof vi.fn>);
+    findMany.mockResolvedValue([]);
+
+    await getEmployeeMonthlyAdvances(7, 6, 2025);
+
+    const where = findMany.mock.calls[findMany.mock.calls.length - 1][0].where;
+    expect(where.OR).toBeUndefined();
+    expect(where.entry.pharmacyId).toBeUndefined();
   });
 });
