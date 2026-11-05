@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
-import { calculateEmployeeMonthlySalary } from '@/lib/salary-calculator';
+import { calculateEmployeeMonthlySalary, type MonthlySalaryResult } from '@/lib/salary-calculator';
 import { roundMoney } from '@/lib/money';
+import { MANAGER_TYPES } from '@/lib/employee-types';
 
 export interface RevenueDeleteEmployeeImpact {
   employeeId: number;
@@ -15,11 +16,20 @@ export interface RevenueDeleteImpact {
   /** true — оценка неполная: у владельца смены могла бы измениться и премия/лестница/доля
    * бонуса (они зависят от порогов выручки, см. computeManagerLadderPremium/revenuePremium),
    * но пересчитывать их без реального удаления небезопасно (см. комментарий ниже) — здесь
-   * учтена только линейная, гарантированно точная часть: сама сменная оплата. */
+   * учтена только линейная, гарантированно точная часть: сменная оплата и бонус самой записи.
+   * Бонус записи к тому же уменьшает долю заведующих аптеки: они в оценку не входят. */
   partial: boolean;
 }
 
 const PROTECTED_CATEGORIES = ['employeeAdvance', 'employeeSurcharge'] as const;
+
+/**
+ * Итог к выплате до округления. «После» считается от него и округляется один раз в конце:
+ * от уже округлённого totalSalary результат мог бы разойтись с настоящим итогом на 5 ₸.
+ */
+function exactSalary(salary: MonthlySalaryResult): number {
+  return salary.grossAccrued + salary.totalBonuses - salary.totalAdvances;
+}
 
 function startOfMonth(year: number, month: number): Date {
   return new Date(year, month - 1, 1);
@@ -43,9 +53,9 @@ function endOfMonth(year: number, month: number): Date {
  * гарантированно точна. А вот премия за выручку/лестничная премия/доля бонуса зависят от порогов
  * (см. computeLadderPremium, revenuePremium в salary-calculator.ts) — удаление одной записи может
  * нелинейно уронить их (например, ниже порога лестницы), и без реального пересчёта это не
- * предсказать надёжно. Отражена только гарантированно точная часть — сама сменная оплата
+ * предсказать надёжно. Отражена только гарантированно точная часть — сменная оплата
  * (baseSalary/15 или /10 × количество смен, без округления "по кусочкам" — пересчитывается
- * весь округлённый итог с count-1, а не вычитается округлённая доля одной смены).
+ * весь округлённый итог с count-1, а не вычитается округлённая доля одной смены) и бонус записи.
  */
 export async function computeRevenueDeleteImpact(entryId: number): Promise<RevenueDeleteImpact | null> {
   const entry = await prisma.dailyRevenueEntry.findUnique({ where: { id: entryId } });
@@ -54,19 +64,30 @@ export async function computeRevenueDeleteImpact(entryId: number): Promise<Reven
   const month = entry.date.getMonth() + 1;
   const year = entry.date.getFullYear();
 
-  const protectedItems = await prisma.dailyExpenseItem.findMany({
-    where: { entryId, category: { in: [...PROTECTED_CATEGORIES] }, employeeId: { not: null } },
+  const items = await prisma.dailyExpenseItem.findMany({
+    where: { entryId, category: { in: [...PROTECTED_CATEGORIES, 'pharmaBonus'] } },
     include: { employee: { select: { name: true } } },
   });
+  const protectedItems = items.filter((item) => item.category !== 'pharmaBonus');
+  const entryBonus = items
+    .filter((item) => item.category === 'pharmaBonus')
+    .reduce((sum, item) => sum + Number(item.amount), 0);
 
   const employees: RevenueDeleteEmployeeImpact[] = [];
-  let partial = false;
+  // Доля заведующей — 10% от всех бонусов её аптек, поэтому от бонуса записи она тоже зависит
+  let partial = entryBonus > 0 && (await prisma.employee.count({
+    where: {
+      employeeType: { in: [...MANAGER_TYPES] },
+      managerBonusShareEnabled: true,
+      pharmacies: { some: { pharmacyId: entry.pharmacyId } },
+    },
+  })) > 0;
 
   if (entry.employeeId) {
     const owner = await prisma.employee.findUnique({ where: { id: entry.employeeId }, select: { name: true } });
     const before = await calculateEmployeeMonthlySalary(entry.employeeId, month, year);
     if (owner && before) {
-      let after = before.totalSalary;
+      let after = exactSalary(before);
       if (entry.shiftType === 'day' && before.dayShiftsCount > 0) {
         const afterShiftPay = roundMoney(before.baseSalary > 0 ? (before.baseSalary / 15) * (before.dayShiftsCount - 1) : 0);
         after -= before.salaryFromDayShifts - afterShiftPay;
@@ -76,6 +97,8 @@ export async function computeRevenueDeleteImpact(entryId: number): Promise<Reven
         after -= before.salaryFromFullDayShifts - afterShiftPay;
         partial = true;
       }
+      // Личные бонусы входят в зарплату не у всех типов: у табельных totalBonuses всегда 0.
+      after -= Math.min(entryBonus, before.totalBonuses);
       employees.push({ employeeId: entry.employeeId, employeeName: owner.name, before: before.totalSalary, after });
     }
   }
@@ -96,10 +119,14 @@ export async function computeRevenueDeleteImpact(entryId: number): Promise<Reven
           employeeId: item.employeeId,
           employeeName: item.employee?.name ?? '—',
           before: before.totalSalary,
-          after: before.totalSalary + delta,
+          after: exactSalary(before) + delta,
         });
       }
     }
+  }
+
+  for (const employee of employees) {
+    employee.after = roundMoney(employee.after);
   }
 
   const revenueAgg = await prisma.dailyRevenueEntry.aggregate({

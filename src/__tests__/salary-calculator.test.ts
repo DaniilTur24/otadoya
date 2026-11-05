@@ -369,9 +369,9 @@ describe('calculateEmployeeMonthlySalary', () => {
 // ─── rounding to the nearest 5 tenge (money.ts) ─────────────────────────────
 // Regression coverage for the bug found in the security audit: raw float division produced
 // unpayable amounts like 46666.66666666667 ₸, and summing several such fractions was
-// order-dependent. Every money component is now rounded to the nearest 5 tenge (the smallest
-// coin in circulation) at the point it is computed, so totalSalary — a sum of already-rounded
-// parts — comes out a multiple of 5 automatically, without a separate final rounding step.
+// order-dependent. Every computed money component is now rounded to the nearest 5 tenge (the
+// smallest coin in circulation) at the point it is computed. Entered amounts stay exact (see the
+// next block), so totalSalary gets one more rounding at the very end to stay payable.
 describe('calculateEmployeeMonthlySalary — rounding to the nearest 5 tenge', () => {
   it('rounds a day-shift salary that would otherwise be a repeating fraction', async () => {
     // 100000 / 15 * 7 = 46666.66666666667 before rounding — this exact case is what the audit
@@ -453,6 +453,82 @@ describe('calculateEmployeeMonthlySalary — rounding to the nearest 5 tenge', (
     expect(result!.allowance).toBe(1000); // 1002 rounds down to the nearest 5
     expect(result!.totalSalary).toBe(11000);
   });
+});
+
+// ─── entered amounts stay exact, only the payable total is rounded ─────────
+// Advances, surcharges and bonuses are money that really changed hands. Rounding their sums made
+// the employee card show «Авансы −335 ₸» above a single −333 row (QA, ISSUE-004).
+describe('calculateEmployeeMonthlySalary — entered amounts stay exact', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockEmployee);
+    vi.mocked(prisma.attendanceShift.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    mockShifts([]);
+    mockCalendar(null);
+  });
+
+  it.each([
+    [333, -335],
+    [331, -330],
+    [100, -100],
+  ])('keeps an advance of %i exact and rounds the total to %i', async (advance, total) => {
+    mockAggregates(0, advance);
+
+    const result = await calculateEmployeeMonthlySalary(1, 11, 2026);
+
+    expect(result!.totalAdvances).toBe(advance);
+    expect(result!.totalSalary).toBe(total);
+  });
+
+  it('keeps surcharges and bonuses exact and rounds only their effect on the total', async () => {
+    mockAggregates(222, 0, 1002);
+
+    const result = await calculateEmployeeMonthlySalary(1, 11, 2026);
+
+    expect(result!.totalBonuses).toBe(222);
+    expect(result!.totalSurcharges).toBe(1002);
+    expect(result!.totalSalary).toBe(1225); // 1224 before rounding
+  });
+
+  it('grossAccrued leaves out bonuses and advances and is not rounded', async () => {
+    mockAggregates(222, 333, 1002);
+
+    const result = await calculateEmployeeMonthlySalary(1, 11, 2026);
+
+    expect(result!.grossAccrued).toBe(1002);
+    expect(result!.totalSalary).toBe(890); // 1002 + 222 − 333 = 891 before rounding
+  });
+
+  it('returns 0, not -0, when a tiny advance rounds away', async () => {
+    mockAggregates(0, 2);
+
+    const result = await calculateEmployeeMonthlySalary(1, 11, 2026);
+
+    expect(result!.totalAdvances).toBe(2);
+    // toBe tells -0 from 0: the card would otherwise print «-0 ₸»
+    expect(result!.totalSalary).toBe(0);
+  });
+
+  it.each(['cleaner', 'manager_fixed', 'pharmacy_manager', 'office'])(
+    '%s: entered amounts stay exact, the total is rounded',
+    async (employeeType) => {
+      vi.mocked(prisma.employee.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 1, name: 'Сотрудник', baseSalary: 0, employeeType, shiftRate: null, allowance: 0,
+        allowanceDescription: '', pharmacies: [], ladderPremiumEnabled: false, managerBonusShareEnabled: false,
+      });
+      vi.mocked(prisma.officePremiumTier.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      vi.mocked(prisma.dailyRevenueEntry.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+        _sum: { cashRevenue: 0, terminalRevenue: 0, kaspiRevenue: 0 },
+      });
+      mockAggregates(0, 333, 1002);
+
+      const result = await calculateEmployeeMonthlySalary(1, 11, 2026);
+
+      expect(result!.totalAdvances).toBe(333);
+      expect(result!.totalSurcharges).toBe(1002);
+      expect(result!.grossAccrued).toBe(1002);
+      expect(result!.totalSalary).toBe(670); // 669 before rounding
+    },
+  );
 });
 
 // ─── excludedFromReport must also stop paying the excluded shift ───────────

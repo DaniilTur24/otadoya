@@ -103,6 +103,8 @@ interface SalaryResult {
   managedRevenueTotal: number;
   ladderPremiumEnabled: boolean;
   managerBonusShareEnabled: boolean;
+  /** Нет в снимках месяцев, закрытых до появления этого поля: там итог уже сходится со строками */
+  grossAccrued?: number;
   totalSalary: number;
   revenueTotal: number;
   recordsCount: number;
@@ -636,6 +638,11 @@ export default function EmployeeDetailPage() {
               // фиксированной ставкой за смену, а не долей от оклада/календаря — см.
               // useFixedFiveDayRate в salary-calculator.ts.
               const usesFixedFiveDayRate = isSellerFiveDayFixed || salary.employeeType === 'manager_trading';
+              // Авансы, доплаты и бонусы показаны точно, а итог округлён до 5 ₸ (см. money.ts) —
+              // без пояснения разница в 1–2 ₸ выглядела бы как ошибка в расчёте.
+              const unroundedTotal = salary.grossAccrued != null
+                ? salary.grossAccrued + salary.totalBonuses - salary.totalAdvances
+                : salary.totalSalary;
               return (
                 <div className="bg-slate-50 border border-slate-300 rounded p-3 space-y-2 text-sm">
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -781,6 +788,12 @@ export default function EmployeeDetailPage() {
 
                     <span className="font-semibold text-slate-800">Итого зарплата</span>
                     <span className={`font-bold text-right text-base ${salary.totalSalary < 0 ? 'text-red-700' : 'text-slate-800'}`}>{fmt(salary.totalSalary)} ₸</span>
+
+                    {Math.abs(unroundedTotal - salary.totalSalary) >= 0.005 && (
+                      <span className="col-span-2 text-xs text-right text-slate-500">
+                        Округлено до 5 ₸, без округления {fmt(unroundedTotal)} ₸
+                      </span>
+                    )}
 
                     {!isAttendanceBased && (
                       <>

@@ -69,6 +69,12 @@ export interface MonthlySalaryResult {
   ladderPremiumEnabled: boolean;
   /** Включена ли доля 10% от бонусов аптеки — для manager_trading/manager_fixed/pharmacy_manager */
   managerBonusShareEnabled: boolean;
+  /**
+   * Начислено за месяц без бонусов и авансов, без итогового округления. Отсюда отчёт по аптекам
+   * берёт зарплату как расход: бонусы идут в нём отдельной строкой, а аванс — это уже часть зарплаты.
+   */
+  grossAccrued: number;
+  /** К выплате: grossAccrued + бонусы − авансы, округлено до 5 ₸ (см. money.ts) */
   totalSalary: number;
   revenueTotal: number;
   recordsCount: number;
@@ -346,6 +352,7 @@ function advancePharmacyFilter(pharmacyId?: number) {
  * Намеренно НЕ фильтруется по excludedFromReport (в отличие от смены/премии/бонуса в
  * entryFilter выше): аванс — это уже физически выданные из кассы деньги, факт остаётся фактом
  * независимо от того, считается ли сама запись выручки в отчёте по аптеке.
+ * По той же причине сумма не округляется: до 5 ₸ округляется только итог к выплате (см. money.ts).
  */
 async function computeAdvances(
   employeeId: number,
@@ -365,7 +372,7 @@ async function computeAdvances(
       ...advancePharmacyFilter(pharmacyId),
     },
   });
-  return roundMoney(Number(agg._sum.amount ?? 0));
+  return Number(agg._sum.amount ?? 0);
 }
 
 /**
@@ -393,7 +400,7 @@ async function computeSurcharges(
       },
     },
   });
-  return roundMoney(Number(agg._sum.amount ?? 0));
+  return Number(agg._sum.amount ?? 0);
 }
 
 const EMPTY_RESULT_BASE = {
@@ -585,7 +592,7 @@ async function calculateTradingEmployeeSalary(
   // Симметричный случай для фиксированной ставки: дни в табеле отработаны, а shiftRate не задан —
   // без этой пометки оплата тихо считалась бы нулём, как раньше происходило с календарём.
   const shiftRateMissing = useFixedFiveDayRate && !shiftRate && fiveDayShiftsCount > 0;
-  const totalBonuses = roundMoney(Number(pharmaBonusAgg._sum.amount ?? 0));
+  const totalBonuses = Number(pharmaBonusAgg._sum.amount ?? 0);
 
   // Если включена лестничная премия аптеки — личная премия за выручку смены не начисляется.
   // Иначе — премия как у продавца (floor в 0 на каждый тип смены независимо), но для каждой
@@ -619,17 +626,16 @@ async function calculateTradingEmployeeSalary(
   const managedRevenueTotal = ladderStats.revenueTotal;
   const allowance = roundMoney(Number(employee.allowance ?? 0));
 
-  const totalSalary =
+  const grossAccrued =
     salaryFromFullDayShifts +
     salaryFromDayShifts +
     salaryFromFiveDayShifts +
-    totalBonuses +
     totalRevenuePremium +
     managerBonusShare +
     allowance +
     managerLadderPremium +
-    totalSurcharges -
-    totalAdvances;
+    totalSurcharges;
+  const totalSalary = roundMoney(grossAccrued + totalBonuses - totalAdvances);
 
   return {
     employeeId: employee.id,
@@ -666,6 +672,7 @@ async function calculateTradingEmployeeSalary(
     ladderConfigMissingPharmacies: ladderStats.configMissingPharmacies,
     ladderPremiumEnabled: useLadder,
     managerBonusShareEnabled: useBonusShare,
+    grossAccrued,
     totalSalary,
     revenueTotal,
     recordsCount: entries.length + fiveDayShiftsCount,
@@ -715,13 +722,13 @@ async function calculateFixedManagerSalary(
   );
   const calendarMissing = workingCalendarDays === null && attendanceShiftsCount > 0;
 
-  const totalSalary =
+  const grossAccrued =
     salaryFromFiveDayShifts +
     managerBonusShare +
     allowance +
     managerStats.premium +
-    totalSurcharges -
-    totalAdvances;
+    totalSurcharges;
+  const totalSalary = roundMoney(grossAccrued - totalAdvances);
 
   return {
     employeeId: employee.id,
@@ -748,6 +755,7 @@ async function calculateFixedManagerSalary(
     ladderConfigMissingPharmacies: managerStats.configMissingPharmacies,
     ladderPremiumEnabled: useLadder,
     managerBonusShareEnabled: useBonusShare,
+    grossAccrued,
     totalSalary,
     recordsCount: attendanceShiftsCount,
   };
@@ -776,7 +784,8 @@ async function calculateCleanerSalary(
   const shiftRate = employee.shiftRate !== null && employee.shiftRate !== undefined ? Number(employee.shiftRate) : null;
   const salaryFromShiftRate = roundMoney(shiftRate ? shiftRate * attendanceShiftsCount : 0);
   const allowance = roundMoney(Number(employee.allowance ?? 0));
-  const totalSalary = salaryFromShiftRate + allowance + totalSurcharges - totalAdvances;
+  const grossAccrued = salaryFromShiftRate + allowance + totalSurcharges;
+  const totalSalary = roundMoney(grossAccrued - totalAdvances);
 
   return {
     employeeId: employee.id,
@@ -793,6 +802,7 @@ async function calculateCleanerSalary(
     allowanceDescription: employee.allowanceDescription ?? '',
     totalAdvances,
     totalSurcharges,
+    grossAccrued,
     totalSalary,
     recordsCount: attendanceShiftsCount,
   };
@@ -820,7 +830,8 @@ async function calculateOfficeSalary(
   const calendarMissing = workingCalendarDays === null && attendanceShiftsCount > 0;
   const allowance = roundMoney(Number(employee.allowance ?? 0));
 
-  const totalSalary = salaryFromFiveDayShifts + officeStats.premium + allowance + totalSurcharges - totalAdvances;
+  const grossAccrued = salaryFromFiveDayShifts + officeStats.premium + allowance + totalSurcharges;
+  const totalSalary = roundMoney(grossAccrued - totalAdvances);
 
   return {
     employeeId: employee.id,
@@ -841,6 +852,7 @@ async function calculateOfficeSalary(
     allowanceDescription: employee.allowanceDescription ?? '',
     managerLadderPremium: officeStats.premium,
     managedRevenueTotal: officeStats.revenueTotal,
+    grossAccrued,
     totalSalary,
     recordsCount: attendanceShiftsCount,
   };
@@ -893,8 +905,8 @@ async function calculatePharmacyManagerSalary(
   const calendarMissing = workingCalendarDays === null && attendanceShiftsCount > 0;
   const allowance = roundMoney(Number(employee.allowance ?? 0));
 
-  const totalSalary =
-    salaryFromFiveDayShifts + managerStats.premium + managerBonusShare + allowance + totalSurcharges - totalAdvances;
+  const grossAccrued = salaryFromFiveDayShifts + managerStats.premium + managerBonusShare + allowance + totalSurcharges;
+  const totalSalary = roundMoney(grossAccrued - totalAdvances);
 
   return {
     employeeId: employee.id,
@@ -921,6 +933,7 @@ async function calculatePharmacyManagerSalary(
     managedRevenueTotal: managerStats.revenueTotal,
     ladderConfigMissing: managerStats.configMissingPharmacies.length > 0,
     ladderConfigMissingPharmacies: managerStats.configMissingPharmacies,
+    grossAccrued,
     totalSalary,
     recordsCount: attendanceShiftsCount,
   };

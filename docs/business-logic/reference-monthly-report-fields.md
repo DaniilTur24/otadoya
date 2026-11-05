@@ -20,9 +20,9 @@
 
 ### Почему зарплата попадает в отчёт именно так
 
-`PHARMA_SALARY_TYPES = {seller, manager_trading, manager_fixed, pharmacy_manager}` — их `totalSalary` (за вычетом `totalBonuses`, но **с возвратом** `totalAdvances` обратно — потому что аванс это уже часть начисленной зарплаты, не отдельный расход) суммируется в `pharmaSalary` той аптеки, к которой привязан сотрудник. `cleaner` → `cleaning`. `office` — особый случай: его зарплата не привязана к аптеке (премия общая для всех), поэтому делится `/ activePharmacyIds.length` и добавляется каждой активной аптеке в `officeSalary`.
+`PHARMA_SALARY_TYPES = {seller, manager_trading, manager_fixed, pharmacy_manager}` — их начисленная зарплата `grossAccrued` (без `totalBonuses` и **без вычета** `totalAdvances` — потому что аванс это уже часть начисленной зарплаты, не отдельный расход) суммируется в `pharmaSalary` той аптеки, к которой привязан сотрудник. `cleaner` → `cleaning`. `office` — особый случай: его зарплата не привязана к аптеке (премия общая для всех), поэтому делится `/ activePharmacyIds.length` и добавляется каждой активной аптеке в `officeSalary`.
 
-`pharmaBonus` (бонусы) учитывается отдельно, как обычная строка расхода из `DailyExpenseItem` — поэтому при добавлении зарплаты он вычитается из `totalSalary` (`result.totalSalary + result.totalAdvances − result.totalBonuses`), чтобы не задвоить сумму бонуса в отчёте.
+`pharmaBonus` (бонусы) учитывается отдельно, как обычная строка расхода из `DailyExpenseItem` — поэтому в `grossAccrued` он не входит, иначе сумма бонуса в отчёте задвоилась бы. Округлённый до 5 ₸ итог `totalSalary` в отчёт не попадает.
 
 ## Полный список строк (`MONTHLY_REPORT_ROWS`)
 

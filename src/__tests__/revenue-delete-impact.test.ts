@@ -4,7 +4,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     dailyRevenueEntry: { findUnique: vi.fn(), aggregate: vi.fn() },
     dailyExpenseItem: { findMany: vi.fn() },
-    employee: { findUnique: vi.fn() },
+    employee: { findUnique: vi.fn(), count: vi.fn() },
     pharmacy: { findUnique: vi.fn() },
   },
 }));
@@ -21,6 +21,7 @@ const findUniqueEntry = prisma.dailyRevenueEntry.findUnique as unknown as Return
 const aggregateEntry = prisma.dailyRevenueEntry.aggregate as unknown as ReturnType<typeof vi.fn>;
 const findManyExpenseItem = prisma.dailyExpenseItem.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUniqueEmployee = prisma.employee.findUnique as unknown as ReturnType<typeof vi.fn>;
+const countEmployees = prisma.employee.count as unknown as ReturnType<typeof vi.fn>;
 const findUniquePharmacy = prisma.pharmacy.findUnique as unknown as ReturnType<typeof vi.fn>;
 const calcSalary = calculateEmployeeMonthlySalary as unknown as ReturnType<typeof vi.fn>;
 
@@ -40,6 +41,10 @@ const baseEntry = {
 function ownerSalary(overrides: Partial<Record<string, number>> = {}) {
   return {
     totalSalary: 100000,
+    // Без авансов и бонусов начисленное совпадает с итогом; тесты на округление задают их явно
+    grossAccrued: overrides.totalSalary ?? 100000,
+    totalBonuses: 0,
+    totalAdvances: 0,
     baseSalary: 150000,
     dayShiftsCount: 2,
     fullDayShiftsCount: 0,
@@ -56,6 +61,7 @@ beforeEach(() => {
   });
   findManyExpenseItem.mockReset().mockResolvedValue([]);
   findUniqueEmployee.mockReset().mockResolvedValue({ name: 'Etel' });
+  countEmployees.mockReset().mockResolvedValue(0);
   findUniquePharmacy.mockReset().mockResolvedValue({ name: 'Тестовая аптека QA' });
   calcSalary.mockReset().mockResolvedValue(ownerSalary());
 });
@@ -138,6 +144,75 @@ describe('computeRevenueDeleteImpact — сменная оплата владе�
   });
 });
 
+describe('computeRevenueDeleteImpact — бонус самой записи', () => {
+  const bonusItem = (amount: string) => ({ employeeId: null, category: 'pharmaBonus', amount, employee: null });
+
+  it('запись без смены с бонусом 222: зарплата падает с 220 до 0, а не остаётся 220', async () => {
+    findUniqueEntry.mockResolvedValue({ ...baseEntry, shiftType: null });
+    findManyExpenseItem.mockResolvedValue([bonusItem('222')]);
+    calcSalary.mockResolvedValue(ownerSalary({ totalSalary: 220, grossAccrued: 0, totalBonuses: 222 }));
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    expect(impact?.employees).toEqual([{ employeeId: 19, employeeName: 'Etel', before: 220, after: 0 }]);
+    expect(impact?.partial).toBe(false);
+  });
+
+  it('запись со сменой: вычитаются и оплата смены, и бонус', async () => {
+    findManyExpenseItem.mockResolvedValue([bonusItem('3000'), bonusItem('2000')]);
+    // Смены 20000 + прочее 80000 + бонусы 5000; без записи смена стоит 10000
+    calcSalary.mockResolvedValue(ownerSalary({ totalSalary: 105000, grossAccrued: 100000, totalBonuses: 5000 }));
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    expect(impact?.employees[0].after).toBe(90000); // 105000 − 10000 смена − 5000 бонус
+  });
+
+  it('у табельного сотрудника бонус не входит в зарплату: сумма не меняется', async () => {
+    findUniqueEntry.mockResolvedValue({ ...baseEntry, shiftType: null });
+    findManyExpenseItem.mockResolvedValue([bonusItem('5000')]);
+    calcSalary.mockResolvedValue(ownerSalary({ totalSalary: 100000, totalBonuses: 0 }));
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    expect(impact?.employees[0].after).toBe(100000);
+  });
+
+  it('если в аптеке есть заведующая с долей бонусов — оценка помечается неполной', async () => {
+    findUniqueEntry.mockResolvedValue({ ...baseEntry, shiftType: null });
+    findManyExpenseItem.mockResolvedValue([bonusItem('5000')]);
+    countEmployees.mockResolvedValue(1);
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    expect(impact?.partial).toBe(true);
+    const where = countEmployees.mock.calls[countEmployees.mock.calls.length - 1][0].where;
+    expect(where).toEqual({
+      employeeType: { in: ['manager_trading', 'manager_fixed', 'pharmacy_manager'] },
+      managerBonusShareEnabled: true,
+      pharmacies: { some: { pharmacyId: 1 } },
+    });
+  });
+
+  it('без бонуса в записи заведующих не ищет', async () => {
+    findUniqueEntry.mockResolvedValue({ ...baseEntry, shiftType: null });
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    expect(countEmployees).not.toHaveBeenCalled();
+    expect(impact?.partial).toBe(false);
+  });
+
+  it('бонус не показывается как выдача отдельному сотруднику', async () => {
+    findUniqueEntry.mockResolvedValue({ ...baseEntry, employeeId: null, shiftType: null });
+    findManyExpenseItem.mockResolvedValue([bonusItem('5000')]);
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    expect(impact?.employees).toEqual([]);
+  });
+});
+
 describe('computeRevenueDeleteImpact — аванс/доплата другому сотруднику', () => {
   it('аванс: after = before + сумма аванса (аванс перестаёт вычитаться)', async () => {
     findManyExpenseItem.mockResolvedValue([
@@ -145,7 +220,7 @@ describe('computeRevenueDeleteImpact — аванс/доплата другом�
     ]);
     // Второй вызов calculateEmployeeMonthlySalary — для получателя аванса (id 34)
     calcSalary.mockImplementation((employeeId: number) =>
-      Promise.resolve(employeeId === 19 ? ownerSalary({ totalSalary: 100000 }) : { ...ownerSalary(), totalSalary: 50000 })
+      Promise.resolve(employeeId === 19 ? ownerSalary({ totalSalary: 100000 }) : ownerSalary({ totalSalary: 50000 }))
     );
 
     const impact = await computeRevenueDeleteImpact(1);
@@ -159,13 +234,43 @@ describe('computeRevenueDeleteImpact — аванс/доплата другом�
       { employeeId: 34, category: 'employeeSurcharge', amount: '5000', employee: { name: 'Айгерим' } },
     ]);
     calcSalary.mockImplementation((employeeId: number) =>
-      Promise.resolve(employeeId === 19 ? ownerSalary({ totalSalary: 100000 }) : { ...ownerSalary(), totalSalary: 50000 })
+      Promise.resolve(employeeId === 19 ? ownerSalary({ totalSalary: 100000 }) : ownerSalary({ totalSalary: 50000 }))
     );
 
     const impact = await computeRevenueDeleteImpact(1);
 
     const recipient = impact?.employees.find((e) => e.employeeId === 34);
     expect(recipient).toEqual({ employeeId: 34, employeeName: 'Айгерим', before: 50000, after: 45000 });
+  });
+
+  it('единственный аванс 333: итог −335 после удаления становится 0, а не −2', async () => {
+    findManyExpenseItem.mockResolvedValue([
+      { employeeId: 34, category: 'employeeAdvance', amount: '333', employee: { name: 'Алиева' } },
+    ]);
+    calcSalary.mockImplementation((employeeId: number) =>
+      Promise.resolve(employeeId === 19 ? ownerSalary() : ownerSalary({ totalSalary: -335, grossAccrued: 0, totalAdvances: 333 }))
+    );
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    const recipient = impact?.employees.find((e) => e.employeeId === 34);
+    expect(recipient).toEqual({ employeeId: 34, employeeName: 'Алиева', before: -335, after: 0 });
+  });
+
+  it('«после» считается от точного итога: округлённый «до» дал бы на 5 ₸ меньше', async () => {
+    // Начислено 1000, авансы 331 + 2: к выплате 667 → 665. Без аванса 2 станет 669 → 670.
+    // От округлённого «до» вышло бы 665 + 2 = 667 → 665.
+    findManyExpenseItem.mockResolvedValue([
+      { employeeId: 34, category: 'employeeAdvance', amount: '2', employee: { name: 'Алиева' } },
+    ]);
+    calcSalary.mockImplementation((employeeId: number) =>
+      Promise.resolve(employeeId === 19 ? ownerSalary() : ownerSalary({ totalSalary: 665, grossAccrued: 1000, totalAdvances: 333 }))
+    );
+
+    const impact = await computeRevenueDeleteImpact(1);
+
+    const recipient = impact?.employees.find((e) => e.employeeId === 34);
+    expect(recipient?.after).toBe(670);
   });
 
   it('аванс самому владельцу записи — объединяется в одну запись employees, а не дублируется', async () => {

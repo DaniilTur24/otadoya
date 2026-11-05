@@ -85,9 +85,8 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
   }
 
   // Полная начисленная зарплата (оклад + смены/табель + доплата + лестничная премия + доля бонуса),
-  // включая уже выданный аванс — аванс это часть зарплаты, а не отдельный расход на этой странице
-  // (totalSalary = начислено − totalAdvances, поэтому добавляем totalAdvances обратно).
-  // Бонус исключаем — он отдельно учтён в pharmaBonus.
+  // включая уже выданный аванс — аванс это часть зарплаты, а не отдельный расход на этой странице.
+  // Бонус в grossAccrued не входит — он отдельно учтён в pharmaBonus.
   const PHARMA_SALARY_TYPES = new Set(['seller', 'seller_five_day_fixed', 'manager_trading', 'manager_fixed', 'pharmacy_manager']);
   const activePharmacyIds = pharmacies.filter((p) => p.isActive).map((p) => p.id);
 
@@ -100,7 +99,7 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
         const result = await calculateEmployeeMonthlySalary(emp.id, month, year);
         if (!result) return;
         if (!emp.isActive && !hasMonthActivity(result)) return;
-        const contribution = (result.totalSalary + result.totalAdvances - result.totalBonuses) / activePharmacyIds.length;
+        const contribution = result.grossAccrued / activePharmacyIds.length;
         for (const pid of activePharmacyIds) {
           if (systemData[pid]) systemData[pid].officeSalary += contribution;
         }
@@ -116,7 +115,7 @@ export async function computeMonthlyData(year: number, month: number): Promise<M
         const result = await calculateEmployeeMonthlySalary(emp.id, month, year, pid);
         if (!result) continue;
         if (!emp.isActive && !hasMonthActivity(result)) continue;
-        const grossAccrued = result.totalSalary + result.totalAdvances - result.totalBonuses;
+        const { grossAccrued } = result;
         // baseSalary и allowance не привязаны к конкретной аптеке (в отличие от сменной части,
         // лестничной премии и доли бонуса — calculateEmployeeMonthlySalary уже считает их только
         // для переданной pharmacyId, см. resolveManagedPharmacyIds в salary-calculator.ts). При

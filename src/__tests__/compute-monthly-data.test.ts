@@ -57,22 +57,28 @@ function mockEmployees(employees: { id: number; employeeType: string; isActive?:
   );
 }
 
+type SalaryResultFields = { totalSalary: number; totalBonuses: number; totalAdvances: number; grossAccrued: number; baseSalary: number; allowance: number; recordsCount?: number };
+
+/** Результат расчёта для мока: grossAccrued по умолчанию сходится с итогом, как при суммах, кратных 5. */
+function salaryResult(result: Partial<SalaryResultFields>): SalaryResultFields {
+  const base = { totalSalary: 0, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, ...result };
+  return { grossAccrued: base.totalSalary + base.totalAdvances - base.totalBonuses, ...base };
+}
+
 /** calculateEmployeeMonthlySalary — по умолчанию возвращает null (как если бы данных не было). */
-function mockSalaryResult(
-  result: Partial<{ totalSalary: number; totalBonuses: number; totalAdvances: number; baseSalary: number; allowance: number }> | null
-) {
+function mockSalaryResult(result: Partial<SalaryResultFields> | null) {
   vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
-    result === null ? null : { totalSalary: 0, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, ...result }
+    result === null ? null : salaryResult(result)
   );
 }
 
 /** Вариант с разным результатом на разные вызовы calculateEmployeeMonthlySalary (по pharmacyId). */
-function mockSalaryResultPerPharmacy(byPharmacyId: Record<number, { totalSalary: number; totalBonuses?: number; totalAdvances?: number; baseSalary?: number; allowance?: number }>) {
+function mockSalaryResultPerPharmacy(byPharmacyId: Record<number, Partial<SalaryResultFields>>) {
   vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockImplementation(
     (_employeeId: number, _month: number, _year: number, pharmacyId?: number) => {
       const r = pharmacyId != null ? byPharmacyId[pharmacyId] : undefined;
       if (!r) return Promise.resolve(null);
-      return Promise.resolve({ totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, ...r });
+      return Promise.resolve(salaryResult(r));
     }
   );
 }
@@ -308,6 +314,29 @@ describe('computeMonthlyData', () => {
     expect(systemData[1].pharmaSalary).toBe(25000);
   });
 
+  it('takes salary from grossAccrued, so rounding the payable total does not leak into the report', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'seller', pharmacies: [{ pharmacyId: 1 }] }]);
+    // Начислено 1000, аванс 333: к выплате 667 → 665. Отчёт должен показать 1000, а не 665 + 333 = 998.
+    mockSalaryResult({ totalSalary: 665, totalAdvances: 333, grossAccrued: 1000 });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].pharmaSalary).toBe(1000);
+  });
+
+  it('office salary also comes from grossAccrued', async () => {
+    mockPharmacies([pharmacy1]);
+    mockRevenueEntries([]);
+    mockEmployees([{ id: 1, employeeType: 'office', pharmacies: [] }]);
+    mockSalaryResult({ totalSalary: 665, totalAdvances: 333, grossAccrued: 1000 });
+
+    const { systemData } = await computeMonthlyData(2026, 6);
+
+    expect(systemData[1].officeSalary).toBe(1000);
+  });
+
   it('ignores employeeAdvance expense items entirely on this report (no otherExpenses fallback)', async () => {
     mockPharmacies([pharmacy1]);
     mockRevenueEntries([
@@ -513,9 +542,9 @@ describe('computeMonthlyData — деактивированные сотрудн
 
   it('включает деактивированного продавца, у которого в месяце были смены', async () => {
     mockEmployees([{ id: 1, employeeType: 'seller', isActive: false, pharmacies: [{ pharmacyId: 1 }] }]);
-    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
-      totalSalary: 250000, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, recordsCount: 20,
-    });
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
+      salaryResult({ totalSalary: 250000, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, recordsCount: 20 })
+    );
 
     const { systemData } = await computeMonthlyData(2026, 6);
 
@@ -524,9 +553,9 @@ describe('computeMonthlyData — деактивированные сотрудн
 
   it('не включает деактивированного сотрудника без операций в месяце', async () => {
     mockEmployees([{ id: 1, employeeType: 'seller', isActive: false, pharmacies: [{ pharmacyId: 1 }] }]);
-    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
-      totalSalary: 0, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 30000, recordsCount: 0,
-    });
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
+      salaryResult({ totalSalary: 0, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 30000, recordsCount: 0 })
+    );
 
     const { systemData } = await computeMonthlyData(2026, 6);
 
@@ -535,9 +564,9 @@ describe('computeMonthlyData — деактивированные сотрудн
 
   it('деактивированная уборщица с авансом в месяце попадает в cleaning', async () => {
     mockEmployees([{ id: 2, employeeType: 'cleaner', isActive: false, pharmacies: [{ pharmacyId: 1 }] }]);
-    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
-      totalSalary: -10000, totalBonuses: 0, totalAdvances: 10000, baseSalary: 0, allowance: 0, recordsCount: 0,
-    });
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
+      salaryResult({ totalSalary: -10000, totalBonuses: 0, totalAdvances: 10000, baseSalary: 0, allowance: 0, recordsCount: 0 })
+    );
 
     const { systemData } = await computeMonthlyData(2026, 6);
 
@@ -547,9 +576,9 @@ describe('computeMonthlyData — деактивированные сотрудн
 
   it('деактивированный офисный сотрудник с табелем остаётся в officeSalary', async () => {
     mockEmployees([{ id: 3, employeeType: 'office', isActive: false, pharmacies: [] }]);
-    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue({
-      totalSalary: 90000, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, recordsCount: 10,
-    });
+    vi.mocked(calculateEmployeeMonthlySalary as ReturnType<typeof vi.fn>).mockResolvedValue(
+      salaryResult({ totalSalary: 90000, totalBonuses: 0, totalAdvances: 0, baseSalary: 0, allowance: 0, recordsCount: 10 })
+    );
 
     const { systemData } = await computeMonthlyData(2026, 6);
 
